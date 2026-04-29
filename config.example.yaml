@@ -65,3 +65,8 @@ default_agent: "assistant"
 # Windows 示例：同上
 log_dir: ".clawbench/logs"  # 日志目录，默认二进制同级 .clawbench/logs/
 log_max_days: 7                # 日志保留天数，默认 7
+
+# 端口转发配置（Android WebView 访问服务器本地端口）
+proxy:
+  enabled: true                # 启用端口转发代理
+  allowed_ports: "1024-65535"  # 允许转发的端口范围（支持范围和离散端口，如 "3000,5173,8080"）

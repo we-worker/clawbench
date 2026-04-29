@@ -148,6 +148,13 @@ func RegisterRoutes(mux *http.ServeMux) {
 	register("/api/tasks/", middleware.Auth(ServeTaskByID))
 	register("/api/tts/generate", middleware.Auth(TTSGenerate))
 
+	// Port forwarding proxy
+	register("/api/proxy/ports", middleware.Auth(ServeProxyPorts))
+	register("/api/proxy/ports/", middleware.Auth(ServeProxyPortRegister))
+	register("/api/proxy/detect", middleware.Auth(ServeProxyDetect))
+	register("/api/proxy/forward/", middleware.Auth(ServeProxyForward))
+	register("/api/proxy/ws/", middleware.Auth(ServeProxyWebSocket))
+
 	if _, err := os.Stat("public"); err == nil {
 		mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir("public"))))
 	} else {

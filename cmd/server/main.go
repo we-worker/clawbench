@@ -315,6 +315,11 @@ func main() {
 		slog.Bool("auth_enabled", model.SessionToken != ""),
 	)
 
+	// Initialize proxy service (port forwarding) — needs the final port number
+	proxyService := service.NewProxyRegistry(cfg.Proxy, port)
+	service.ProxyService = proxyService
+	defer proxyService.Stop()
+
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 

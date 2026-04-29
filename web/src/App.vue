@@ -108,6 +108,12 @@
         @close="detailsOpen = false"
       />
 
+      <ProxyPanel
+        v-if="isAppMode"
+        :open="proxyOpen"
+        @close="proxyOpen = false"
+      />
+
       <!-- Bottom dock -->
       <div
         v-if="isAuthenticated"
@@ -133,6 +139,13 @@
             <circle cx="18" cy="6" r="3"/>
             <circle cx="6" cy="18" r="3"/>
             <path d="M15 6a9 9 0 0 0-9 9V3"/>
+          </svg>
+        </button>
+        <button v-if="isAppMode" class="dock-btn" :class="{ active: proxyOpen }" @click.stop="openDrawer('proxy')" title="端口转发">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
           </svg>
         </button>
         <button class="dock-btn" @click.stop="handleRefresh" title="刷新">
@@ -164,8 +177,11 @@ import FileDetailsDialog from './components/file/FileDetailsDialog.vue'
 import GitHistoryDrawer from './components/git/GitHistoryDrawer.vue'
 import SearchDrawer from './components/common/SearchDrawer.vue'
 import ToastNotification from './components/common/ToastNotification.vue'
+import ProxyPanel from './components/proxy/ProxyPanel.vue'
 import { useToast } from './composables/useToast.ts'
 import { useSwipeNavigation } from './composables/useSwipeNavigation.ts'
+import { useAppMode } from './composables/useAppMode.ts'
+import { usePortForward } from './composables/usePortForward.ts'
 import { store } from './stores/app.ts'
 import { initMermaid, reRenderMermaid, getFileType } from './utils/helpers.ts'
 import 'highlight.js/styles/github.css'
@@ -206,6 +222,11 @@ const showHidden = ref(JSON.parse(localStorage.getItem('clawbenchShowHidden') ||
 const sortField = ref(null)
 const sortDir = ref('asc')
 
+// App mode & port forwarding
+const { isAppMode } = useAppMode()
+const { syncToNative } = usePortForward()
+const proxyOpen = ref(false)
+
 // 抽屉互斥：打开一个时关闭其他（瞬间关闭，无动画）
 const drawerStates = {
   chat: chatOpen,
@@ -215,6 +236,7 @@ const drawerStates = {
   toc: tocOpen,
   search: searchOpen,
   details: detailsOpen,
+  proxy: proxyOpen,
 }
 
 function openDrawer(name, tab = null) {
@@ -440,6 +462,10 @@ onMounted(async () => {
             }
         }
     } catch (_) {}
+    // Sync port forwarding to Android native layer
+    if (isAppMode.value) {
+      syncToNative().catch(() => {})
+    }
     try {
         await store.loadProject()
     } catch (_) {

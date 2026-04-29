@@ -36,6 +36,7 @@ type Config struct {
 		Speed          float64 `yaml:"speed"`           // Speech speed multiplier (default: 1.0)
 		Format         string  `yaml:"format"`          // Audio output format (default: "mp3")
 	} `yaml:"tts"`
+	Proxy ProxyConfig `yaml:"proxy"` // Port forwarding configuration
 }
 
 // Global application state
