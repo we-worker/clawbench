@@ -120,6 +120,10 @@ type StreamParser struct {
 	// receivedPartialThinking tracks whether we've seen thinking_delta events,
 	// so we can skip thinking blocks in the full assistant message
 	receivedPartialThinking bool
+	// receivedPartialToolUse tracks whether we've seen stream_event tool_use
+	// events (content_block_start), so we skip the tool_use block in the
+	// complete assistant message to avoid duplication
+	receivedPartialToolUse bool
 	// model stores the model name extracted from message_start events
 	model string
 	// currentTool tracks the in-progress tool call
@@ -142,6 +146,10 @@ func (p *StreamParser) ParseLine(line string, ch chan<- StreamEvent) {
 		if msg.Message != nil {
 			for _, block := range msg.Message.Content {
 				if block.Type == "tool_use" {
+					// Skip if we already received stream_event tool_use for this block
+					if p.receivedPartialToolUse {
+						continue
+					}
 					// Emit tool_use event with full input from the complete message
 					inputStr := string(block.Input)
 					ch <- StreamEvent{Type: "tool_use", Tool: &ToolCall{
@@ -158,7 +166,8 @@ func (p *StreamParser) ParseLine(line string, ch chan<- StreamEvent) {
 			}
 			return
 		}
-		// If we already received partial content via stream_event, skip
+		// If we already received partial content via stream_event, skip text/thinking
+		// (tool_use is handled above with receivedPartialToolUse check)
 		if p.receivedPartial {
 			return
 		}
@@ -251,6 +260,7 @@ func (p *StreamParser) ParseLine(line string, ch chan<- StreamEvent) {
 			}
 		case "content_block_start":
 			if msg.Event.ContentBlock != nil && msg.Event.ContentBlock.Type == "tool_use" {
+				p.receivedPartialToolUse = true
 				p.currentTool = &ToolCall{
 					Name: msg.Event.ContentBlock.Name,
 					ID:   msg.Event.ContentBlock.ID,

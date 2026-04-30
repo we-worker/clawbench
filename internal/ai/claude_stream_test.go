@@ -531,12 +531,13 @@ func TestStreamParser_FullCodebuddyFlow(t *testing.T) {
 	// 3. tool_use stop (from content_block_stop, with accumulated input)
 	// 4. content "The port is " (from text_delta)
 	// 5. content "20000." (from text_delta)
-	// 6. tool_use (from assistant message, with full input - NOT deduplicated since assistant tool_use always emits)
-	// 7. metadata
-	// 8. done
+	// 6. metadata
+	// 7. done
 	//
-	// Note: assistant message thinking is skipped (receivedPartialThinking), text is skipped (receivedPartial)
-	// Note: assistant tool_use IS emitted even with receivedPartial (this is by design - it carries the complete input)
+	// Note: assistant message thinking is skipped (receivedPartialThinking)
+	// Note: assistant message text is skipped (receivedPartial)
+	// Note: assistant message tool_use is also skipped (receivedPartialToolUse) — avoids duplicate
+	//       since content_block_start/stop already emitted the complete tool_use
 
 	var thinkingCount, contentCount, toolUseCount, metadataCount, doneCount int
 	for _, ev := range events {
@@ -560,9 +561,9 @@ func TestStreamParser_FullCodebuddyFlow(t *testing.T) {
 	if contentCount != 2 {
 		t.Errorf("expected 2 content events, got %d", contentCount)
 	}
-	// 2 from stream (start+stop) + 1 from assistant message = 3
-	if toolUseCount != 3 {
-		t.Errorf("expected 3 tool_use events, got %d", toolUseCount)
+	// 2 from stream (start+stop); assistant message tool_use is skipped (receivedPartialToolUse)
+	if toolUseCount != 2 {
+		t.Errorf("expected 2 tool_use events, got %d", toolUseCount)
 	}
 	if metadataCount != 1 {
 		t.Errorf("expected 1 metadata event, got %d", metadataCount)

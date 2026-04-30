@@ -6,6 +6,7 @@ func buildClaudeStreamArgs(req ChatRequest) []string {
 		"--print",
 		"--output-format", "stream-json",
 		"--verbose",
+		"--include-partial-messages",
 	}
 
 	if req.Resume {
