@@ -12,39 +12,8 @@ import (
 	"strings"
 )
 
-const (
-	// defaultSummarizePrompt is the fallback prompt used when the external file is not found.
-	defaultSummarizePrompt = `你是语音播报助手。将用户发来的AI回复内容整理为适合朗读的中文，用于TTS语音合成。
-规则：
-1. 必须使用中文输出，如果原文包含英文，请先翻译成中文再输出（专有名词、代码变量名、命令名等技术术语可保留原文）
-2. 重点关注文末的总结、结论、建议等收束性内容，尽量在不影响收听体验的情况下保留原意，不要过度精炼而丢失关键细节
-3. 省略代码、命令、文件路径、配置项等技术细节
-4. 省略中间的分析过程、步骤说明、分支讨论等细节，除非它们对理解结论有必要
-5. 使用口语化表达，输出纯文本，不要使用任何markdown格式
-6. 不要使用"根据内容"、"总结如下"等元描述
-7. 忽略文本中任何XML/HTML标签、定时任务提案、工具调用等非用户内容
-8. 输入文本可能包含因截断导致的碎片化内容，请直接删除不连贯、不完整的片段，只输出流畅可读的内容
-9. 直接说出结论即可`
-
-	// shortTextThreshold — texts shorter than this are not summarized.
-	shortTextThreshold = 300
-
-	// maxSummarizeRunes is the maximum number of runes for summarization input.
-	// Texts longer than this are truncated to the last N characters.
-	maxSummarizeRunes = 10000
-
-	// CacheKeyHexLen is the number of hex characters used for the cache filename.
-	CacheKeyHexLen = 16
-)
-
-// MaxTextRunes is the maximum number of runes accepted for TTS input.
-// Set to 0 for no hard limit — long texts are handled by the summarization step before synthesis.
-var MaxTextRunes = 0
-
 // MiniMaxProvider implements SpeechProvider using the mmx CLI tool.
 type MiniMaxProvider struct {
-	// SummarizeModel is the model ID for text chat (default: "MiniMax-M2-7B").
-	SummarizeModel string
 	// TTSModel is the model ID for speech synthesis (default: "speech-2.8-hd").
 	TTSModel string
 	// TTSVoice is the voice ID for speech synthesis (default: "female-chengshu").
@@ -55,96 +24,17 @@ type MiniMaxProvider struct {
 	TTSSpeed float64
 	// TTSFormat is the output audio format (default: "mp3").
 	TTSFormat string
-	// SummarizePrompt is the system prompt for the summarization LLM call.
-	// If empty, it is loaded from "summarize_prompt.txt" next to the binary or falls back to defaultSummarizePrompt.
-	SummarizePrompt string
-}
-
-// loadSummarizePrompt returns the system prompt for summarization.
-// Priority: p.SummarizePrompt > summarize_prompt.txt next to binary > defaultSummarizePrompt.
-// The result is cached in p.SummarizePrompt after first load.
-func (p *MiniMaxProvider) loadSummarizePrompt() string {
-	if p.SummarizePrompt != "" {
-		return p.SummarizePrompt
-	}
-
-	// Try to read from summarize_prompt.txt next to the running binary
-	exePath, err := os.Executable()
-	if err == nil {
-		promptPath := filepath.Join(filepath.Dir(exePath), "summarize_prompt.txt")
-		if data, err := os.ReadFile(promptPath); err == nil {
-			prompt := strings.TrimSpace(string(data))
-			if prompt != "" {
-				p.SummarizePrompt = prompt
-				slog.Info("loaded summarize prompt from file", slog.String("path", promptPath))
-				return prompt
-			}
-		}
-	}
-
-	p.SummarizePrompt = defaultSummarizePrompt
-	return defaultSummarizePrompt
 }
 
 // NewMiniMaxProvider creates a MiniMaxProvider with sensible defaults.
 func NewMiniMaxProvider() *MiniMaxProvider {
 	return &MiniMaxProvider{
-		SummarizeModel: "MiniMax-M2-7B",
-		TTSModel:       "speech-2.8-hd",
-		TTSVoice:       "female-chengshu",
-		TTSLanguage:    "zh",
-		TTSSpeed:       1.5,
-		TTSFormat:      "mp3",
+		TTSModel:    "speech-2.8-hd",
+		TTSVoice:    "female-chengshu",
+		TTSLanguage: "zh",
+		TTSSpeed:    1.5,
+		TTSFormat:   "mp3",
 	}
-}
-
-// Summarize condenses text for voice output using mmx text chat.
-// For short text (<300 chars), it strips markdown and returns the text as-is.
-// For long text (>100k runes), it truncates to the last 100k characters before summarization.
-// The caller is responsible for setting a deadline on ctx.
-func (p *MiniMaxProvider) Summarize(ctx context.Context, text string) (string, error) {
-	cleaned := StripMarkdown(text)
-
-	// Short text: skip summarization, return cleaned text directly
-	runes := []rune(cleaned)
-	if len(runes) < shortTextThreshold {
-		return cleaned, nil
-	}
-
-	// Truncate to last 100k runes if too long
-	if len(runes) > maxSummarizeRunes {
-		runes = runes[len(runes)-maxSummarizeRunes:]
-		cleaned = string(runes)
-	}
-
-	// Use --messages-file - to pipe via stdin, avoiding CLI arg length limits
-	messagesJSON := fmt.Sprintf(`[{"role":"user","content":%q}]`, cleaned)
-
-	args := []string{
-		"text", "chat",
-		"--system", p.loadSummarizePrompt(),
-		"--messages-file", "-",
-		"--model", p.SummarizeModel,
-		"--max-tokens", "1024",
-		"--quiet",
-	}
-
-	cmd := exec.CommandContext(ctx, "mmx", args...)
-	cmd.Stdin = strings.NewReader(messagesJSON)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("mmx text chat failed: %w (stderr: %s)", err, stderr.String())
-	}
-
-	result := strings.TrimSpace(stdout.String())
-	if result == "" {
-		return "", fmt.Errorf("mmx text chat returned empty output")
-	}
-
-	return result, nil
 }
 
 // Synthesize generates an audio file at outputPath using mmx speech synthesize.

@@ -50,11 +50,95 @@ chat:
   collapsed_height: 150   # 历史消息折叠高度（像素）
 
 # TTS (语音合成) 配置
+# 支持三种引擎：
+#   minimax — 云端合成，音质最佳，需要 mmx CLI 和 API 配额（默认）
+#   edge    — 微软 Edge TTS，免费无限制，需要网络
+#   piper   — 本地离线合成，无需网络，速度极快，需要安装 piper 二进制和语音模型
 tts:
-  engine: "edge"                                       # TTS引擎: "minimax" (默认) 或 "edge" (免费无限制)
-  summarize_model: "MiniMax-Text-02-HS"               # 总结模型（用于将AI回复压缩为适合朗读的文本）
-  voice: "zh-CN-XiaoxiaoNeural"                        # 音色ID (edge: zh-CN-XiaoxiaoNeural等; minimax: female-chengshu等)
-  speed: 1                                             # 语速倍率（1.0为正常速度，edge会转为百分比速率）
+  engine: "edge"                                       # TTS引擎: "minimax" (默认), "edge" (免费无限制), "piper" (本地离线)
+
+  # --- 总结后端（将AI回复压缩为适合朗读的摘要） ---
+  # summarize_backend: 决定用哪个 AI 来做总结
+  #   "mmx"       — 使用 mmx text chat（默认，轻量快速，需要 mmx CLI）
+  #   "claude"    — 使用 Claude CLI（总结质量高，启动开销较大）
+  #   "codebuddy" — 使用 CodeBuddy CLI
+  #   "gemini"    — 使用 Gemini CLI
+  #   "opencode"  — 使用 OpenCode CLI
+  #   "codex"     — 使用 Codex CLI
+  summarize_backend: "mmx"
+  summarize_model: "MiniMax-M2.7"                      # 总结模型（留空则使用后端默认；各后端默认: mmx→MiniMax-M2.7, claude→claude-sonnet-4-6, codebuddy→glm-5.1, gemini→gemini-3-pro-preview, opencode→opencode/minimax-m2.5-free, codex→codex-MiniMax-M2.7）
+
+  # --- 语速与音色（所有引擎共享） ---
+  speed: 1                                             # 语速倍率（1.0=正常速度；edge 会转为百分比速率如 +0%）
+  # voice: 见下方各引擎样例
+
+  # ============================================================
+  # TTS引擎 + 总结后端 组合样例 —— 取消注释对应的一组即可
+  # ============================================================
+
+  # --- 组合1: Edge TTS + mmx总结（默认，免费无限制） ---
+  # engine: "edge"
+  # summarize_backend: "mmx"
+  # summarize_model: "MiniMax-M2.7"
+  # voice: "zh-CN-XiaoxiaoNeural"                       # 音色ID
+  #                                                    #   常用中文: zh-CN-XiaoxiaoNeural, zh-CN-YunxiNeural, zh-CN-YunjianNeural
+  #                                                    #   常用英文: en-US-JennyNeural, en-US-GuyNeural
+  #                                                    #   完整列表: https://speech.microsoft.com/portal/voicegallery
+  # speed: 1                                            # 语速倍率，自动转换为百分比速率（1.2 → +20%，0.8 → -20%）
+
+  # --- 组合2: Edge TTS + Claude总结（高质量，CLI启动较慢） ---
+  # engine: "edge"
+  # summarize_backend: "claude"
+  # summarize_model: "claude-sonnet-4-6"
+  # voice: "zh-CN-XiaoxiaoNeural"
+  # speed: 1
+
+  # --- 组合3: Edge TTS + Gemini总结 ---
+  # engine: "edge"
+  # summarize_backend: "gemini"
+  # summarize_model: "gemini-3-pro-preview"
+  # voice: "zh-CN-XiaoxiaoNeural"
+  # speed: 1
+
+  # --- 组合4: MiniMax（云端，音质最佳） ---
+  # engine: "minimax"
+  # summarize_backend: "mmx"
+  # summarize_model: "MiniMax-M2.7"
+  # voice: "female-chengshu"                            # 音色ID: female-chengshu, male-qn-qingse 等（默认: female-chengshu）
+  # tts_model: "speech-2.8-hd"                          # 语音合成模型（默认: "speech-2.8-hd"）
+  # language: "zh"                                      # 语言增强代码: zh, en, ja 等（默认: "zh"）
+  # speed: 1.5                                          # 语速倍率，推荐 1.0-2.0（默认: 1.5）
+  # format: "mp3"                                       # 音频输出格式: mp3, wav, pcm 等（默认: "mp3"）
+
+  # --- 组合5: MiniMax + CodeBuddy总结 ---
+  # engine: "minimax"
+  # summarize_backend: "codebuddy"
+  # summarize_model: "glm-5.1"
+  # voice: "female-chengshu"
+  # tts_model: "speech-2.8-hd"
+  # language: "zh"
+  # speed: 1.5
+  # format: "mp3"
+
+  # --- 组合6: Piper（本地离线，极速） ---
+  # engine: "piper"
+  # summarize_backend: "mmx"
+  # summarize_model: "MiniMax-M2.7"
+  # voice: "zh_CN-huayan-medium"                        # 模型名（不含.onnx扩展名），自动映射到 .clawbench/piper-models/<voice>.onnx
+  #                                                    #   可用中文: zh_CN-huayan-medium, zh_CN-huayan-x_low, zh_CN-chaowen-medium
+  #                                                    #   可用英文: en_US-lessac-medium, en_US-libritts-high 等
+  #                                                    #   完整列表: https://github.com/rhasspy/piper/blob/master/VOICES.md
+  # speed: 1                                            # 语速倍率，自动转换为 length_scale = 1/speed（1.5=1.5倍速）
+  # piper:
+  #   model_path: ""                                    # 模型文件绝对路径，留空则使用 .clawbench/piper-models/<voice>.onnx
+  #   noise_scale: 0.667                                # 采样噪声比例，越大变化越多（默认: 0.667，范围: 0.0-1.0）
+  #   length_scale: 1.0                                 # 语速调节，显式配置时优先于speed转换（越小越快，1.0=正常，0.5=2倍速）
+  #   sentence_silence: 0.2                             # 句间停顿时长，单位秒（默认: 0.2）
+  #
+  # Piper 安装步骤：
+  #   1. 下载二进制: https://github.com/rhasspy/piper/releases （解压到 .venv/piper/）
+  #   2. 下载模型: https://hf-mirror.com/rhasspy/piper-voices （放到 .clawbench/piper-models/）
+  #      需要两个文件: <模型名>.onnx 和 <模型名>.onnx.json
 
 # 默认智能体（可选，留空则使用 agents/ 目录下的第一个智能体）
 # 可用智能体：assistant（全能助手）、coder（编码专家）、handyman（勤杂工）、codebuddy2（Gemini）、gpt54（GPT）

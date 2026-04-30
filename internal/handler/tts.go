@@ -37,6 +37,15 @@ func SetSpeechProvider(p speech.SpeechProvider) {
 	speechProvider = p
 }
 
+// summarizer is the global text summarizer instance.
+var summarizer speech.Summarizer = speech.NewMMXSummarizer()
+
+// SetSummarizer replaces the global text summarizer.
+// Must be called before the HTTP server starts; not goroutine-safe.
+func SetSummarizer(s speech.Summarizer) {
+	summarizer = s
+}
+
 // ttsGenerateRequest is the request body for POST /api/tts/generate.
 type ttsGenerateRequest struct {
 	Text string `json:"text"`
@@ -95,7 +104,13 @@ func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 	// Compute cache key from text content
 	hash := sha256.Sum256([]byte(req.Text))
 	cacheKey := hex.EncodeToString(hash[:])[:speech.CacheKeyHexLen]
-	relAudioPath := filepath.Join(".clawbench", "generated", "tts", cacheKey+".mp3")
+
+	// Determine audio file extension based on TTS engine
+	audioExt := ".mp3"
+	if _, ok := speechProvider.(*speech.PiperProvider); ok {
+		audioExt = ".wav"
+	}
+	relAudioPath := filepath.Join(".clawbench", "generated", "tts", cacheKey+audioExt)
 
 	// Validate the output path (defense-in-depth)
 	absAudioPath, ok := validateAndResolvePath(w, projectPath, relAudioPath)
@@ -115,10 +130,11 @@ func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 			slog.String("path", relAudioPath),
 		)
 		// Try DB first, fall back to file cache
-		summary, summarizeFailed, _ := service.GetTTSSummary(cacheKey)
-		if summary == "" {
+		summary, summarizeFailed, found := service.GetTTSSummary(cacheKey)
+		if !found {
 			cachedSummary, _ := os.ReadFile(absAudioPath + ".summary.txt")
 			summary = string(cachedSummary)
+			summarizeFailed = true // can't verify from file cache
 		}
 		ttsWriteSSE(w, ttsSSEEvent{
 			Type:            "result",
@@ -147,7 +163,7 @@ func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 		defer summarizeCancel()
 
 		var err error
-		summary, err = speechProvider.Summarize(summarizeCtx, req.Text)
+		summary, err = summarizer.Summarize(summarizeCtx, req.Text)
 		if err != nil {
 			slog.Warn("tts summarize failed, using original text",
 				slog.String("error", err.Error()),
@@ -155,8 +171,6 @@ func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 			summary = req.Text
 			summarizeFailed = true
 		}
-
-		summary = speech.StripMarkdown(summary)
 
 		slog.Info("tts summarize completed",
 			slog.String("cache_key", cacheKey),

@@ -1,0 +1,234 @@
+package speech
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+)
+
+// --- NewPiperProvider defaults ---
+
+func TestNewPiperProvider_Defaults(t *testing.T) {
+	p := NewPiperProvider()
+	assert.Equal(t, "", p.ModelPath) // Must be configured explicitly
+	assert.Equal(t, 0.667, p.NoiseScale)
+	assert.Equal(t, 1.0, p.LengthScale)
+	assert.Equal(t, 0.2, p.SentenceSilence)
+}
+
+// --- ResolveModelPath ---
+
+func TestResolveModelPath_ExplicitPath(t *testing.T) {
+	result := ResolveModelPath("some-voice", "/custom/path/model.onnx")
+	assert.Equal(t, "/custom/path/model.onnx", result)
+}
+
+func TestResolveModelPath_VoiceName(t *testing.T) {
+	result := ResolveModelPath("zh_CN-huayan-medium", "")
+	assert.Equal(t, filepath.Join(".clawbench", "piper-models", "zh_CN-huayan-medium.onnx"), result)
+}
+
+func TestResolveModelPath_Empty(t *testing.T) {
+	result := ResolveModelPath("", "")
+	assert.Equal(t, "", result)
+}
+
+// --- Summarize short text bypass (MMXSummarizer) ---
+
+func TestPiperSummarize_ShortText_BypassesLLM(t *testing.T) {
+	s := NewMMXSummarizer()
+	shortText := "这是一个简短的消息，不需要总结。"
+	result, err := s.Summarize(context.Background(), shortText)
+	assert.NoError(t, err)
+	assert.Contains(t, result, "简短的消息")
+}
+
+func TestPiperSummarize_ShortTextWithMarkdown_StripsMarkdown(t *testing.T) {
+	s := NewMMXSummarizer()
+	input := "Short **bold** and *italic* text."
+	result, err := s.Summarize(context.Background(), input)
+	assert.NoError(t, err)
+	assert.NotContains(t, result, "**")
+	assert.NotContains(t, result, "*")
+	assert.Contains(t, result, "bold")
+	assert.Contains(t, result, "italic")
+}
+
+// --- Summarize long text (requires mmx CLI, skip if unavailable) ---
+
+func TestPiperSummarize_LongText_WithCLI(t *testing.T) {
+	if _, err := exec.LookPath("mmx"); err != nil {
+		t.Skip("mmx CLI not available, skipping integration test")
+	}
+
+	s := NewMMXSummarizer()
+	longText := strings.Repeat("这是一个较长的AI回复内容，包含了详细的技术分析和代码示例。", 10)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	result, err := s.Summarize(ctx, longText)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, result)
+	assert.Less(t, len([]rune(result)), len([]rune(longText)))
+}
+
+// --- Summarize context cancellation ---
+
+func TestPiperSummarize_CancelledContext(t *testing.T) {
+	s := NewMMXSummarizer()
+	longText := strings.Repeat("这是需要被总结的长文本内容。", 50)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := s.Summarize(ctx, longText)
+	assert.Error(t, err)
+}
+
+// --- Synthesize integration test (requires piper binary) ---
+
+func TestPiperSynthesize_WithCLI(t *testing.T) {
+	piperPath, err := exec.LookPath("piper")
+	if err != nil {
+		// Try .venv/bin/piper relative to binary
+		if exePath, exeErr := os.Executable(); exeErr == nil {
+			candidatePath := filepath.Join(filepath.Dir(exePath), ".venv/bin/piper")
+			if _, statErr := os.Stat(candidatePath); statErr == nil {
+				piperPath = candidatePath
+			}
+		}
+	}
+	if piperPath == "" {
+		t.Skip("piper binary not available, skipping integration test")
+	}
+
+	// Find a model file
+	modelPath := findPiperModel(t)
+	if modelPath == "" {
+		t.Skip("no Piper model file found, skipping integration test")
+	}
+
+	p := NewPiperProvider()
+	p.ModelPath = modelPath
+	outputPath := filepath.Join(t.TempDir(), "test_output.wav")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err = p.Synthesize(ctx, "这是一个测试语音。", outputPath)
+	assert.NoError(t, err)
+
+	info, statErr := os.Stat(outputPath)
+	assert.NoError(t, statErr)
+	assert.Greater(t, info.Size(), int64(0))
+}
+
+// --- Synthesize creates output directory ---
+
+func TestPiperSynthesize_CreatesDirectory(t *testing.T) {
+	if _, err := exec.LookPath("piper"); err != nil {
+		t.Skip("piper binary not available, skipping integration test")
+	}
+
+	modelPath := findPiperModel(t)
+	if modelPath == "" {
+		t.Skip("no Piper model file found, skipping integration test")
+	}
+
+	p := NewPiperProvider()
+	p.ModelPath = modelPath
+	nestedDir := filepath.Join(t.TempDir(), "deep", "nested", "dir")
+	outputPath := filepath.Join(nestedDir, "output.wav")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := p.Synthesize(ctx, "测试目录创建。", outputPath)
+	assert.NoError(t, err)
+
+	_, err = os.Stat(nestedDir)
+	assert.NoError(t, err)
+}
+
+// --- Synthesize missing model file ---
+
+func TestPiperSynthesize_MissingModel(t *testing.T) {
+	p := NewPiperProvider()
+	p.ModelPath = "/nonexistent/model.onnx"
+	outputPath := filepath.Join(t.TempDir(), "output.wav")
+
+	err := p.Synthesize(context.Background(), "test", outputPath)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "model file not found")
+}
+
+// --- Synthesize no model configured ---
+
+func TestPiperSynthesize_NoModelConfigured(t *testing.T) {
+	p := NewPiperProvider()
+	// ModelPath is empty by default
+	outputPath := filepath.Join(t.TempDir(), "output.wav")
+
+	err := p.Synthesize(context.Background(), "test", outputPath)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "model path not configured")
+}
+
+// --- Synthesize context cancellation ---
+
+func TestPiperSynthesize_CancelledContext(t *testing.T) {
+	p := NewPiperProvider()
+	p.ModelPath = "/fake/model.onnx"
+	outputPath := filepath.Join(t.TempDir(), "cancelled.wav")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := p.Synthesize(ctx, "test", outputPath)
+	assert.Error(t, err)
+}
+
+// findPiperModel searches for a .onnx model file in common locations.
+func findPiperModel(t *testing.T) string {
+	t.Helper()
+
+	searchDirs := []string{
+		filepath.Join(".clawbench", "piper-models"),
+	}
+
+	// Also check relative to binary
+	if exePath, err := os.Executable(); err == nil {
+		searchDirs = append(searchDirs,
+			filepath.Join(filepath.Dir(exePath), ".clawbench", "piper-models"),
+		)
+	}
+
+	// Also check project root (go test runs from package dir)
+	if cwd, err := os.Getwd(); err == nil {
+		projectRoot := filepath.Join(cwd, "..", "..")
+		searchDirs = append(searchDirs,
+			filepath.Join(projectRoot, ".clawbench", "piper-models"),
+		)
+	}
+
+	for _, dir := range searchDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".onnx") {
+				return filepath.Join(dir, entry.Name())
+			}
+		}
+	}
+
+	return ""
+}

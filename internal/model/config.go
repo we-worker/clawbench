@@ -28,16 +28,26 @@ type Config struct {
 		CollapsedHeight int `yaml:"collapsed_height"` // Collapsed message height in pixels (default: 150)
 	} `yaml:"chat"`
 	TTS struct {
-		Engine         string  `yaml:"engine"`          // TTS engine: "minimax" (default) or "edge"
-		SummarizeModel string  `yaml:"summarize_model"` // LLM model for summarization (default: "MiniMax-Text-02-HS")
-		TTSModel       string  `yaml:"tts_model"`       // TTS model for speech synthesis (default: "Speech-2.8-Turbo")
-		Voice          string  `yaml:"voice"`           // Voice ID for TTS (default: "female-chengshu")
-		Language       string  `yaml:"language"`        // Language boost code (default: "zh")
-		Speed          float64 `yaml:"speed"`           // Speech speed multiplier (default: 1.0)
-		Format         string  `yaml:"format"`          // Audio output format (default: "mp3")
+		Engine           string  `yaml:"engine"`            // TTS engine: "minimax" (default), "edge", or "piper"
+		SummarizeBackend string  `yaml:"summarize_backend"` // Summarization backend: "mmx" (default), "claude", "codebuddy", "gemini", "opencode", "codex"
+		SummarizeModel   string  `yaml:"summarize_model"`   // Model for summarization (default: "MiniMax-M2.7" for mmx; empty = backend default for others)
+		TTSModel         string  `yaml:"tts_model"`         // TTS model for speech synthesis (default: "Speech-2.8-Turbo")
+		Voice            string  `yaml:"voice"`             // Voice ID for TTS (default: "female-chengshu")
+		Language         string  `yaml:"language"`          // Language boost code (default: "zh")
+		Speed            float64 `yaml:"speed"`             // Speech speed multiplier (default: 1.0)
+		Format           string  `yaml:"format"`            // Audio output format (default: "mp3")
+		Piper            PiperConfig `yaml:"piper"`           // Piper-specific configuration (only used when engine: "piper")
 	} `yaml:"tts"`
 	Proxy ProxyConfig `yaml:"proxy"` // Port forwarding configuration
 	SSH   SSHConfig   `yaml:"ssh"`   // SSH tunnel server configuration
+}
+
+// PiperConfig holds configuration for the Piper TTS engine.
+type PiperConfig struct {
+	ModelPath       string  `yaml:"model_path"`        // Path to .onnx model file (empty = .clawbench/piper-models/<voice>.onnx)
+	NoiseScale      float64 `yaml:"noise_scale"`       // Noise scale for sampling (default: 0.667)
+	LengthScale     float64 `yaml:"length_scale"`      // Length scale for speech rate (default: 1.0)
+	SentenceSilence float64 `yaml:"sentence_silence"`  // Silence between sentences in seconds (default: 0.2)
 }
 
 // Global application state

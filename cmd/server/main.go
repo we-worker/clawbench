@@ -130,7 +130,47 @@ func main() {
 	model.ChatPageSize = cfg.Chat.PageSize
 	model.ChatCollapsedHeight = cfg.Chat.CollapsedHeight
 
-	// Initialize TTS provider from config with defaults
+	// Initialize TTS summarizer from config
+	summarizeBackend := cfg.TTS.SummarizeBackend
+	if summarizeBackend == "" {
+		summarizeBackend = "mmx"
+	}
+
+	var ttsSummarizer speech.Summarizer
+	if summarizeBackend == "mmx" {
+		s := speech.NewMMXSummarizer()
+		if cfg.TTS.SummarizeModel != "" {
+			s.Model = cfg.TTS.SummarizeModel
+		}
+		ttsSummarizer = s
+		slog.Info("tts summarizer configured",
+			slog.String("backend", "mmx"),
+			slog.String("model", s.Model),
+		)
+	} else {
+		s, err := speech.NewAIBackendSummarizer(summarizeBackend)
+		if err != nil {
+			slog.Error("failed to create AI backend summarizer, falling back to mmx",
+				slog.String("backend", summarizeBackend),
+				slog.String("error", err.Error()),
+			)
+			fallback := speech.NewMMXSummarizer()
+			if cfg.TTS.SummarizeModel != "" {
+				fallback.Model = cfg.TTS.SummarizeModel
+			}
+			ttsSummarizer = fallback
+		} else {
+			s.Model = cfg.TTS.SummarizeModel // empty = use backend default
+			ttsSummarizer = s
+			slog.Info("tts summarizer configured",
+				slog.String("backend", summarizeBackend),
+				slog.String("model", s.Model),
+			)
+		}
+	}
+	handler.SetSummarizer(ttsSummarizer)
+
+	// Initialize TTS synthesis provider from config with defaults
 	var ttsProvider speech.SpeechProvider
 	engine := cfg.TTS.Engine
 	if engine == "" {
@@ -140,9 +180,6 @@ func main() {
 	switch engine {
 	case "edge":
 		p := speech.NewEdgeTTSProvider()
-		if cfg.TTS.SummarizeModel != "" {
-			p.SummarizeModel = cfg.TTS.SummarizeModel
-		}
 		if cfg.TTS.Voice != "" {
 			p.Voice = cfg.TTS.Voice
 		}
@@ -158,15 +195,36 @@ func main() {
 		ttsProvider = p
 		slog.Info("tts provider configured",
 			slog.String("engine", "edge"),
-			slog.String("summarize_model", p.SummarizeModel),
 			slog.String("voice", p.Voice),
 			slog.String("rate", p.Rate),
 		)
+	case "piper":
+		p := speech.NewPiperProvider()
+		// Resolve model path: explicit config > voice-based path
+		p.ModelPath = speech.ResolveModelPath(cfg.TTS.Voice, cfg.TTS.Piper.ModelPath)
+		if cfg.TTS.Piper.NoiseScale > 0 {
+			p.NoiseScale = cfg.TTS.Piper.NoiseScale
+		}
+		// LengthScale: explicit piper.length_scale takes priority;
+		// otherwise convert speed multiplier (length_scale = 1/speed)
+		if cfg.TTS.Piper.LengthScale > 0 {
+			p.LengthScale = cfg.TTS.Piper.LengthScale
+		} else if cfg.TTS.Speed > 0 {
+			p.LengthScale = 1.0 / cfg.TTS.Speed
+		}
+		if cfg.TTS.Piper.SentenceSilence > 0 {
+			p.SentenceSilence = cfg.TTS.Piper.SentenceSilence
+		}
+		ttsProvider = p
+		slog.Info("tts provider configured",
+			slog.String("engine", "piper"),
+			slog.String("model_path", p.ModelPath),
+			slog.Float64("noise_scale", p.NoiseScale),
+			slog.Float64("length_scale", p.LengthScale),
+			slog.Float64("sentence_silence", p.SentenceSilence),
+		)
 	default:
 		p := speech.NewMiniMaxProvider()
-		if cfg.TTS.SummarizeModel != "" {
-			p.SummarizeModel = cfg.TTS.SummarizeModel
-		}
 		if cfg.TTS.TTSModel != "" {
 			p.TTSModel = cfg.TTS.TTSModel
 		}
@@ -185,7 +243,6 @@ func main() {
 		ttsProvider = p
 		slog.Info("tts provider configured",
 			slog.String("engine", "minimax"),
-			slog.String("summarize_model", p.SummarizeModel),
 			slog.String("tts_model", p.TTSModel),
 			slog.String("voice", p.TTSVoice),
 			slog.Float64("speed", p.TTSSpeed),

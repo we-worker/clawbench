@@ -127,7 +127,6 @@ Run with *npm start*.`
 
 func TestNewMiniMaxProvider_Defaults(t *testing.T) {
 	p := NewMiniMaxProvider()
-	assert.Equal(t, "MiniMax-M2-7B", p.SummarizeModel)
 	assert.Equal(t, "speech-2.8-hd", p.TTSModel)
 	assert.Equal(t, "female-chengshu", p.TTSVoice)
 	assert.Equal(t, "zh", p.TTSLanguage)
@@ -135,21 +134,21 @@ func TestNewMiniMaxProvider_Defaults(t *testing.T) {
 	assert.Equal(t, "mp3", p.TTSFormat)
 }
 
-// --- Summarize short text bypass ---
+// --- Summarize short text bypass (MMXSummarizer) ---
 
 func TestSummarize_ShortText_BypassesLLM(t *testing.T) {
-	p := NewMiniMaxProvider()
+	s := NewMMXSummarizer()
 	shortText := "这是一个简短的消息，不需要总结。"
-	result, err := p.Summarize(context.Background(), shortText)
+	result, err := s.Summarize(context.Background(), shortText)
 	assert.NoError(t, err)
 	// Short text should be returned as-is (after markdown stripping)
 	assert.Contains(t, result, "简短的消息")
 }
 
 func TestSummarize_ShortTextWithMarkdown_StripsMarkdown(t *testing.T) {
-	p := NewMiniMaxProvider()
+	s := NewMMXSummarizer()
 	input := "Short **bold** and *italic* text."
-	result, err := p.Summarize(context.Background(), input)
+	result, err := s.Summarize(context.Background(), input)
 	assert.NoError(t, err)
 	assert.NotContains(t, result, "**")
 	assert.NotContains(t, result, "*")
@@ -167,13 +166,13 @@ func TestSummarize_LongText_WithCLI(t *testing.T) {
 		}
 	}
 
-	p := NewMiniMaxProvider()
+	s := NewMMXSummarizer()
 	longText := strings.Repeat("这是一个较长的AI回复内容，包含了详细的技术分析和代码示例。", 10)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	result, err := p.Summarize(ctx, longText)
+	result, err := s.Summarize(ctx, longText)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, result)
 	// Summary should be shorter than original
@@ -183,13 +182,13 @@ func TestSummarize_LongText_WithCLI(t *testing.T) {
 // --- Summarize context cancellation ---
 
 func TestSummarize_CancelledContext(t *testing.T) {
-	p := NewMiniMaxProvider()
+	s := NewMMXSummarizer()
 	longText := strings.Repeat("这是需要被总结的长文本内容。", 50)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	_, err := p.Summarize(ctx, longText)
+	_, err := s.Summarize(ctx, longText)
 	assert.Error(t, err)
 }
 

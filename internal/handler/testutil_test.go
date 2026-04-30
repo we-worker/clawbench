@@ -121,6 +121,12 @@ func setupTestEnv(t *testing.T) (*testEnv, func()) {
 		CREATE INDEX IF NOT EXISTS idx_executions_task ON task_executions(task_id, created_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_history_session ON chat_history(project_path, backend, session_id, created_at);
 		CREATE INDEX IF NOT EXISTS idx_sessions_project_backend ON chat_sessions(project_path, backend);
+		CREATE TABLE IF NOT EXISTS tts_summaries (
+			cache_key TEXT PRIMARY KEY,
+			summary TEXT NOT NULL,
+			summarize_failed INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
 	`)
 	if err != nil {
 		t.Fatalf("failed to create tables: %v", err)
