@@ -9,7 +9,7 @@
     >
       <div class="bs-panel" :class="{ 'bs-leaving': leaving, 'bs-instant': instant, 'bs-compact': compact }">
         <!-- Header -->
-        <div v-if="!noHeader" class="bs-header">
+        <div v-if="!noHeader" class="bs-header" @click="handleClose">
           <slot name="header">
             <span class="bs-title">{{ title }}</span>
           </slot>
@@ -175,7 +175,7 @@ defineExpose({
   border-bottom: 1px solid var(--border-color, #e5e5e5);
   background: var(--bg-secondary, #f8f9fa);
   flex-shrink: 0;
-  user-select: none;
+  cursor: pointer;
 }
 
 .bs-header-icon {
@@ -202,26 +202,6 @@ defineExpose({
   overflow: hidden;
   display: flex;
   align-items: center;
-}
-
-.bs-close {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-muted, #999);
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
-  flex-shrink: 0;
-  margin-left: auto;
-}
-
-.bs-close:hover {
-  color: var(--text-primary, #1a1a1a);
-  background: var(--bg-tertiary, #f0f0f0);
 }
 
 /* ── Body ── */

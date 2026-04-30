@@ -2,14 +2,8 @@
   <Teleport to="body">
     <div v-show="open" class="modal-overlay" :style="{ zIndex }" @click.self="$emit('close')">
       <div class="modal-dialog" :style="{ maxWidth, maxHeight: maxHeightValue }" @click.stop>
-        <div class="modal-header">
+        <div class="modal-header" @click="$emit('close')">
           <span class="modal-title">{{ title }}</span>
-          <button class="modal-close" @click="$emit('close')" title="关闭">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
         </div>
         <div class="modal-body">
           <slot />
@@ -77,30 +71,13 @@ const maxHeightValue = computed(() =>
   padding: 6px 10px;
   border-bottom: 1px solid var(--border-color, #e5e5e5);
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .modal-title {
   font-weight: 600;
   font-size: 13px;
   color: var(--text-primary, #1a1a1a);
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-muted, #999);
-  padding: 2px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
-}
-
-.modal-close:hover {
-  color: var(--text-primary, #1a1a1a);
-  background: var(--bg-tertiary, #f0f0f0);
 }
 
 .modal-body {

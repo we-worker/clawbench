@@ -1,9 +1,8 @@
 <template>
   <div v-if="open" class="session-overlay" @click="close">
     <div class="session-drawer" @click.stop>
-      <div class="session-header">
+      <div class="session-header" @click="close">
         <span class="session-title">选择会话</span>
-        <button class="session-close" @click="close">×</button>
       </div>
 
       <div class="session-list">
@@ -142,31 +141,12 @@ watch(() => props.open, async (val) => {
   justify-content: space-between;
   padding: 16px;
   border-bottom: 1px solid var(--border-color, #e5e5e5);
+  cursor: pointer;
 }
 
 .session-title {
   font-size: 16px;
   font-weight: 600;
-  color: var(--text-primary, #1a1a1a);
-}
-
-.session-close {
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: none;
-  font-size: 24px;
-  color: var(--text-muted, #999);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  transition: background 0.15s;
-}
-
-.session-close:hover {
-  background: var(--bg-tertiary, #f0f0f0);
   color: var(--text-primary, #1a1a1a);
 }
 

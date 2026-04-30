@@ -8,12 +8,6 @@
         <line x1="16" y1="17" x2="8" y2="17"/>
       </svg>
       <span class="bs-header-title">文件详情</span>
-      <button class="bs-close" @click.stop="$emit('close')" title="关闭">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-          <line x1="18" y1="6" x2="6" y2="18"/>
-          <line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
     </template>
 
     <div class="details-body">
