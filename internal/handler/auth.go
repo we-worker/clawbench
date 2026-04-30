@@ -43,7 +43,7 @@ func ServeLogin(w http.ResponseWriter, r *http.Request) {
 				Path:     "/",
 				HttpOnly: true,
 				MaxAge:   int(7 * 24 * 3600),
-				SameSite: http.SameSiteStrictMode,
+				SameSite: http.SameSiteLaxMode,
 			})
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]bool{"ok": true})

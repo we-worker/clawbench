@@ -87,7 +87,7 @@ func ServeProjectSet(w http.ResponseWriter, r *http.Request) {
 				Path:     "/",
 				MaxAge:   7 * 24 * 3600,
 				HttpOnly: true,
-				SameSite: http.SameSiteStrictMode,
+				SameSite: http.SameSiteLaxMode,
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -148,7 +148,7 @@ func ServeProjectSet(w http.ResponseWriter, r *http.Request) {
 			Path:     "/",
 			MaxAge:   7 * 24 * 3600,
 			HttpOnly: true,
-			SameSite: http.SameSiteStrictMode,
+			SameSite: http.SameSiteLaxMode,
 		})
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"ok": "true", "path": absPath})

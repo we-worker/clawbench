@@ -85,6 +85,9 @@ func AIChatStream(w http.ResponseWriter, r *http.Request) {
 					if event.Tool.Input != "" {
 						json.Unmarshal([]byte(event.Tool.Input), &input)
 					}
+					if input == nil {
+						input = map[string]any{}
+					}
 					data, _ := json.Marshal(map[string]any{
 						"name":  event.Tool.Name,
 						"id":    event.Tool.ID,

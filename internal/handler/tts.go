@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -40,15 +41,28 @@ type ttsGenerateRequest struct {
 	Text string `json:"text"`
 }
 
-// ttsGenerateResponse is the response body for POST /api/tts/generate.
-type ttsGenerateResponse struct {
-	AudioPath        string `json:"audioPath"`
-	Summary          string `json:"summary,omitempty"`
-	SummarizeFailed  bool   `json:"summarizeFailed,omitempty"`
+// ttsSSEEvent is an SSE event sent during TTS generation.
+type ttsSSEEvent struct {
+	Type            string `json:"type"`            // "phase" or "result"
+	Phase           string `json:"phase,omitempty"` // "summarizing", "synthesizing"
+	AudioPath       string `json:"audioPath,omitempty"`
+	Summary         string `json:"summary,omitempty"`
+	SummarizeFailed bool   `json:"summarizeFailed,omitempty"`
+	SynthesizeFailed bool  `json:"synthesizeFailed,omitempty"`
+	SynthesizeError string `json:"synthesizeError,omitempty"`
+}
+
+// ttsWriteSSE writes a single SSE event and flushes.
+func ttsWriteSSE(w http.ResponseWriter, event ttsSSEEvent) {
+	data, _ := json.Marshal(event)
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 // TTSGenerate handles POST /api/tts/generate.
-// It summarizes the input text, synthesizes speech, and returns the audio file path.
+// It streams SSE events to report progress: summarizing → synthesizing → result.
 func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 	projectPath, ok := requireProject(w, r)
 	if !ok {
@@ -88,31 +102,36 @@ func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
 	// Check cache: if audio file already exists, return immediately
-	// Also check for a cached summary file alongside the audio
 	if info, err := os.Stat(absAudioPath); err == nil && info.Size() > 0 {
 		slog.Info("tts cache hit",
 			slog.String("cache_key", cacheKey),
 			slog.String("path", relAudioPath),
 		)
-		// Try to read cached summary
 		summaryPath := absAudioPath + ".summary.txt"
 		cachedSummary, _ := os.ReadFile(summaryPath)
-		writeJSON(w, http.StatusOK, ttsGenerateResponse{
-			AudioPath: relAudioPath,
-			Summary:   string(cachedSummary),
+		ttsWriteSSE(w, ttsSSEEvent{
+			Type:       "result",
+			AudioPath:  relAudioPath,
+			Summary:    string(cachedSummary),
 		})
 		return
 	}
 
-	// Step 1: Summarize the text for voice output (handler controls deadline)
+	// Phase 1: Summarize
+	ttsWriteSSE(w, ttsSSEEvent{Type: "phase", Phase: "summarizing"})
+
 	summarizeCtx, summarizeCancel := context.WithTimeout(r.Context(), ttsSummarizeTimeout)
 	defer summarizeCancel()
 
 	summary, err := speechProvider.Summarize(summarizeCtx, req.Text)
 	summarizeFailed := false
 	if err != nil {
-		// Log warning but fall back to original text
 		slog.Warn("tts summarize failed, using original text",
 			slog.String("error", err.Error()),
 		)
@@ -139,7 +158,9 @@ func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 2: Synthesize speech from the summary (handler controls deadline)
+	// Phase 2: Synthesize
+	ttsWriteSSE(w, ttsSSEEvent{Type: "phase", Phase: "synthesizing"})
+
 	synthesizeCtx, synthesizeCancel := context.WithTimeout(r.Context(), ttsSynthesizeTimeout)
 	defer synthesizeCancel()
 
@@ -148,8 +169,13 @@ func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 			slog.String("error", err.Error()),
 			slog.String("cache_key", cacheKey),
 		)
-		// Don't leak internal error details to the client
-		model.WriteErrorf(w, http.StatusInternalServerError, "语音生成失败，请稍后重试")
+		ttsWriteSSE(w, ttsSSEEvent{
+			Type:             "result",
+			SynthesizeFailed: true,
+			SynthesizeError:  "语音合成失败，请稍后重试",
+			Summary:          summary,
+			SummarizeFailed:  summarizeFailed,
+		})
 		return
 	}
 
@@ -158,9 +184,10 @@ func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 		slog.String("path", relAudioPath),
 	)
 
-	writeJSON(w, http.StatusOK, ttsGenerateResponse{
-		AudioPath: relAudioPath,
-		Summary:   summary,
+	ttsWriteSSE(w, ttsSSEEvent{
+		Type:            "result",
+		AudioPath:       relAudioPath,
+		Summary:         summary,
 		SummarizeFailed: summarizeFailed,
 	})
 }

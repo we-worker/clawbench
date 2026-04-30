@@ -36,6 +36,6 @@ type ContentBlock struct {
 	Text  string         `json:"text,omitempty"`  // thinking or text content
 	Name  string         `json:"name,omitempty"`  // tool name (tool_use)
 	ID    string         `json:"id,omitempty"`    // tool call ID (tool_use)
-	Input map[string]any `json:"input,omitempty"` // tool input (tool_use)
-	Done  bool           `json:"done,omitempty"`  // tool_use input complete (tool_use)
+	Input map[string]any `json:"input"` // tool input (tool_use) — no omitempty: must serialize {} so frontend distinguishes "no data" from "empty input"
+	Done  bool           `json:"done"`           // tool_use input complete (tool_use) — no omitempty: done=false must round-trip through DB
 }

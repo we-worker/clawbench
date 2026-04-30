@@ -486,6 +486,21 @@ public class MainActivity extends Activity {
         }
 
         /**
+         * Open a forwarded port in the system browser.
+         * Called from the port forwarding panel "open" button.
+         */
+        @JavascriptInterface
+        public void openInBrowser(int port, String protocol) {
+            activity.runOnUiThread(() -> {
+                String scheme = "https".equalsIgnoreCase(protocol) ? "https" : "http";
+                String url = scheme + "://localhost:" + port;
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.startActivity(intent);
+            });
+        }
+
+        /**
          * Get the saved SSH/web password for auto-login.
          * Returns empty string if no password is saved.
          */

@@ -96,12 +96,13 @@ export function usePortForward() {
     }
   }
 
-  /** Open a forwarded port — in app mode uses embedded browser, otherwise window.open */
+  /** Open a forwarded port — in app mode opens system browser, otherwise window.open */
   function openPort(targetPort: number, protocol?: string) {
-    if (openPortBrowserFn) {
-      openPortBrowserFn(targetPort, protocol)
+    const scheme = protocol === 'https' ? 'https' : 'http'
+    // In Android app mode, open in system browser via native bridge
+    if (isAppMode.value && (window as any).AndroidNative?.openInBrowser) {
+      ;(window as any).AndroidNative.openInBrowser(targetPort, scheme)
     } else {
-      const scheme = protocol === 'https' ? 'https' : 'http'
       window.open(`${scheme}://localhost:${targetPort}`, '_blank')
     }
   }

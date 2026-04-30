@@ -828,9 +828,7 @@ func accumulateBlock(blocks *[]model.ContentBlock, event ai.StreamEvent, project
 			found := false
 			for i := len(*blocks) - 1; i >= 0; i-- {
 				if (*blocks)[i].Type == "tool_use" && (*blocks)[i].ID == event.Tool.ID {
-					if len(input) > 0 {
-						(*blocks)[i].Input = input
-					}
+					(*blocks)[i].Input = input
 					(*blocks)[i].Done = event.Tool.Done
 					found = true
 					break

@@ -229,12 +229,6 @@ const sortDir = ref('asc')
 const { isAppMode } = useAppMode()
 const { syncToNative } = usePortForward()
 const proxyOpen = ref(false)
-const portForwardBrowserRef = ref(null)
-
-// Register port forward browser open callback
-setOpenPortBrowser((port, protocol) => {
-  portForwardBrowserRef.value?.open(port, protocol)
-})
 
 // 抽屉互斥：打开一个时关闭其他（瞬间关闭，无动画）
 const drawerStates = {
