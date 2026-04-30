@@ -1,7 +1,6 @@
 package com.clawbench.app;
 
 import android.annotation.SuppressLint;
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -35,6 +34,8 @@ import android.widget.EditText;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AppCompatActivity;
+
 import org.json.JSONArray;
 
 import java.util.Set;
@@ -51,7 +52,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * - Proper back navigation within WebView
  * - SSL error handling with user confirmation
  */
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
 
     private static final String PREFS_NAME = "clawbench_prefs";
     private static final String KEY_SERVER_URL = "server_url";
@@ -284,10 +285,10 @@ public class MainActivity extends Activity {
         } else {
             // No more WebView history — offer to reconfigure server instead of exiting
             new AlertDialog.Builder(this)
-                    .setTitle(R.string.dialog_title)
-                    .setMessage("是否重新配置服务器地址？")
+                    .setTitle(R.string.dialog_back_title)
+                    .setMessage("当前没有更多页面可回退，是否重新配置服务器地址？")
                     .setPositiveButton("重新配置", (dialog, which) -> showServerDialog())
-                    .setNegativeButton("退出", (dialog, which) -> super.onBackPressed())
+                    .setNegativeButton("退出应用", (dialog, which) -> super.onBackPressed())
                     .setCancelable(true)
                     .show();
         }
@@ -334,10 +335,10 @@ public class MainActivity extends Activity {
             String serverUrl = prefs.getString(KEY_SERVER_URL, "");
             if (serverUrl.startsWith("https://")) {
                 new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("SSL \u8bc1\u4e66\u9a8c\u8bc1\u5931\u8d25")
-                        .setMessage("\u670d\u52a1\u5668\u4f7f\u7528\u81ea\u7b7e\u540d\u8bc1\u4e66\uff0c\u662f\u5426\u4fe1\u4efb\u8be5\u8bc1\u4e66\uff1f\n\n" + error.toString())
-                        .setPositiveButton("\u4fe1\u4efb\u5e76\u7ee7\u7eed", (dialog, which) -> handler.proceed())
-                        .setNegativeButton("\u53d6\u6d88", (dialog, which) -> handler.cancel())
+                        .setTitle("SSL 证书验证失败")
+                        .setMessage("服务器使用了自签名证书，连接可能不安全。\n\n仅当您信任该服务器时才继续。")
+                        .setPositiveButton("信任并继续", (dialog, which) -> handler.proceed())
+                        .setNegativeButton("取消连接", (dialog, which) -> handler.cancel())
                         .setCancelable(false)
                         .show();
             } else {

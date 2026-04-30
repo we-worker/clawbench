@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Input field background with rounded corners, subtle border, and focus glow -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Focused state: accent border + glow effect -->
+    <item android:state_focused="true">
+        <layer-list>
+            <!-- Outer glow (slightly larger, translucent accent) -->
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="#1a58a6ff" />
+                    <corners android:radius="10dp" />
+                </shape>
+            </item>
+            <!-- Inner field with accent border -->
+            <item
+                android:bottom="1dp"
+                android:left="1dp"
+                android:right="1dp"
+                android:top="1dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/dialog_input_background" />
+                    <stroke android:width="1.5dp" android:color="@color/dialog_input_stroke_focused" />
+                    <corners android:radius="9dp" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+    <!-- Default state: subtle border -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/dialog_input_background" />
+            <stroke android:width="1dp" android:color="@color/dialog_input_stroke" />
+            <corners android:radius="8dp" />
+        </shape>
+    </item>
+</selector>

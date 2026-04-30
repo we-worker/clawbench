@@ -3,15 +3,10 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="24dp">
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="输入 ClawBench 服务器地址"
-        android:textSize="14sp"
-        android:textColor="#8b949e"
-        android:layout_marginBottom="8dp" />
+    android:paddingTop="4dp"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:paddingBottom="4dp">
 
     <EditText
         android:id="@+id/serverUrlInput"
@@ -20,32 +15,20 @@
         android:hint="@string/dialog_hint"
         android:inputType="textUri"
         android:singleLine="true"
-        android:padding="12dp"
-        android:background="@android:color/transparent"
-        android:textColor="#e6edf3"
-        android:textColorHint="#484f58"
+        android:textColor="@color/dialog_text_primary"
+        android:textColorHint="@color/dialog_text_hint"
         android:textSize="16sp" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="登录密码（用于 SSH 隧道认证）"
-        android:textSize="14sp"
-        android:textColor="#8b949e"
-        android:layout_marginTop="16dp"
-        android:layout_marginBottom="8dp" />
 
     <EditText
         android:id="@+id/passwordInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="服务器登录密码"
+        android:hint="登录密码（可选）"
         android:inputType="textPassword"
         android:singleLine="true"
-        android:padding="12dp"
-        android:background="@android:color/transparent"
-        android:textColor="#e6edf3"
-        android:textColorHint="#484f58"
+        android:layout_marginTop="12dp"
+        android:textColor="@color/dialog_text_primary"
+        android:textColorHint="@color/dialog_text_hint"
         android:textSize="16sp" />
 
 </LinearLayout>

@@ -5,4 +5,19 @@
     <color name="colorAccent">#58a6ff</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
+
+    <!-- Dialog colors (GitHub dark theme palette) -->
+    <color name="dialog_background">#161b22</color>
+    <color name="dialog_surface">#1c2128</color>
+    <color name="dialog_text_primary">#e6edf3</color>
+    <color name="dialog_text_secondary">#8b949e</color>
+    <color name="dialog_text_hint">#484f58</color>
+    <color name="dialog_input_background">#0d1117</color>
+    <color name="dialog_input_stroke">#30363d</color>
+    <color name="dialog_input_stroke_focused">#58a6ff</color>
+    <color name="dialog_button_positive">#58a6ff</color>
+    <color name="dialog_button_negative">#8b949e</color>
+    <color name="dialog_divider">#21262d</color>
+    <!-- Icon tint for dialog decorative icons -->
+    <color name="dialog_icon_tint">#58a6ff</color>
 </resources>
