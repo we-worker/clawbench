@@ -58,6 +58,7 @@
       :messages="messages"
       :autoSpeechEnabled="autoSpeech.enabled.value"
       :currentSessionId="session.currentSessionId.value"
+      :quickSend="store.state.chatQuickSend"
       @send="sendMessage"
       @cancel="stream.cancelStream"
       @file-select="handleFileSelect"
@@ -115,6 +116,7 @@ import ChatMetadataModal from './ChatMetadataModal.vue'
 import ChatInputBar from './ChatInputBar.vue'
 import ChatMessageList from './ChatMessageList.vue'
 import { useChatRender } from '@/composables/useChatRender.ts'
+import { store } from '@/stores/app.ts'
 import { useChatStream } from '@/composables/useChatStream.ts'
 import { useChatSession } from '@/composables/useChatSession.ts'
 import { useToast } from '@/composables/useToast.ts'

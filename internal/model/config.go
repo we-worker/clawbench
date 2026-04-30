@@ -23,9 +23,10 @@ type Config struct {
 		MaxFiles  int `yaml:"max_files"`  // Maximum number of files per upload (default: 20)
 	} `yaml:"upload"`
 	Chat struct {
-		InitialMessages int `yaml:"initial_messages"` // Number of messages to load initially (default: 20)
-		PageSize        int `yaml:"page_size"`        // Number of messages per lazy-load batch (default: 20)
-		CollapsedHeight int `yaml:"collapsed_height"` // Collapsed message height in pixels (default: 150)
+		InitialMessages int      `yaml:"initial_messages"` // Number of messages to load initially (default: 20)
+		PageSize        int      `yaml:"page_size"`        // Number of messages per lazy-load batch (default: 20)
+		CollapsedHeight int      `yaml:"collapsed_height"` // Collapsed message height in pixels (default: 150)
+		QuickSend       []string `yaml:"quick_send"`       // Quick-send preset texts, shown when input is empty
 	} `yaml:"chat"`
 	TTS struct {
 		Engine           string      `yaml:"engine"`            // TTS engine: "minimax" (default), "edge", "piper", or "kokoro"
@@ -75,4 +76,5 @@ var (
 	ChatInitialMessages int // Default: 20
 	ChatPageSize        int // Default: 20
 	ChatCollapsedHeight int // Default: 150
+	ChatQuickSend       []string // Quick-send preset texts
 )

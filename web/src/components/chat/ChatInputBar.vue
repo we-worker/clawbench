@@ -113,7 +113,7 @@
           <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           <span class="stop-btn-pulse"></span>
         </button>
-        <button v-else class="chat-send-btn" @click="$emit('send', inputText.trim())" :class="{ disabled: inputDisabled && pendingFiles.length === 0 && attachedFiles.length === 0 }" title="发送">
+        <button v-else class="chat-send-btn" @click.stop="handleSendClick" :class="{ disabled: inputDisabled && pendingFiles.length === 0 && attachedFiles.length === 0 }" title="发送">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
             <line x1="22" y1="2" x2="11" y2="13"/>
             <polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -158,6 +158,19 @@
           </button>
         </div>
       </Teleport>
+      <!-- Teleported quick-send menu -->
+      <Teleport to="body">
+        <div v-if="showQuickMenu" class="quick-send-menu" :style="quickMenuStyle" @click.stop>
+          <div class="attach-menu-group-title">快捷发送</div>
+          <button v-for="text in quickSend" :key="text" class="attach-menu-item" @click="handleQuickSend(text)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+            <span>{{ text }}</span>
+          </button>
+        </div>
+      </Teleport>
     </div>
   </div>
 </template>
@@ -175,6 +188,7 @@ const props = defineProps({
   messages: Array,
   autoSpeechEnabled: Boolean,
   currentSessionId: String,
+  quickSend: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits([
@@ -200,6 +214,8 @@ const dragCounter = ref(0)
 const showAttachMenu = ref(false)
 const attachMenuRef = ref(null)
 const menuStyle = ref({})
+const showQuickMenu = ref(false)
+const quickMenuStyle = ref({})
 
 const uploadingFiles = computed(() => props.pendingFiles.filter(f => f.uploading))
 
@@ -323,6 +339,36 @@ function toggleAttachMenu() {
   showAttachMenu.value = true
 }
 
+function handleSendClick() {
+  if (inputText.value.trim()) {
+    emit('send', inputText.value.trim())
+  } else if (props.quickSend.length > 0) {
+    toggleQuickMenu()
+  }
+}
+
+function handleQuickSend(text) {
+  showQuickMenu.value = false
+  emit('send', text)
+}
+
+function toggleQuickMenu() {
+  if (showQuickMenu.value) {
+    showQuickMenu.value = false
+    return
+  }
+  const sendBtn = document.querySelector('.chat-send-btn')
+  if (sendBtn) {
+    const rect = sendBtn.getBoundingClientRect()
+    quickMenuStyle.value = {
+      position: 'fixed',
+      bottom: `${window.innerHeight - rect.top + 4}px`,
+      right: `${window.innerWidth - rect.right}px`,
+    }
+  }
+  showQuickMenu.value = true
+}
+
 // Close menu on outside click
 function handleClickOutside(e) {
   // The teleported menu is outside attachMenuRef, so check both
@@ -330,6 +376,9 @@ function handleClickOutside(e) {
   if (menuEl && menuEl.contains(e.target)) return
   if (attachMenuRef.value && attachMenuRef.value.contains(e.target)) return
   showAttachMenu.value = false
+  const quickMenuEl = document.querySelector('.quick-send-menu')
+  if (quickMenuEl && quickMenuEl.contains(e.target)) return
+  showQuickMenu.value = false
 }
 
 onMounted(() => {
@@ -605,6 +654,19 @@ defineExpose({
   height: 1px;
   background: var(--border-color, #e5e5e5);
   margin: 3px 6px;
+}
+
+/* Quick-send menu (teleported to body, right-anchored) */
+.quick-send-menu {
+  position: fixed;
+  background: var(--bg-secondary, #fff);
+  border: 1px solid var(--border-color, #e5e5e5);
+  border-radius: 8px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 9999;
+  min-width: 120px;
+  max-width: 240px;
+  padding: 3px 0;
 }
 
 /* Attachment tags row */

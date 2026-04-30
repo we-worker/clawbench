@@ -130,6 +130,12 @@ func main() {
 	model.ChatPageSize = cfg.Chat.PageSize
 	model.ChatCollapsedHeight = cfg.Chat.CollapsedHeight
 
+	// Set quick-send presets with defaults
+	if len(cfg.Chat.QuickSend) == 0 {
+		cfg.Chat.QuickSend = []string{"OK", "继续", "提交", "放弃工作区修改"}
+	}
+	model.ChatQuickSend = cfg.Chat.QuickSend
+
 	// Initialize TTS summarizer from config
 	summarizeBackend := cfg.TTS.SummarizeBackend
 	if summarizeBackend == "" {
