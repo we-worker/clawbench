@@ -95,9 +95,10 @@ type StreamContentBlock struct {
 
 // StreamDelta represents a content_block_delta payload
 type StreamDelta struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	Thinking string `json:"thinking,omitempty"`
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
+	PartialJSON string `json:"partial_json,omitempty"` // input_json_delta uses this field (not "text")
 }
 
 // StreamMessageStart represents the message field in a message_start event
@@ -248,9 +249,16 @@ func (p *StreamParser) ParseLine(line string, ch chan<- StreamEvent) {
 					ch <- StreamEvent{Type: "content", Content: msg.Event.Delta.Text}
 				}
 			case "input_json_delta":
-				// Accumulate tool input JSON
+				// Accumulate tool input JSON.
+				// Codebuddy/Claude CLI uses "partial_json" field; fall back to "text" for compatibility.
 				if p.currentTool != nil {
-					p.currentTool.Input += msg.Event.Delta.Text
+					delta := msg.Event.Delta.Text
+					if delta == "" && msg.Event.Delta.PartialJSON != "" {
+						delta = msg.Event.Delta.PartialJSON
+					}
+					if delta != "" {
+						p.currentTool.Input += delta
+					}
 				}
 			case "thinking_delta":
 				if msg.Event.Delta.Thinking != "" {
@@ -260,17 +268,30 @@ func (p *StreamParser) ParseLine(line string, ch chan<- StreamEvent) {
 			}
 		case "content_block_start":
 			if msg.Event.ContentBlock != nil && msg.Event.ContentBlock.Type == "tool_use" {
+				// If there's an in-progress tool that hasn't received content_block_stop,
+				// close it first. Codebuddy/Claude CLI may emit multiple tool_use
+				// content_block_start events in sequence without intervening stops
+				// when the AI invokes several tools concurrently.
+				if p.currentTool != nil {
+					closed := *p.currentTool // copy before mutating
+					closed.Done = true
+					ch <- StreamEvent{Type: "tool_use", Tool: &closed}
+				}
 				p.receivedPartialToolUse = true
 				p.currentTool = &ToolCall{
 					Name: msg.Event.ContentBlock.Name,
 					ID:   msg.Event.ContentBlock.ID,
 				}
-				ch <- StreamEvent{Type: "tool_use", Tool: p.currentTool}
+				// Send a copy to the channel so that later mutations (Input accumulation,
+				// Done=true) don't affect events already queued for SSE consumption.
+				startCopy := *p.currentTool
+				ch <- StreamEvent{Type: "tool_use", Tool: &startCopy}
 			}
 		case "content_block_stop":
 			if p.currentTool != nil {
-				p.currentTool.Done = true
-				ch <- StreamEvent{Type: "tool_use", Tool: p.currentTool}
+				closed := *p.currentTool // copy before mutating
+				closed.Done = true
+				ch <- StreamEvent{Type: "tool_use", Tool: &closed}
 				p.currentTool = nil
 			}
 		case "message_start":

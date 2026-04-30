@@ -79,7 +79,7 @@
                 <line x1="12" y1="16" x2="12.01" y2="16"/>
               </svg>
             </div>
-            <pre v-if="block.input && Object.keys(block.input).length && expandedTools[`${index}-${bi}`]" class="tool-detail" @click.stop v-html="formatToolInput(block.input)"></pre>
+            <pre v-if="expandedTools[`${index}-${bi}`]" class="tool-detail" @click.stop v-html="formatToolInput(block.input)"></pre>
           </template>
           <!-- Error block -->
           <div v-else-if="block.type === 'error'" class="chat-error-card">
@@ -146,16 +146,16 @@
         <span v-if="msg.createdAt" class="chat-meta-sep">{{ formatMessageTime(msg.createdAt) }}</span>
       </span>
       <div class="chat-meta-actions">
-        <button v-if="!msg.streaming" ref="speakBtnRef" class="chat-info-btn chat-speak-btn" :class="{ active: autoSpeech.isActive(msgText), loading: autoSpeech.isGeneratingText(msgText) }" @click.stop="handleSpeak">
-          <!-- Generating state -->
-          <template v-if="autoSpeech.isGeneratingText(msgText)">
+        <button v-if="!msg.streaming" ref="speakBtnRef" class="chat-info-btn chat-speak-btn" :class="{ active: autoSpeech.isActive(msg.id), loading: autoSpeech.isGeneratingText(msg.id) }" @click.stop="handleSpeak">
+          <!-- Generating state — show phase label -->
+          <template v-if="autoSpeech.isGeneratingText(msg.id)">
             <svg class="speak-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
               <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 6v6l4 2"/>
             </svg>
-            <span>生成中</span>
+            <span>{{ autoSpeech.getPhaseLabel(msg.id) || '生成中' }}</span>
           </template>
           <!-- Playing state -->
-          <template v-else-if="autoSpeech.isPlayingAudio(msgText)">
+          <template v-else-if="autoSpeech.isPlayingAudio(msg.id)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
               <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
             </svg>
@@ -194,8 +194,6 @@
       </button>
     </div>
 
-    <!-- TTS Popover: shows AI-summarized text being read aloud -->
-    <!-- TtsPopover removed - status now shown in meta bar -->
   </div>
 </template>
 
@@ -203,7 +201,6 @@
 import { ref, inject, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { baseName } from '@/utils/helpers.ts'
 import { store } from '@/stores/app.ts'
-import { useAutoSpeech } from '@/composables/useAutoSpeech.ts'
 
 // Tool display configuration: icon SVG paths + category for color
 const TOOL_DISPLAY = {
@@ -257,7 +254,7 @@ const props = defineProps({
 
 const emit = defineEmits(['toggle-tool', 'show-metadata', 'file-tag-click', 'expand'])
 
-const autoSpeech = useAutoSpeech()
+const autoSpeech = inject('autoSpeech')
 const thinkingExpanded = ref({})
 const wrapperRef = ref(null)
 const overflows = ref(false)
@@ -273,10 +270,10 @@ const msgText = computed(() => {
 
 // Handle speak button click: play or stop (no popover)
 function handleSpeak() {
-  if (autoSpeech.isActive(msgText.value)) {
+  if (autoSpeech.isActive(props.msg?.id)) {
     autoSpeech.stopAudio()
-  } else if (msgText.value) {
-    autoSpeech.speakText(msgText.value)
+  } else if (msgText.value && props.msg?.id) {
+    autoSpeech.speakText(props.msg.id, msgText.value)
   }
 }
 
@@ -1003,21 +1000,6 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     gap: 2px;
-}
-
-/* Speak button active state */
-.chat-speak-btn.active {
-    opacity: 1;
-    color: var(--accent-color, #0066cc);
-}
-
-.chat-speak-btn.active:hover {
-    background: color-mix(in srgb, var(--accent-color, #0066cc) 10%, transparent);
-}
-
-/* Speak button loading spinner animation */
-.chat-speak-btn.loading .speak-spinner {
-    animation: speak-spin 1s linear infinite;
 }
 
 /* Speak button loading spinner animation */

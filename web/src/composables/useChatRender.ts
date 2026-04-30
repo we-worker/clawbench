@@ -203,7 +203,14 @@ export function useChatRender(options) {
   }
 
   function formatToolInput(input) {
-    if (!input) return ''
+    if (!input || (typeof input === 'object' && Object.keys(input).length === 0)) {
+      // Show empty {} for tools with no parameters
+      try {
+        return hljs.highlight('{}', { language: 'json' }).value
+      } catch {
+        return '{}'
+      }
+    }
     try {
       const json = JSON.stringify(input, null, 2)
       return hljs.highlight(json, { language: 'json' }).value

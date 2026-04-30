@@ -338,10 +338,11 @@ func TestStreamParser_TextDedup_CodebuddySimpleFormat(t *testing.T) {
 
 func TestStreamParser_ToolUseStartStop(t *testing.T) {
 	// Test full tool_use lifecycle: content_block_start -> input_json_delta -> content_block_stop
+	// Uses "partial_json" field as actual Codebuddy/Claude CLI does
 	lines := []string{
 		`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_123","name":"Read"}}}`,
-		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","text":"{\"file_"}}}`,
-		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","text":"path\":\"/src/main.go\"}"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"file_"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"path\":\"/src/main.go\"}"}}}`,
 		`{"type":"stream_event","event":{"type":"content_block_stop","index":1}}`,
 	}
 
@@ -381,12 +382,112 @@ func TestStreamParser_ToolUseStartStop(t *testing.T) {
 
 func TestStreamParser_InputJsonDeltaNoCurrentTool(t *testing.T) {
 	// input_json_delta without a currentTool should be silently ignored
-	line := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","text":"{\"key\":\"val\"}"}}}`
+	line := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"key\":\"val\"}"}}}`
 
 	events := parseLine(line)
 
 	if len(events) != 0 {
 		t.Errorf("expected 0 events when no currentTool, got %d", len(events))
+	}
+}
+
+func TestStreamParser_ToolUseWithTextField(t *testing.T) {
+	// input_json_delta with "text" field (legacy format) should still work as fallback
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_456","name":"Bash"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","text":"{\"comma"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","text":"nd\":\"ls\"}"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":1}}`,
+	}
+
+	events := parseLines(lines)
+
+	// Find the stop event (Done=true)
+	var stopEvent *StreamEvent
+	for i := range events {
+		if events[i].Type == "tool_use" && events[i].Tool != nil && events[i].Tool.Done {
+			stopEvent = &events[i]
+			break
+		}
+	}
+	if stopEvent == nil {
+		t.Fatal("expected a tool_use stop event with Done=true")
+	}
+	if stopEvent.Tool.Input != `{"command":"ls"}` {
+		t.Errorf("expected accumulated input '{\"command\":\"ls\"}', got %q", stopEvent.Tool.Input)
+	}
+}
+
+func TestStreamParser_ConcurrentToolUse(t *testing.T) {
+	// When AI invokes multiple tools concurrently, Codebuddy/Claude CLI may
+	// emit content_block_start for the next tool before content_block_stop
+	// for the previous one. The parser should auto-close the previous tool
+	// when a new tool_use start arrives.
+	lines := []string{
+		// Tool A starts
+		`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_A","name":"Bash"}}}`,
+		// Tool A input deltas
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"comm"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"and\":\"ls\"}"}}}`,
+		// Tool B starts — Tool A never got content_block_stop!
+		`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_B","name":"Read"}}}`,
+		// Tool B input deltas
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"file_"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"path\":\"/a.go\"}"}}}`,
+		// Tool B stop
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":2}}`,
+	}
+
+	events := parseLines(lines)
+
+	// Should get: tool_A_start, tool_A_auto_closed, tool_B_start, tool_B_stop
+	toolEvents := make([]StreamEvent, 0)
+	for _, e := range events {
+		if e.Type == "tool_use" {
+			toolEvents = append(toolEvents, e)
+		}
+	}
+
+	if len(toolEvents) != 4 {
+		t.Fatalf("expected 4 tool_use events (A start, A auto-close, B start, B stop), got %d", len(toolEvents))
+	}
+
+	// Event 0: Tool A start (done=false)
+	if toolEvents[0].Tool.ID != "toolu_A" {
+		t.Errorf("event 0: expected tool ID 'toolu_A', got %q", toolEvents[0].Tool.ID)
+	}
+	if toolEvents[0].Tool.Done {
+		t.Error("event 0: expected Done=false for tool A start")
+	}
+
+	// Event 1: Tool A auto-closed (done=true, input accumulated)
+	if toolEvents[1].Tool.ID != "toolu_A" {
+		t.Errorf("event 1: expected tool ID 'toolu_A', got %q", toolEvents[1].Tool.ID)
+	}
+	if !toolEvents[1].Tool.Done {
+		t.Error("event 1: expected Done=true for auto-closed tool A")
+	}
+	if toolEvents[1].Tool.Input != `{"command":"ls"}` {
+		t.Errorf("event 1: expected tool A input '{\"command\":\"ls\"}', got %q", toolEvents[1].Tool.Input)
+	}
+
+	// Event 2: Tool B start (done=false, input empty)
+	if toolEvents[2].Tool.ID != "toolu_B" {
+		t.Errorf("event 2: expected tool ID 'toolu_B', got %q", toolEvents[2].Tool.ID)
+	}
+	if toolEvents[2].Tool.Done {
+		t.Error("event 2: expected Done=false for tool B start")
+	}
+
+	// Event 3: Tool B stop (done=true, input accumulated)
+	if toolEvents[3].Tool.ID != "toolu_B" {
+		t.Errorf("event 3: expected tool ID 'toolu_B', got %q", toolEvents[3].Tool.ID)
+	}
+	if !toolEvents[3].Tool.Done {
+		t.Error("event 3: expected Done=true for tool B stop")
+	}
+	if toolEvents[3].Tool.Input != `{"file_path":"/a.go"}` {
+		t.Errorf("event 3: expected tool B input '{\"file_path\":\"/a.go\"}', got %q", toolEvents[3].Tool.Input)
 	}
 }
 
