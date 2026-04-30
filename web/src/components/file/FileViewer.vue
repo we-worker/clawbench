@@ -13,6 +13,7 @@
       @open-git-history="emit('openGitHistory')"
       @toggle-toc="emit('toggleToc')"
       @toggle-search="emit('toggleSearch')"
+      @open-as-text="handleOpenAsText"
     />
 
     <div class="file-viewer-content" ref="contentRef">
@@ -64,6 +65,26 @@
         </div>
       </div>
 
+      <!-- Binary file -->
+      <div v-else-if="file.isBinary" class="raw-content-viewer">
+        <div class="unsupported-file">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14,2 14,8 20,8"/>
+          </svg>
+          <div class="unsupported-title">{{ file.name }}</div>
+          <div class="unsupported-desc">二进制文件，无法在浏览器中预览 {{ file.size ? '(' + formatSize(file.size) + ')' : '' }}</div>
+          <a :href="'/api/local-file/' + encodeURIComponent(file.path)" class="download-btn" download>
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" width="14" height="14">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7,10 12,15 17,10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            下载
+          </a>
+        </div>
+      </div>
+
       <!-- Markdown file -->
       <MarkdownPreview
         v-else-if="isMarkdown"
@@ -97,6 +118,7 @@ import MarkdownPreview from './MarkdownPreview.vue'
 import CodePreview from './CodePreview.vue'
 import FileHeader from './FileHeader.vue'
 import { getFileType, formatFileSize } from '@/utils/helpers.ts'
+import { store } from '@/stores/app.ts'
 
 const props = defineProps({
     file: Object,
@@ -187,7 +209,7 @@ watch(() => props.file, (f, oldF) => {
     clearRestoreTimer()
     if (!f) { currentFilePath = null; loading.value = true; return }
     currentFilePath = f.path
-    if (f.isImage || f.isAudio || f.isVideo || f.tooLarge || f.error) {
+    if (f.isImage || f.isAudio || f.isVideo || f.isBinary || f.tooLarge || f.error) {
         loading.value = false
     } else {
         loading.value = f.content == null
@@ -205,7 +227,7 @@ watch(() => props.file, (f, oldF) => {
 
 watch(() => props.file?.content, (content) => {
     if (!props.file) return
-    if (props.file.isImage || props.file.isAudio || props.file.isVideo || props.file.tooLarge || props.file.error) return
+    if (props.file.isImage || props.file.isAudio || props.file.isVideo || props.file.isBinary || props.file.tooLarge || props.file.error) return
     loading.value = content == null
     // Content loaded, try restore or attach listener
     if (content != null) {
@@ -215,6 +237,11 @@ watch(() => props.file?.content, (content) => {
 
 function formatSize(bytes) {
     return formatFileSize(bytes)
+}
+
+function handleOpenAsText() {
+    if (!props.file?.path) return
+    store.selectFile(props.file.path, false, false, false, true)
 }
 </script>
 

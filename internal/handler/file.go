@@ -183,6 +183,23 @@ func GetFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only serve content for known text files; everything else is binary.
+	// This prevents accidentally reading large binary files into memory.
+	// Use ?forceText=1 to override (e.g. user explicitly wants to view as text).
+	forceText := r.URL.Query().Get("forceText") == "1"
+	if !forceText && !model.IsTextFile(info.Name()) {
+		relPath, _ := filepath.Rel(projectPath, absPath)
+		writeJSON(w, http.StatusOK, FileContent{
+			Content:   "",
+			Name:      info.Name(),
+			Path:      filepath.ToSlash(relPath),
+			Supported: false,
+			IsBinary:  true,
+			Size:      info.Size(),
+		})
+		return
+	}
+
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		model.WriteError(w, model.Internal(fmt.Errorf("cannot read file")))
@@ -347,6 +364,7 @@ type FileContent struct {
 	Name      string `json:"name"`
 	Path      string `json:"path"`
 	Supported bool   `json:"supported"`
+	IsBinary  bool   `json:"isBinary,omitempty"`
 	Size      int64  `json:"size"`
 }
 

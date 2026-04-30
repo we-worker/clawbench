@@ -35,6 +35,13 @@
           </svg>
         </button>
         <div v-if="menuOpen" class="dropdown-menu">
+          <button v-if="file.isBinary" class="dropdown-item" @click="handleOpenAsText">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+              <polyline points="16 18 22 12 16 6"/>
+              <polyline points="8 6 2 12 8 18"/>
+            </svg>
+            以文本打开
+          </button>
           <button v-if="isMarkdown" class="dropdown-item" @click="handleToggleView">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
               <polyline points="16 18 22 12 16 6"/>
@@ -84,7 +91,7 @@ const props = defineProps({
     tocOpen: Boolean,
     searchOpen: Boolean,
 })
-const emit = defineEmits(['delete', 'toggleView', 'showDetails', 'openGitHistory', 'toggleToc', 'toggleSearch'])
+const emit = defineEmits(['delete', 'toggleView', 'showDetails', 'openGitHistory', 'toggleToc', 'toggleSearch', 'openAsText'])
 
 const menuOpen = ref(false)
 const dropdownRef = ref(null)
@@ -119,6 +126,11 @@ const badgeStyle = computed(() => ({
 function handleToggleView() {
     menuOpen.value = false
     emit('toggleView')
+}
+
+function handleOpenAsText() {
+    menuOpen.value = false
+    emit('openAsText')
 }
 
 function handleDelete() {
