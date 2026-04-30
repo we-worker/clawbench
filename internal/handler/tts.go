@@ -132,18 +132,27 @@ func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 			slog.String("cache_key", cacheKey),
 			slog.String("path", relAudioPath),
 		)
+		// Always send both phase events for consistent UX, even on cache hits.
+		ttsWriteSSE(w, ttsSSEEvent{Type: "phase", Phase: "summarizing"})
+		// Small delay so the frontend can render "摘要中" before we send "合成中".
+		// On cache hits all events fire instantly; without a gap the user never
+		// sees the intermediate labels.
+		time.Sleep(100 * time.Millisecond)
+		ttsWriteSSE(w, ttsSSEEvent{Type: "phase", Phase: "synthesizing"})
+		time.Sleep(100 * time.Millisecond)
 		// Try DB first, fall back to file cache
-		summary, summarizeFailed, found := service.GetTTSSummary(cacheKey)
+		summary, _, found := service.GetTTSSummary(cacheKey)
 		if !found {
 			cachedSummary, _ := os.ReadFile(absAudioPath + ".summary.txt")
 			summary = string(cachedSummary)
-			summarizeFailed = true // can't verify from file cache
 		}
+		// Don't forward summarizeFailed on cache hits — the audio exists,
+		// so the user doesn't need to know that summarization failed on a
+		// previous attempt.  Showing "摘要失败" every time is misleading.
 		ttsWriteSSE(w, ttsSSEEvent{
-			Type:            "result",
-			AudioPath:       relAudioPath,
-			Summary:         summary,
-			SummarizeFailed: summarizeFailed,
+			Type:      "result",
+			AudioPath: relAudioPath,
+			Summary:   summary,
 		})
 		return
 	}
@@ -156,15 +165,14 @@ func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 		slog.Info("tts summary cache hit, skipping summarization",
 			slog.String("cache_key", cacheKey),
 		)
+		// Still send "summarizing" phase for consistent UX even though we skip the actual work.
+		ttsWriteSSE(w, ttsSSEEvent{Type: "phase", Phase: "summarizing"})
+		time.Sleep(100 * time.Millisecond)
 		summary = cachedSummary
 		summarizeFailed = cachedFailed
 	} else {
-		// Only send "summarizing" phase if text is long enough to require AI summarization.
-		// Short texts (<300 chars) skip summarization entirely, so we go straight to synthesizing.
-		needsSummary := speech.NeedsSummarization(req.Text)
-		if needsSummary {
-			ttsWriteSSE(w, ttsSSEEvent{Type: "phase", Phase: "summarizing"})
-		}
+		// Always send "summarizing" phase for consistent UX.
+		ttsWriteSSE(w, ttsSSEEvent{Type: "phase", Phase: "summarizing"})
 
 		summarizeCtx, summarizeCancel := context.WithTimeout(r.Context(), ttsSummarizeTimeout)
 		defer summarizeCancel()

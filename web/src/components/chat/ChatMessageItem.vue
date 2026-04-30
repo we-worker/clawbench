@@ -147,12 +147,12 @@
       </span>
       <div class="chat-meta-actions">
         <button v-if="!msg.streaming" ref="speakBtnRef" class="chat-info-btn chat-speak-btn" :class="{ active: autoSpeech.isActive(msg.id), loading: autoSpeech.isGeneratingText(msg.id) }" @click.stop="handleSpeak">
-          <!-- Generating state — show phase label -->
+          <!-- Generating states: summarizing / synthesizing -->
           <template v-if="autoSpeech.isGeneratingText(msg.id)">
             <svg class="speak-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
               <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 6v6l4 2"/>
             </svg>
-            <span>{{ autoSpeech.getPhaseLabel(msg.id) || '生成中' }}</span>
+            <span>{{ autoSpeech.getPhaseLabel(msg.id) }}</span>
           </template>
           <!-- Playing state -->
           <template v-else-if="autoSpeech.isPlayingAudio(msg.id)">
@@ -161,7 +161,7 @@
             </svg>
             <span>朗读中</span>
           </template>
-          <!-- Default state -->
+          <!-- Default idle state -->
           <template v-else>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
               <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>

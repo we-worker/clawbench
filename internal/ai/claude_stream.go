@@ -11,11 +11,14 @@ func buildClaudeStreamArgs(req ChatRequest) []string {
 
 	if req.Resume {
 		args = append(args, "--resume", req.SessionID)
-	} else {
+	} else if req.SessionID != "" {
 		args = append(args, "--session-id", req.SessionID)
 	}
 
-	args = append(args, "--add-dir", req.WorkDir, "--dangerously-skip-permissions")
+	if req.WorkDir != "" {
+		args = append(args, "--add-dir", req.WorkDir)
+	}
+	args = append(args, "--dangerously-skip-permissions")
 
 	// Disable built-in scheduling/timer tools to force use of ClawBench's
 	// <schedule-proposal> mechanism instead of native CronCreate/CronDelete/CronList.
