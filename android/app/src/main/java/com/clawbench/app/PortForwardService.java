@@ -521,21 +521,46 @@ public class PortForwardService extends Service {
     /**
      * Add a local port forward through the SSH tunnel.
      * Creates: 127.0.0.1:{port} on device → 127.0.0.1:{port} on server
-     * If the connection fails, disconnects and retries once (password may have been updated).
+     *
+     * If the port is already in the forwarded set but the SSH session is disconnected,
+     * this will reconnect and re-establish the port forward. This handles the case where
+     * the Go backend restarts (killing the SSH server), and the Android frontend calls
+     * syncToNative() → addForwardedPort() on page reload — the port is in the set
+     * but the tunnel is dead.
+     *
      * MUST be called from a background thread (network I/O).
      */
     private synchronized void addPortForward(int port) {
-        if (forwardedPorts.contains(port)) {
-            Log.d(TAG, "SSH: port " + port + " already forwarded");
+        boolean alreadyInSet = forwardedPorts.contains(port);
+        boolean sessionAlive = sshSession != null && sshSession.isConnected();
+
+        if (alreadyInSet && sessionAlive) {
+            // Port is tracked and SSH session is alive — nothing to do.
+            // (ensureConnection() already re-established this forward when it reconnected.)
+            Log.d(TAG, "SSH: port " + port + " already forwarded and session active");
             return;
+        }
+
+        // Port is in the set but session is dead — need to reconnect.
+        // Or port is new — need to add it.
+        if (alreadyInSet && !sessionAlive) {
+            Log.i(TAG, "SSH: port " + port + " in set but session disconnected, reconnecting...");
         }
 
         try {
             ensureConnection();
-            sshSession.setPortForwardingL("127.0.0.1", port, "127.0.0.1", port);
-            forwardedPorts.add(port);
-            saveForwardedPorts();
-            Log.i(TAG, "SSH: port forward added: localhost:" + port + " → server:" + port);
+            // ensureConnection() rebuilds ALL ports in forwardedPorts when it reconnects.
+            // For new ports (not in set yet), we need to explicitly set up forwarding.
+            if (!alreadyInSet) {
+                sshSession.setPortForwardingL("127.0.0.1", port, "127.0.0.1", port);
+                forwardedPorts.add(port);
+                saveForwardedPorts();
+            }
+            // For already-tracked ports, ensureConnection() already called
+            // setPortForwardingL for all ports in forwardedPorts during reconnect.
+            // If ensureConnection() failed to set up this specific port, it logged
+            // the error — the connection monitor will retry later.
+            Log.i(TAG, "SSH: port forward ready: localhost:" + port + " → server:" + port);
             updateNotification(forwardedPorts.size(), null);
         } catch (Exception e) {
             Log.e(TAG, "SSH: failed to add port forward for " + port + ", retrying...", e);
@@ -543,9 +568,11 @@ public class PortForwardService extends Service {
             disconnectInternal();
             try {
                 ensureConnection();
-                sshSession.setPortForwardingL("127.0.0.1", port, "127.0.0.1", port);
-                forwardedPorts.add(port);
-                saveForwardedPorts();
+                if (!alreadyInSet) {
+                    sshSession.setPortForwardingL("127.0.0.1", port, "127.0.0.1", port);
+                    forwardedPorts.add(port);
+                    saveForwardedPorts();
+                }
                 Log.i(TAG, "SSH: port forward added on retry: localhost:" + port + " → server:" + port);
                 updateNotification(forwardedPorts.size(), null);
             } catch (Exception e2) {
