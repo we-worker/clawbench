@@ -40,9 +40,9 @@
 
 ### AI 对话
 
-| 工具调用可视化 | 深度思考 | 快捷发送 |
-|----------------|----------|----------|
-| ![工具调用可视化](docs/screenshots/screenshot-20.jpg) | ![深度思考](docs/screenshots/screenshot-22.jpg) | ![快捷发送](docs/screenshots/screenshot-25.jpg) |
+| 工具调用与深度思考 | 快捷发送 |
+|--------------------|----------|
+| ![工具调用与深度思考](docs/screenshots/screenshot-20.jpg) | ![快捷发送](docs/screenshots/screenshot-25.jpg) |
 
 ### Git 集成
 
