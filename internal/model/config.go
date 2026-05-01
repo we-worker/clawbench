@@ -13,7 +13,7 @@ type Config struct {
 		CertFile string `yaml:"cert_file"`
 		KeyFile  string `yaml:"key_file"`
 	} `yaml:"tls"`
-  Dev struct {
+	Dev struct {
 		Port     int    `yaml:"port"`
 		Frontend int    `yaml:"frontend_port"`
 		Host     string `yaml:"host"` // Bind address (empty = 0.0.0.0, "localhost" = 127.0.0.1 only)
@@ -33,8 +33,8 @@ type Config struct {
 	} `yaml:"session"`
 	TTS struct {
 		Engine           string      `yaml:"engine"`            // TTS engine: "minimax" (default), "edge", "piper", or "kokoro"
-		SummarizeBackend string      `yaml:"summarize_backend"` // Summarization backend: "mmx" (default), "claude", "codebuddy", "gemini", "opencode", "codex"
-		SummarizeModel   string      `yaml:"summarize_model"`   // Model for summarization (default: "MiniMax-M2.7" for mmx; empty = backend default for others)
+		SummarizeBackend string      `yaml:"summarize_backend"` // Summarization backend: "mmx" (default), "claude", "codebuddy", "gemini", "opencode", "codex", "ollama"
+		SummarizeModel   string      `yaml:"summarize_model"`   // Model for summarization (default: "MiniMax-M2.7" for mmx, "gemma3:270m" for ollama; empty = backend default for others)
 		TTSModel         string      `yaml:"tts_model"`         // TTS model for speech synthesis (default: "Speech-2.8-Turbo")
 		Voice            string      `yaml:"voice"`             // Voice ID for TTS (default: "female-chengshu")
 		Language         string      `yaml:"language"`          // Language boost code (default: "zh")
@@ -42,6 +42,7 @@ type Config struct {
 		Format           string      `yaml:"format"`            // Audio output format (default: "mp3")
 		Piper            PiperConfig `yaml:"piper"`             // Piper-specific configuration (only used when engine: "piper")
 		Kokoro           KokoroConfig `yaml:"kokoro"`           // Kokoro-specific configuration (only used when engine: "kokoro")
+		Ollama           OllamaConfig `yaml:"ollama"`           // Ollama-specific configuration (only used when summarize_backend: "ollama")
 	} `yaml:"tts"`
 	Proxy ProxyConfig `yaml:"proxy"` // Port forwarding configuration
 	SSH   SSHConfig   `yaml:"ssh"`   // SSH tunnel server configuration
@@ -60,6 +61,11 @@ type KokoroConfig struct {
 	ModelPath  string  `yaml:"model_path"`   // Path to kokoro .onnx model file (empty = .clawbench/kokoro-models/kokoro-v1.0.onnx)
 	VoicesPath string  `yaml:"voices_path"`  // Path to voices .bin file (empty = .clawbench/kokoro-models/voices-v1.0.bin)
 	Lang       string  `yaml:"lang"`         // espeak language code for phonemization (default: "cmn" for Mandarin Chinese)
+}
+
+// OllamaConfig holds configuration for the Ollama summarization backend.
+type OllamaConfig struct {
+	BaseURL string `yaml:"base_url"` // Ollama API base URL (default: "http://localhost:11434")
 }
 
 // Global application state

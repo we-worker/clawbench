@@ -82,8 +82,9 @@ tts:
   #   "gemini"    — 使用 Gemini CLI
   #   "opencode"  — 使用 OpenCode CLI
   #   "codex"     — 使用 Codex CLI
+  #   "ollama"    — 使用 Ollama HTTP API（本地推理，需要运行 Ollama 服务）
   summarize_backend: "mmx"
-  summarize_model: "MiniMax-M2.7"                      # 总结模型（留空则使用后端默认；各后端默认: mmx→MiniMax-M2.7, claude→claude-sonnet-4-6, codebuddy→glm-5.1, gemini→gemini-3-pro-preview, opencode→opencode/minimax-m2.5-free, codex→codex-MiniMax-M2.7）
+  summarize_model: "MiniMax-M2.7"                      # 总结模型（留空则使用后端默认；各后端默认: mmx→MiniMax-M2.7, ollama→gemma3:270m, claude→claude-sonnet-4-6, codebuddy→glm-5.1, gemini→gemini-3-pro-preview, opencode→opencode/minimax-m2.5-free, codex→codex-MiniMax-M2.7）
 
   # --- 语速与音色（所有引擎共享） ---
   speed: 1                                             # 语速倍率（1.0=正常速度；edge 会转为百分比速率如 +0%）
@@ -180,6 +181,20 @@ tts:
   #            voices/*.bin (需转换为 NPZ 格式的 voices-v1.1-zh.bin)
   #   3. 或者使用 v1.0 英文模型: https://github.com/thewh1teagle/kokoro-onnx/releases
   #      需要两个文件: kokoro-v1.0.onnx 和 voices-v1.0.bin
+
+  # --- 组合8: Ollama总结（本地推理，无需云服务） ---
+  # engine: "edge"
+  # summarize_backend: "ollama"
+  # summarize_model: "gemma3:270m"                       # Ollama 模型名（需预先 ollama pull）
+  # ollama:
+  #   base_url: "http://localhost:11434"                  # Ollama API 地址（默认: http://localhost:11434）
+  # voice: "zh-CN-XiaoxiaoNeural"
+  # speed: 1
+  #
+  # Ollama 安装步骤：
+  #   1. 安装 Ollama: https://ollama.com/download
+  #   2. 拉取模型: ollama pull gemma3:270m
+  #   3. 确保 Ollama 服务运行中（默认监听 localhost:11434）
 
 # 默认智能体（可选，留空则使用 agents/ 目录下的第一个智能体）
 # 可用智能体：assistant（全能助手）、coder（编码专家）、handyman（勤杂工）、codebuddy2（Gemini）、gpt54（GPT）

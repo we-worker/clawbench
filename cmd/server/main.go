@@ -156,6 +156,14 @@ func main() {
 			slog.String("backend", "mmx"),
 			slog.String("model", s.Model),
 		)
+	} else if summarizeBackend == "ollama" {
+		s := speech.NewOllamaSummarizer(cfg.TTS.Ollama.BaseURL, cfg.TTS.SummarizeModel)
+		ttsSummarizer = s
+		slog.Info("tts summarizer configured",
+			slog.String("backend", "ollama"),
+			slog.String("model", s.Model),
+			slog.String("base_url", s.BaseURL),
+		)
 	} else {
 		s, err := speech.NewAIBackendSummarizer(summarizeBackend)
 		if err != nil {
