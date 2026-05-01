@@ -92,8 +92,8 @@ function onPointerDown(e) {
   if (!barRef.value) return
   // Don't close if clicking inside the bar
   if (barRef.value.contains(e.target)) return
-  // Don't close if clicking inside a BottomSheet or ModalDialog (SessionDrawer, agent selector)
-  if (e.target.closest('.bottom-sheet, .modal-dialog')) return
+  // Don't close if clicking inside a BottomSheet (bs-overlay/bs-panel) or ModalDialog
+  if (e.target.closest('.bs-overlay, .bs-panel, .modal-dialog')) return
   emit('close')
 }
 
