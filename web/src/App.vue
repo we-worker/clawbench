@@ -559,6 +559,40 @@ onMounted(async () => {
         return
     }
     initMermaid()
+    // Pre-fetch current session info for QuoteQuestionBar
+    // (ChatPanel may not be opened yet, so chatSessionState would be empty)
+    try {
+      const [chatResp, agentsResp] = await Promise.all([
+        fetch('/api/ai/chat?limit=1'),
+        fetch('/api/agents'),
+      ])
+      if (chatResp.ok) {
+        const chatData = await chatResp.json()
+        if (chatData.sessionId) {
+          chatSessionState.currentSessionId = chatData.sessionId
+          chatSessionState.currentSessionTitle = chatData.sessionTitle || ''
+          chatSessionState.currentAgentId = chatData.agentId || ''
+        }
+      }
+      if (agentsResp.ok) {
+        const agentsData = await agentsResp.json()
+        const agents = agentsData.agents || []
+        // Provide getAgentIcon/getAgentName with the loaded agents list
+        chatSessionState.getAgentIcon = (agentId) => {
+          const agent = agents.find(a => a.id === agentId)
+          return agent ? agent.icon : '🤖'
+        }
+        chatSessionState.getAgentName = (agentId) => {
+          const agent = agents.find(a => a.id === agentId)
+          return agent ? agent.name : (agentId || '助手')
+        }
+        // Set agentHeaderTitle based on current agent
+        if (chatSessionState.currentAgentId) {
+          const agent = agents.find(a => a.id === chatSessionState.currentAgentId)
+          chatSessionState.agentHeaderTitle = agent ? `${agent.icon} ${agent.name}` : 'AI 对话'
+        }
+      }
+    } catch (_) {}
     // Check unread chat messages on startup
     try {
         const sr = await fetch('/api/ai/sessions')
