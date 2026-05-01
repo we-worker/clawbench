@@ -276,7 +276,8 @@ export function useChatSession(options: UseChatSessionOptions) {
       Object.keys(blockProposals).forEach(k => delete blockProposals[k])
       inputDisabled.value = false
       loading.value = false
-      toast.show('已创建新会话', { icon: '✨', type: 'success', duration: 1500 })
+      const maxCount = store.state.sessionMaxCount
+      toast.show(`已创建新会话 (${data.sessionCount ?? ''}/${maxCount})`, { icon: '✨', type: 'success', duration: 1500 })
     } catch (err) {
       console.error('Failed to create session:', err)
       toast.show(err.message || '创建会话失败', { icon: '⚠️', type: 'error' })
