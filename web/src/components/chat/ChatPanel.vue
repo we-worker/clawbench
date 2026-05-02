@@ -22,6 +22,7 @@
       :renderedContents="render.renderedContents.value"
       :hasMore="session.hasMore.value"
       :loadingMore="session.loadingMore.value"
+      :totalMessages="session.totalMessages.value"
       :indicatorText="swipeSession.indicatorText.value"
       :indicatorDirection="swipeSession.indicatorDirection.value"
       @touchstart="swipeSession.onTouchStart"
@@ -307,13 +308,16 @@ async function handleCreateSession(agentId) {
 
 async function handleDeleteSession() {
   if (!identity.currentSessionId.value) return
+  const deletedId = identity.currentSessionId.value
   cleanupActiveStream()
-  await session.deleteSession(identity.currentSessionId.value, identity.currentBackend.value)
+  await session.deleteSession(deletedId, identity.currentBackend.value)
+  inputBarRef.value?.deleteDraft(deletedId)
 }
 
 async function handleDeleteSessionById(sessionId, backend) {
   cleanupActiveStream()
   await session.deleteSession(sessionId, backend)
+  inputBarRef.value?.deleteDraft(sessionId)
 }
 
 async function sendMessage(text, extraFilePaths) {

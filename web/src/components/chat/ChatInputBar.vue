@@ -172,7 +172,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
 import { baseName } from '@/utils/helpers.ts'
 
 const props = defineProps({
@@ -214,6 +214,24 @@ const attachMenuRef = ref(null)
 const menuStyle = ref({})
 const showQuickMenu = ref(false)
 const quickMenuStyle = ref({})
+
+// Per-session draft cache: save input text when switching away, restore when switching back
+const draftCache = new Map()
+
+watch(() => props.currentSessionId, (newId, oldId) => {
+  // Save draft from the old session
+  if (oldId) {
+    const text = inputText.value
+    if (text) {
+      draftCache.set(oldId, text)
+    } else {
+      draftCache.delete(oldId)
+    }
+  }
+  // Restore draft for the new session (or clear if none)
+  inputText.value = newId ? (draftCache.get(newId) || '') : ''
+  nextTick(() => collapseTextarea())
+})
 
 const uploadingFiles = computed(() => props.pendingFiles.filter(f => f.uploading))
 
@@ -306,6 +324,10 @@ function onDrop(e) {
 
 function clearInput() {
   inputText.value = ''
+  // Also clear the draft cache for current session so it doesn't linger
+  if (props.currentSessionId) {
+    draftCache.delete(props.currentSessionId)
+  }
   nextTick(() => collapseTextarea())
 }
 
@@ -392,6 +414,7 @@ onBeforeUnmount(() => {
 defineExpose({
   clearInput,
   inputText,
+  deleteDraft: (sessionId) => { draftCache.delete(sessionId) },
 })
 </script>
 
