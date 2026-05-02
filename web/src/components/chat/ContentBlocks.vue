@@ -37,7 +37,7 @@
             <line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
         </div>
-        <div v-if="expandedTools[key(bi)]" class="tool-detail" @click="handleToolDetailClick" v-html="formatToolInput(block.input, block.name)"></div>
+        <div v-if="expandedTools[key(bi)] || shouldAutoExpand(block)" class="tool-detail" :data-tool-name="block.name" @click="handleToolDetailClick" v-html="formatToolInput(block.input, block.name)"></div>
       </template>
       <!-- Error block -->
       <div v-else-if="block.type === 'error'" class="chat-error-card">
@@ -93,6 +93,7 @@
 
 <script setup>
 import { ref, watch, onUnmounted } from 'vue'
+import { handleToolAction, shouldAutoExpandTool } from '@/utils/renderToolDetail.ts'
 
 // Tool display configuration: icon SVG paths + category for color
 const TOOL_DISPLAY = {
@@ -111,6 +112,7 @@ const TOOL_DISPLAY = {
   'Agent':         { icon: 'M12 8V4H8 M12 8V4h4 M8 4a4 4 0 0 0-4 4v2 M16 4a4 4 0 0 1 4 4v2 M9 16h6 M10 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4z', category: 'agent' },
   'SendMessage':   { icon: 'M22 2l-7 20-4-9-9-4 20-7z', category: 'agent' },
   'Skill':         { icon: 'M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z', category: 'skill' },
+  'AskUserQuestion': { icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z M8 10h.01 M12 10h.01 M16 10h.01', category: 'ask' },
 }
 const FALLBACK_TOOL_DISPLAY = { icon: 'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z', category: 'fallback' }
 
@@ -125,6 +127,10 @@ function hasToolResult(block) {
   if (!block.name) return false
   if (block.input === null || block.input === undefined) return false
   return true
+}
+
+function shouldAutoExpand(block) {
+  return shouldAutoExpandTool(block.name || '')
 }
 
 const props = defineProps({
@@ -146,7 +152,7 @@ const props = defineProps({
   getAgentName: { type: Function, default: () => '' },
 })
 
-defineEmits(['toggle-tool', 'edit-task'])
+const emit = defineEmits(['toggle-tool', 'edit-task', 'send-message'])
 
 // Key helper: use msgId if available, otherwise msgIndex
 function key(bi) {
@@ -164,9 +170,13 @@ function toggleThinking(k) {
   thinkingExpanded.value = { ...thinkingExpanded.value, [k]: !thinkingExpanded.value[k] }
 }
 
-/** Click inside expanded tool-detail: allow file-open buttons to bubble, block everything else. */
+/** Click inside expanded tool-detail: dispatch to tool action handlers first, then fall through to generic behavior. */
 function handleToolDetailClick(event) {
-  if ((event.target).closest('.chat-file-open-btn')) {
+  // Try tool-specific action handler first (via data-tool-name on the .tool-detail container)
+  const toolName = event.currentTarget.dataset?.toolName
+  if (toolName && handleToolAction(toolName, event, emit)) return
+  // Allow file-open buttons to bubble
+  if (event.target.closest('.chat-file-open-btn')) {
     return
   }
   event.stopPropagation()
@@ -399,6 +409,7 @@ onUnmounted(() => {
 .chat-tool-call[data-category="plan"]     { --tool-accent: var(--accent-color); }
 .chat-tool-call[data-category="agent"]    { --tool-accent: #ec4899; }
 .chat-tool-call[data-category="skill"]    { --tool-accent: #06b6d4; }
+.chat-tool-call[data-category="ask"]      { --tool-accent: #f97316; }
 .chat-tool-call[data-category="fallback"] { --tool-accent: var(--text-muted); }
 
 .chat-tool-call:hover {
@@ -453,6 +464,10 @@ onUnmounted(() => {
   overflow-y: auto;
   max-height: 150px;
   cursor: default;
+}
+
+.tool-detail[data-tool-name="AskUserQuestion"] {
+  max-height: 500px;
 }
 
 .tool-spinner {
@@ -735,5 +750,157 @@ onUnmounted(() => {
 
 .content-blocks .tool-detail .bash-command {
   color: var(--text-primary);
+}
+
+/* ── AskUserQuestion card ── */
+:root[data-theme="dark"] .content-blocks .chat-tool-call[data-category="ask"] { --tool-accent: #fb923c; }
+
+.content-blocks .tool-detail .ask-question-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.content-blocks .tool-detail .ask-question-empty {
+  color: var(--text-muted, #999);
+  font-style: italic;
+  font-size: 11px;
+}
+
+.content-blocks .tool-detail .ask-question-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.content-blocks .tool-detail .ask-question-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f97316;
+}
+
+:root[data-theme="dark"] .content-blocks .tool-detail .ask-question-header {
+  color: #fb923c;
+}
+
+.content-blocks .tool-detail .ask-question-text {
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.content-blocks .tool-detail .ask-question-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.content-blocks .tool-detail .ask-question-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.content-blocks .tool-detail .ask-question-option:hover {
+  background: color-mix(in srgb, #f97316 6%, var(--bg-secondary));
+  border-color: color-mix(in srgb, #f97316 30%, var(--border-color));
+}
+
+.content-blocks .tool-detail .ask-question-option.selected {
+  background: color-mix(in srgb, #f97316 10%, var(--bg-secondary));
+  border-color: #f97316;
+}
+
+:root[data-theme="dark"] .content-blocks .tool-detail .ask-question-option.selected {
+  background: color-mix(in srgb, #fb923c 12%, var(--bg-secondary));
+  border-color: #fb923c;
+}
+
+.content-blocks .tool-detail .ask-option-indicator {
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--text-muted, #999);
+}
+
+.content-blocks .tool-detail .ask-question-option.selected .ask-option-indicator {
+  color: #f97316;
+}
+
+:root[data-theme="dark"] .content-blocks .tool-detail .ask-question-option.selected .ask-option-indicator {
+  color: #fb923c;
+}
+
+.content-blocks .tool-detail .ask-option-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.content-blocks .tool-detail .ask-option-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.content-blocks .tool-detail .ask-option-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.content-blocks .tool-detail .ask-question-submit {
+  align-self: flex-end;
+  padding: 5px 16px;
+  border: none;
+  border-radius: 6px;
+  background: #f97316;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.content-blocks .tool-detail .ask-question-submit:hover:not(:disabled) {
+  background: #ea580c;
+}
+
+.content-blocks .tool-detail .ask-question-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.content-blocks .tool-detail .ask-question-view.ask-submitted .ask-question-submit {
+  background: #16a34a;
+  cursor: default;
+  opacity: 1;
+}
+
+:root[data-theme="dark"] .content-blocks .tool-detail .ask-question-submit {
+  background: #fb923c;
+}
+
+:root[data-theme="dark"] .content-blocks .tool-detail .ask-question-submit:hover:not(:disabled) {
+  background: #f97316;
+}
+
+:root[data-theme="dark"] .content-blocks .tool-detail .ask-question-view.ask-submitted .ask-question-submit {
+  background: #22c55e;
 }
 </style>

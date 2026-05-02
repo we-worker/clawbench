@@ -202,6 +202,14 @@ export function useChatRender(options) {
 
   function toolCallSummary(block) {
     if (!block.input) return ''
+    // AskUserQuestion: show first question header
+    if ((block.name || '').toLowerCase() === 'askuserquestion' && Array.isArray(block.input.questions) && block.input.questions.length > 0) {
+      const q = block.input.questions[0]
+      const header = q.header || ''
+      const question = q.question || ''
+      if (header) return header
+      if (question) return question.length > 60 ? question.slice(0, 57) + '...' : question
+    }
     // Prefer description (human-readable intent) over raw input values
     if (block.input.description) return block.input.description
     const obj = block.input

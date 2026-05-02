@@ -30,6 +30,7 @@
       @file-tag-click="handleFileTagClick"
       @load-more="handleLoadMore"
       @edit-task="openTaskEdit"
+      @send-message="handleToolSendMessage"
     />
 
     <!-- Session switching overlay — placed here to cover the entire message area -->
@@ -440,6 +441,26 @@ async function sendMessage(text, extraFilePaths) {
             identity.currentSessionId.value = ''
         }
     }
+}
+
+/** Handle a tool-triggered message send (e.g. AskUserQuestion answer).
+ *  If the AI stream is still running, waits for it to finish first. */
+async function handleToolSendMessage(text) {
+    if (!text) return
+    // Wait for the current stream to finish (AI may still be outputting after the tool event)
+    if (loading.value) {
+        await new Promise(resolve => {
+            const timer = setTimeout(() => { unwatch(); resolve() }, 60000) // 60s safety timeout
+            const unwatch = watch(loading, (val) => {
+                if (!val) {
+                    clearTimeout(timer)
+                    unwatch()
+                    resolve()
+                }
+            })
+        })
+    }
+    await sendMessage(text)
 }
 
 function scrollBottom(force = false) {
