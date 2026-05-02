@@ -55,6 +55,7 @@ interface AppState {
     dirEntries: DirEntry[]
     allItems: DirEntry[]
     currentFileList: unknown[]
+    dirLoading: boolean
 
     // Current file
     currentFile: CurrentFile | null
@@ -93,6 +94,7 @@ const state = reactive<AppState>({
     dirEntries: [],
     allItems: [],
     currentFileList: [],
+    dirLoading: false,
 
     // Current file
     currentFile: null,
@@ -154,6 +156,7 @@ async function setProject(path: string): Promise<void> {
 // =============================================
 
 async function loadFiles(dir = ''): Promise<void> {
+    state.dirLoading = true
     try {
         const url = dir ? `/api/dir?path=${encodeURIComponent(dir)}` : '/api/dir?path='
         const data = await apiGet<{ items: DirEntry[] }>(url)
@@ -162,6 +165,8 @@ async function loadFiles(dir = ''): Promise<void> {
         state.allItems = state.dirEntries.slice()
     } catch (err) {
         console.error('Failed to load directory:', err)
+    } finally {
+        state.dirLoading = false
     }
 }
 

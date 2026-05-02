@@ -23,6 +23,7 @@
         :show-hidden="showHidden"
         :sort-field="sortField"
         :sort-dir="sortDir"
+        :dir-loading="store.state.dirLoading"
         @close="fileManagerOpen = false"
         @navigate-dir="handleNavigateDir"
         @select-file="handleSelectFile"
@@ -424,6 +425,7 @@ function handleToggleSort(field) {
 }
 
 async function handleNavigateDir(path) {
+    if (store.state.dirLoading) return
     await store.navigateToDir(path)
 }
 

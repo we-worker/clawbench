@@ -28,6 +28,9 @@
         <button class="toolbar-btn" :class="{ active: !showHidden }" @click="$emit('toggleHidden')" title="隐藏隐藏文件">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
         </button>
+        <button class="toolbar-btn" :class="{ active: isInSync }" :disabled="!currentFile?.path" @click="syncToCurrentFile" title="同步到当前文件目录">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 3 4 7 8 11"/><line x1="4" y1="7" x2="20" y2="7"/><polyline points="16 21 20 17 16 13"/><line x1="20" y1="17" x2="4" y2="17"/></svg>
+        </button>
         <SearchInput v-model="searchQuery" placeholder="Filter files..." @dblclick="searchQuery = ''" />
       </div>
       <DirBreadcrumb :path="currentDir" @navigate="$emit('navigateDir', $event)" />
@@ -42,6 +45,11 @@
       @touchend="onContainerTouchEnd"
       @touchcancel="onContainerTouchEnd"
     >
+      <div v-if="dirLoading" class="dir-loading-overlay">
+        <svg class="dir-loading-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+        <span>加载中…</span>
+      </div>
+      <template v-else>
       <div v-if="filteredEntries.length === 0" class="empty-state">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
@@ -49,7 +57,7 @@
         <p>{{ currentDir ? 'This directory is empty.' : 'No supported files found.' }}</p>
       </div>
 
-      <template v-for="entry in filteredEntries" :key="entry.name">
+      <template v-for="entry in visibleEntries" :key="entry.name">
         <!-- Directory -->
         <div v-if="entry.type === 'dir'"
           class="file-item dir-item"
@@ -87,6 +95,10 @@
           <span class="file-name">{{ entry.name }}</span>
           <span class="file-meta">{{ formatSize(entry.size) }} · {{ formatDate(entry.modified) }}</span>
         </div>
+      </template>
+      <div v-if="hasMoreEntries" class="truncate-hint">
+        仅展示前 {{ MAX_VISIBLE_ENTRIES }} 项（共 {{ filteredEntries.length }} 项），请使用搜索精确定位
+      </div>
       </template>
     </div>
 
@@ -145,6 +157,7 @@ import { ref, computed, reactive, inject, nextTick, Teleport, watch } from 'vue'
 import BottomSheet from '@/components/common/BottomSheet.vue'
 import HeaderMarquee from '@/components/common/HeaderMarquee.vue'
 import { getFileType } from '@/utils/helpers.ts'
+import { dirName } from '@/utils/path.ts'
 import { store } from '@/stores/app.ts'
 import { useAppMode } from '@/composables/useAppMode.ts'
 import SearchInput from '@/components/common/SearchInput.vue'
@@ -161,6 +174,7 @@ const props = defineProps({
     showHidden: Boolean,
     sortField: String,
     sortDir: String,
+    dirLoading: Boolean,
 })
 
 const emit = defineEmits(['close', 'navigateDir', 'selectFile', 'toggleSort', 'toggleHidden', 'rename', 'delete', 'refresh'])
@@ -188,6 +202,22 @@ function copyProjectPath() {
 }
 
 const searchQuery = ref('')
+
+// Sync button: navigate to the directory of the currently opened file
+const isInSync = computed(() => {
+    if (!props.currentFile?.path) return false
+    return dirName(props.currentFile.path) === props.currentDir
+})
+
+function syncToCurrentFile() {
+    if (!props.currentFile?.path) return
+    const targetDir = dirName(props.currentFile.path)
+    if (targetDir === props.currentDir) {
+        if (toast) toast.show('已在当前文件目录', { icon: '📍', type: 'success', duration: 1500 })
+        return
+    }
+    emit('navigateDir', targetDir)
+}
 
 // Clear search when directory changes
 watch(() => props.currentDir, () => {
@@ -326,6 +356,8 @@ async function doNewFolder() {
     }
 }
 
+const MAX_VISIBLE_ENTRIES = 200
+
 const filteredEntries = computed(() => {
     let entries = [...props.entries]
     if (!props.showHidden) entries = entries.filter(e => !e.name.startsWith('.'))
@@ -352,7 +384,11 @@ const filteredEntries = computed(() => {
     return entries
 })
 
+const hasMoreEntries = computed(() => filteredEntries.value.length > MAX_VISIBLE_ENTRIES)
+const visibleEntries = computed(() => filteredEntries.value.slice(0, MAX_VISIBLE_ENTRIES))
+
 function handleFileClick(e) {
+    if (props.dirLoading) return
     const item = e.target.closest('.file-item')
     if (!item) return
     const action = item.dataset.action
@@ -687,6 +723,40 @@ function doDelete() {
     height: 48px;
     margin-bottom: 12px;
     opacity: 0.5;
+}
+
+/* Truncate hint */
+.truncate-hint {
+    text-align: center;
+    padding: 10px 16px;
+    font-size: 12px;
+    color: var(--text-muted, #999);
+    background: var(--bg-tertiary, #f5f5f5);
+    border-top: 1px solid var(--border-color, #e5e5e5);
+    flex-shrink: 0;
+}
+
+/* Loading overlay */
+.dir-loading-overlay {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 40px 20px;
+    color: var(--text-muted, #999);
+    font-size: 13px;
+}
+
+.dir-loading-spinner {
+    width: 24px;
+    height: 24px;
+    animation: dir-spin 1s linear infinite;
+}
+
+@keyframes dir-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 </style>
