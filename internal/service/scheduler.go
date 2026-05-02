@@ -234,18 +234,18 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string) {
 	}
 
 	// Build chat request — no session resume, standalone execution
-	// Strip schedule-proposal instructions from system prompt to prevent
-	// recursive task creation during scheduled execution
-	systemPrompt := stripScheduleProposal(agent.SystemPrompt)
-
+	// ScheduledExecution flag prevents recursive task creation at the
+	// handler level: even if the AI outputs a <schedule-proposal> tag,
+	// the handler will not create a task from it.
 	chatReq := ai.ChatRequest{
-		Prompt:       task.Prompt,
-		SessionID:    "", // no session — standalone execution
-		WorkDir:      projectPath,
-		SystemPrompt: systemPrompt,
-		Model:        agent.Model,
-		AgentID:      task.AgentID,
-		Resume:       false,
+		Prompt:             task.Prompt,
+		SessionID:          "", // no session — standalone execution
+		WorkDir:            projectPath,
+		SystemPrompt:       agent.SystemPrompt,
+		Model:              agent.Model,
+		AgentID:            task.AgentID,
+		Resume:             false,
+		ScheduledExecution: true,
 	}
 
 	// Execute AI backend (no timeout - let AI run indefinitely)
@@ -377,35 +377,6 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string) {
 		slog.Int("run_count", runCount),
 		slog.String("status", newStatus),
 	)
-}
-
-// stripScheduleProposal removes the schedule-proposal instruction section from
-// a system prompt to prevent recursive task creation when an agent executes a
-// scheduled task. It strips from "## 定时任务" through the line containing
-// "输出标签后", which is the final line of the schedule-proposal block in
-// all agent YAML files.
-func stripScheduleProposal(prompt string) string {
-	startMarker := "## 定时任务"
-	startIdx := strings.Index(prompt, startMarker)
-	if startIdx == -1 {
-		return prompt
-	}
-
-	endMarker := "输出标签后"
-	endIdx := strings.Index(prompt, endMarker)
-	if endIdx == -1 || endIdx < startIdx {
-		return prompt
-	}
-
-	// Find the end of the line containing endMarker
-	lineEnd := strings.Index(prompt[endIdx:], "\n")
-	if lineEnd == -1 {
-		// End marker is on the last line — strip from start to end of string
-		return strings.TrimSpace(prompt[:startIdx])
-	}
-
-	// Strip from startIdx to endIdx + lineEnd + 1
-	return prompt[:startIdx] + prompt[endIdx+lineEnd+1:]
 }
 
 // GetTasks retrieves all tasks for a project path. If projectPath is empty, retrieves all tasks.

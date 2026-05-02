@@ -537,14 +537,18 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 		// This must happen after all deltas are coalesced, because the tag
 		// spans multiple incremental content events and is never complete in
 		// any single delta.
-		for i := range blocks {
-			if blocks[i].Type == "text" && strings.Contains(blocks[i].Text, "<schedule-proposal") {
-				slog.Info("detected schedule-proposal tag in accumulated text block",
-					slog.String("session", sessionID),
-				)
-				if taskID := detectAndCreateScheduleProposal(blocks[i].Text, projectPath, sessionID, agentID); taskID != "" {
-					// Inject task_id into the proposal JSON so the frontend can link to the created task
-					blocks[i].Text = injectTaskIDIntoProposal(blocks[i].Text, taskID)
+		// Skip proposal detection for scheduled task executions to prevent
+		// recursive task creation.
+		if !chatReq.ScheduledExecution {
+			for i := range blocks {
+				if blocks[i].Type == "text" && strings.Contains(blocks[i].Text, "<schedule-proposal") {
+					slog.Info("detected schedule-proposal tag in accumulated text block",
+						slog.String("session", sessionID),
+					)
+					if taskID := detectAndCreateScheduleProposal(blocks[i].Text, projectPath, sessionID, agentID); taskID != "" {
+						// Inject task_id into the proposal JSON so the frontend can link to the created task
+						blocks[i].Text = injectTaskIDIntoProposal(blocks[i].Text, taskID)
+					}
 				}
 			}
 		}

@@ -193,6 +193,12 @@ func TestServeTasks_PostAssistantAgent(t *testing.T) {
 	env, teardown := setupTestEnv(t)
 	defer teardown()
 
+	// All agents are allowed for scheduled tasks
+	model.Agents = map[string]*model.Agent{
+		"assistant": {ID: "assistant", Name: "Assistant", Backend: "codebuddy"},
+	}
+	defer func() { model.Agents = nil }()
+
 	s := service.NewScheduler()
 	defer s.Stop()
 	service.GlobalScheduler = s
@@ -206,7 +212,11 @@ func TestServeTasks_PostAssistantAgent(t *testing.T) {
 	})
 	req = withProjectCookie(req, env.ProjectDir)
 	w := callHandler(ServeTasks, req)
-	assertStatus(t, w, http.StatusBadRequest)
+
+	assertOK(t, w)
+	var result map[string]any
+	json.Unmarshal(w.Body.Bytes(), &result)
+	assert.Equal(t, true, result["ok"])
 }
 
 func TestServeTasks_NoProject(t *testing.T) {
@@ -496,8 +506,10 @@ func TestServeTaskByID_UpdateAssistantAgent(t *testing.T) {
 	env, teardown := setupTestEnv(t)
 	defer teardown()
 
+	// All agents are allowed for scheduled tasks
 	model.Agents = map[string]*model.Agent{
-		"coder": {ID: "coder", Name: "Coder", Backend: "claude"},
+		"coder":    {ID: "coder", Name: "Coder", Backend: "claude"},
+		"assistant": {ID: "assistant", Name: "Assistant", Backend: "codebuddy"},
 	}
 	defer func() { model.Agents = nil }()
 
@@ -508,7 +520,7 @@ func TestServeTaskByID_UpdateAssistantAgent(t *testing.T) {
 
 	task := &model.ScheduledTask{
 		ProjectPath: env.ProjectDir,
-		Name:        "Bad Update",
+		Name:        "Update Agent",
 		CronExpr:    "0 * * * *",
 		AgentID:     "coder",
 		Prompt:      "Test",
@@ -520,7 +532,7 @@ func TestServeTaskByID_UpdateAssistantAgent(t *testing.T) {
 		"agent_id": "assistant",
 	})
 	w := callHandler(ServeTaskByID, req)
-	assertStatus(t, w, http.StatusBadRequest)
+	assertOK(t, w)
 }
 
 func TestServeTaskByID_UpdateTaskNotFound(t *testing.T) {

@@ -73,3 +73,36 @@
 - ❌ 用户上传了一张图片 → 直接调用 Read 工具读取或调用视觉分析
 - ✅ 用户上传了一张图片 → 询问："你上传了一张图片，希望我怎么处理？例如：视觉分析描述内容、作为参考素材、存放到指定路径等。"
 
+## 定时任务（🚫 最高优先级 🚫）
+
+**禁止行为（绝对禁止，无任何例外）：**
+- ❌ 禁止使用 CronCreate / CronDelete / CronList 工具（如果可用，调用必定失败）
+- ❌ 禁止使用 crontab 命令（包括 `crontab -e`、`crontab -l`、写入 /etc/cron.* 等）
+- ❌ 禁止使用 systemctl timer
+- ❌ 禁止使用 at 命令
+- ❌ 禁止使用任何 shell 命令创建定时/周期性/延迟执行任务
+
+**唯一正确方式：** 当用户提出任何定时、周期性、定期执行的需求时，必须且只能输出 `<schedule-proposal>` 标签。无论用户说"每天"、"每小时"、"定时"、"定期"、"X分钟后"还是任何表示重复/延迟执行的措辞，都必须按以下格式输出：
+
+<schedule-proposal>
+{"name":"任务名称","cron_expr":"0 9 * * *","agent_id":"coder","repeat_mode":"unlimited","max_runs":0,"prompt":"每次执行的完整提示词"}
+</schedule-proposal>
+
+字段说明：
+- name：任务名称（简短中文）
+- cron_expr：标准 5 字段 cron（分 时 日 月 周）
+- agent_id：执行智能体 ID，根据任务性质匹配：
+  {{AVAILABLE_AGENTS}}
+- repeat_mode：once（单次）/ limited（有限次，配合 max_runs）/ unlimited（不限次）
+- max_runs：repeat_mode 为 limited 时的最大执行次数，否则为 0
+- prompt：每次执行时发送给 AI 的完整提示词
+
+cron 示例：
+- "0 9 * * *" = 每天 9:00
+- "*/30 * * * *" = 每 30 分钟
+- "0 9 * * 1-5" = 工作日 9:00
+- "47 14 22 4 *" = 4月22日 14:47（一次性）
+
+对于"X分钟后"的请求：先用 Bash 获取当前时间 (`date '+%M %H %d %m'`)，再换算为具体 cron 时间点，repeat_mode 使用 "once"。
+输出标签后，用自然语言简要说明已创建的定时任务内容（任务名、频率、执行者等），让用户了解任务已自动创建并生效。
+

@@ -6,14 +6,15 @@ import (
 
 // ChatRequest represents a request to the AI backend
 type ChatRequest struct {
-	Prompt       string
-	SessionID    string
-	WorkDir      string
-	SystemPrompt string
-	Model        string // per-request model override (empty = use global default)
-	Command      string // optional: custom command path for the AI backend CLI
-	AgentID      string // agent ID for logging and persistence
-	Resume       bool   // If true, resume an existing session instead of creating new
+	Prompt             string
+	SessionID          string
+	WorkDir            string
+	SystemPrompt       string
+	Model              string // per-request model override (empty = use global default)
+	Command            string // optional: custom command path for the AI backend CLI
+	AgentID            string // agent ID for logging and persistence
+	Resume             bool   // If true, resume an existing session instead of creating new
+	ScheduledExecution bool   // If true, this is a scheduled task execution — block schedule-proposal creation
 }
 
 // Metadata contains additional information about the AI response
