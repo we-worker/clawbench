@@ -44,7 +44,7 @@
       <template v-if="msg.role === 'assistant' && msg.blocks">
         <template v-for="(block, bi) in msg.blocks" :key="bi">
           <!-- Thinking block -->
-          <div v-if="block.type === 'thinking'" class="chat-thinking" :class="{ expanded: thinkingExpanded[`${index}-${bi}`] }" @click.stop="toggleThinking(`${index}-${bi}`)">
+          <div v-if="block.type === 'thinking'" class="chat-thinking" :class="{ expanded: thinkingExpanded[`${msg.id ? 'db-'+msg.id : 'local-'+index}-${bi}`] }" @click.stop="toggleThinking(`${msg.id ? 'db-'+msg.id : 'local-'+index}-${bi}`)">
             <div class="thinking-header">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
                 <circle cx="12" cy="12" r="10"/>
@@ -55,11 +55,11 @@
                 <polyline points="6 9 12 15 18 9"/>
               </svg>
             </div>
-            <pre v-if="thinkingExpanded[`${index}-${bi}`]" class="thinking-text">{{ block.text }}</pre>
+            <pre v-if="thinkingExpanded[`${msg.id ? 'db-'+msg.id : 'local-'+index}-${bi}`]" class="thinking-text">{{ block.text }}</pre>
           </div>
           <!-- Tool use block -->
           <template v-else-if="block.type === 'tool_use'">
-            <div class="chat-tool-call" :class="{ done: block.done, incomplete: block.done && !hasToolResult(block) }" :data-category="getToolDisplay(block).category" @click.stop="$emit('toggle-tool', `${index}-${bi}`)">
+            <div class="chat-tool-call" :class="{ done: block.done, incomplete: block.done && !hasToolResult(block) }" :data-category="getToolDisplay(block).category" @click.stop="$emit('toggle-tool', `${msg.id ? 'db-'+msg.id : 'local-'+index}-${bi}`)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" class="tool-icon">
                 <path :d="getToolDisplay(block).icon"/>
               </svg>
@@ -79,7 +79,7 @@
                 <line x1="12" y1="16" x2="12.01" y2="16"/>
               </svg>
             </div>
-            <div v-if="expandedTools[`${index}-${bi}`]" class="tool-detail" @click="handleToolDetailClick" v-html="formatToolInput(block.input, block.name)"></div>
+            <div v-if="expandedTools[`${msg.id ? 'db-'+msg.id : 'local-'+index}-${bi}`]" class="tool-detail" @click="handleToolDetailClick" v-html="formatToolInput(block.input, block.name)"></div>
           </template>
           <!-- Error block -->
           <div v-else-if="block.type === 'error'" class="chat-error-card">
@@ -123,8 +123,8 @@
         <!-- Cancelled marker -->
         <div v-if="msg.cancelled" class="chat-cancelled-mark">已中断</div>
       </template>
-      <!-- User message or legacy plain text -->
-      <div v-else-if="msg.role === 'user' || msg.content" v-html="renderedContent"></div>
+      <!-- User message or legacy plain text (NOT for assistant messages with blocks parsed) -->
+      <div v-else-if="msg.role === 'user'" v-html="renderedContent"></div>
     </div>
 
     <!-- Collapse overlay + expand button -->

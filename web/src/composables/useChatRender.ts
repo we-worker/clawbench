@@ -143,9 +143,17 @@ export function useChatRender(options) {
   }
 
   function updateRenderedContents(forceFullRender = false) {
+    // Defensive: if arrays diverged (e.g. loadHistory replaced messages
+    // but renderedContents wasn't rebuilt yet), force a full rebuild.
+    if (!forceFullRender && renderedContents.value.length > messages.value.length) {
+      forceFullRender = true
+    }
     if (forceFullRender) {
       renderedContents.value = messages.value.map(msg => {
-        if (msg.role === 'assistant' && msg.blocks) {
+        // Assistant messages are always rendered via blocks in ChatMessageItem,
+        // never via renderedContent. Return empty string to prevent stale/wrong
+        // HTML from leaking into the v-else-if branch.
+        if (msg.role === 'assistant') {
           return ''
         }
         const key = msg.content || ''
@@ -170,7 +178,8 @@ export function useChatRender(options) {
       if (newMsgs.length === 0) return
 
       const newContents = newMsgs.map(msg => {
-        if (msg.role === 'assistant' && msg.blocks) {
+        // Assistant messages are always rendered via blocks, never via renderedContent
+        if (msg.role === 'assistant') {
           return ''
         }
         const key = msg.content || ''
