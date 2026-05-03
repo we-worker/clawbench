@@ -77,7 +77,7 @@ export function useAutoSpeech() {
 
   function reportError(message: string) {
     lastError.value = message
-    toast.show(message, { icon: '🔊', type: 'info', duration: 5000 })
+    toast.show(message, { icon: '🔊', type: 'error', duration: 5000 })
   }
 
   // --- Internal: generate and play TTS for text ---

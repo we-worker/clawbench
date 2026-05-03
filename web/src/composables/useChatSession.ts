@@ -222,7 +222,7 @@ export function useChatSession(options: UseChatSessionOptions) {
       // If another switch happened, don't touch state
       if (switchSessionSeq !== mySeq) return
       console.error('Failed to switch session:', err)
-      toast.show(gt('chat.session.switchFailed'), { icon: '⚠️' })
+      toast.show(gt('chat.session.switchFailed'), { icon: '⚠️', type: 'error' })
     } finally {
       // Always restore input — switchSession is the only place that locks it,
       // so it must always unlock regardless of success/failure/race.
