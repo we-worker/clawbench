@@ -394,7 +394,7 @@ export default {
     setProjectFailedDetail: 'Set project failed: {error}',
   },
   search: {
-    title: 'Search files',
+    title: 'Search in file',
     placeholder: 'Enter keyword to search…',
     noContent: 'No file content',
     enterKeyword: 'Enter keyword to search',

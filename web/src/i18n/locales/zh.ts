@@ -394,7 +394,7 @@ export default {
     setProjectFailedDetail: '设置项目失败: {error}',
   },
   search: {
-    title: '搜索文件',
+    title: '文件内容搜索',
     placeholder: '输入关键字搜索…',
     noContent: '无文件内容',
     enterKeyword: '输入关键字搜索',

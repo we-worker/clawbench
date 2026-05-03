@@ -231,6 +231,10 @@ function jumpToFirst() {
   flex-shrink: 0;
 }
 
+.search-input-row :deep(.search-pill) {
+  flex: 1;
+}
+
 .search-content {
   flex: 1;
   overflow: hidden;
