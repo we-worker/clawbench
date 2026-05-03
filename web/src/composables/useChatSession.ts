@@ -132,7 +132,6 @@ export function useChatSession(options: UseChatSessionOptions) {
         onScrollBottom(true)
         onConnectStream(currentSessionId.value)
       } else {
-        inputDisabled.value = false
         loading.value = false
         startMsgCountPolling()
         onScrollBottom(forceScrollBottom)
@@ -177,9 +176,9 @@ export function useChatSession(options: UseChatSessionOptions) {
 
     // Mark switching state immediately so UI can show a fade/placeholder
     switching.value = true
-    // Immediately lock input to prevent sending messages with stale sessionId.
-    // Do NOT set loading=true here — loading means "AI is generating", not
-    // "session is switching". Setting it would flash the stop button.
+    // Briefly lock input to prevent sending messages with stale sessionId.
+    // This is the ONLY place inputDisabled is set to true — it defaults to false
+    // and is restored as soon as the switch completes (even if the session is running).
     inputDisabled.value = true
 
     onDisconnectStream()
@@ -193,8 +192,6 @@ export function useChatSession(options: UseChatSessionOptions) {
       const resp = await fetch(`/api/ai/chat?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`)
       if (!resp.ok) {
         toast.show('切换会话失败', { icon: '⚠️', type: 'error' })
-        inputDisabled.value = false
-        switching.value = false
         return
       }
       const data = await resp.json()
@@ -217,16 +214,18 @@ export function useChatSession(options: UseChatSessionOptions) {
         stopMsgCountPolling()
         onConnectStream(sessionId)
       } else {
-        inputDisabled.value = false
         loading.value = false
         startMsgCountPolling()
       }
-      switching.value = false
     } catch (err) {
       // If another switch happened, don't touch state
       if (switchSessionSeq !== mySeq) return
       console.error('Failed to switch session:', err)
       toast.show('切换会话失败', { icon: '⚠️' })
+    } finally {
+      // Always restore input — switchSession is the only place that locks it,
+      // so it must always unlock regardless of success/failure/race.
+      // If a newer switch started, it will set inputDisabled=true again immediately.
       inputDisabled.value = false
       switching.value = false
     }
@@ -254,7 +253,6 @@ export function useChatSession(options: UseChatSessionOptions) {
       renderedContents.value = []
       totalMessages.value = 0
       Object.keys(blockProposals).forEach(k => delete blockProposals[k])
-      inputDisabled.value = false
       loading.value = false
       const maxCount = store.state.sessionMaxCount
       toast.show(`已创建新会话 (${data.sessionCount ?? ''}/${maxCount})`, { icon: '✨', type: 'success', duration: 1500 })

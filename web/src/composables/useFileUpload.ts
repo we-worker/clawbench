@@ -2,8 +2,7 @@ import { ref } from 'vue'
 import { useToast } from '@/composables/useToast.ts'
 import { store } from '@/stores/app.ts'
 
-export function useFileUpload(options) {
-  const { inputDisabled } = options
+export function useFileUpload() {
   const toast = useToast()
 
   const pendingFiles = ref([])

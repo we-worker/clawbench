@@ -457,11 +457,15 @@ export function useChatStream(options: UseChatStreamOptions) {
     if (!currentSessionId.value || !loading.value) return
     try {
       await cancelChat(currentSessionId.value)
+      // Backend will send 'cancelled' SSE event which triggers onStreamEnd.
+      // If the SSE connection is already dead, forceCleanup won't happen here —
+      // the onerror handler or global polling will take over.
     } catch (err) {
       console.error('Failed to cancel:', err)
       // Force local state reset even if API call fails
       disconnectStream()
       forceCleanupStreamingState()
+      onStreamEnd?.('cancelled')
     }
   }
 

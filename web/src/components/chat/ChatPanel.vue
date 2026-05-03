@@ -172,7 +172,7 @@ const identity = useSessionIdentity()
 const { agents: agentsList, getAgentIcon, getAgentName } = useAgents()
 
 const messages = ref([])
-const inputDisabled = ref(true)
+const inputDisabled = ref(false)
 const loading = ref(false)
 // Incremented when the panel reopens, so ChatMessageItem can re-check
 // overflow after being hidden (display:none gives scrollHeight=0).
@@ -297,7 +297,7 @@ const stream = useChatStream({
   onQueueUpdate: (queue) => { manager.setPendingMessages(queue) },
 })
 
-const { pendingFiles, attachedFiles, handleFileSelect, handleFileDrop, removeFile, addAttachedFile, removeAttachedFile, cleanupPreviewUrls, clearPendingFiles } = useFileUpload({ inputDisabled })
+const { pendingFiles, attachedFiles, handleFileSelect, handleFileDrop, removeFile, addAttachedFile, removeAttachedFile, cleanupPreviewUrls, clearPendingFiles } = useFileUpload()
 
 const manager = useSessionManager({
   messages,
