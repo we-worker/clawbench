@@ -1,6 +1,6 @@
 import {
   // Tool icons
-  Eye, PenLine, FilePenLine, Terminal, Search, Folder,
+  Eye, PenLine, FilePenLine, SquareTerminal, Terminal, Search, Folder,
   Globe, Bot, Sparkles, MessageSquarePlus, Plus, Pencil,
   CircleDot, ListChecks, ListTodo, Target,
   FileText, Compass, CheckCircle2, FolderSync, Monitor,
@@ -17,7 +17,7 @@ export const TOOL_ICONS: Record<string, { icon: typeof Wrench; category: string 
   'Read':              { icon: Eye,              category: 'file' },
   'Write':             { icon: PenLine,          category: 'file' },
   'Edit':              { icon: FilePenLine,      category: 'file' },
-  'Bash':              { icon: Terminal,         category: 'bash' },
+  'Bash':              { icon: SquareTerminal,   category: 'bash' },
   'Grep':              { icon: Search,           category: 'search' },
   'Glob':              { icon: Folder,           category: 'search' },
   'WebSearch':         { icon: Globe,            category: 'search' },

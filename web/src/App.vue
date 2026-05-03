@@ -163,7 +163,7 @@
               <GitBranch />
             </button>
             <button class="dock-btn" :class="{ active: proxyOpen, disabled: !isAppMode }" @click.stop="isAppMode ? openDrawer('proxy') : toast.show(t('toast.portForwardAppOnly'), { type: 'info' })" :title="t('nav.portForward')">
-              <Waypoints />
+              <EthernetPort />
             </button>
             <button class="dock-btn" @click.stop="handleRefresh" :title="t('nav.refresh')">
               <RotateCw />
@@ -191,7 +191,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, provide, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, ChevronRight, MessageSquare, Folder, GitBranch, Waypoints, RotateCw } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, MessageSquare, Folder, GitBranch, EthernetPort, RotateCw } from 'lucide-vue-next'
 import AppHeader from './components/common/AppHeader.vue'
 import FileManager from './components/file/FileManager.vue'
 import WelcomeView from './components/WelcomeView.vue'
