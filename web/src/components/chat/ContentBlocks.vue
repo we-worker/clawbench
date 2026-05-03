@@ -5,7 +5,7 @@
       <div v-if="block.type === 'thinking'" class="chat-thinking" :class="{ expanded: thinkingExpanded[key(bi)] }" @click.stop="toggleThinking(key(bi))">
         <div class="thinking-header">
           <CircleHelp :size="12" />
-          <span class="thinking-label">Thinking</span>
+          <span class="thinking-label">{{ t('chat.message.deepThinking') }}</span>
           <ChevronDown :size="12" class="thinking-chevron" />
         </div>
         <pre v-if="thinkingExpanded[key(bi)]" class="thinking-text">{{ block.text }}</pre>

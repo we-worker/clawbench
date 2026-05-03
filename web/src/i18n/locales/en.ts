@@ -104,6 +104,7 @@ export default {
       viewDetails: 'View details',
       speaking: 'Speaking',
       readAloud: 'Read',
+      deepThinking: 'Thinking',
     },
     speech: {
       summarizing: 'Summarizing',

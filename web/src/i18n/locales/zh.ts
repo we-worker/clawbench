@@ -104,6 +104,7 @@ export default {
       viewDetails: '查看详情',
       speaking: '朗读中',
       readAloud: '朗读',
+      deepThinking: '深度思考',
     },
     speech: {
       summarizing: '摘要中',
