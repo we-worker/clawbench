@@ -114,7 +114,8 @@ export function useChatRender(options) {
           const block = msg.blocks[bi]
           if (block.type === 'text') {
             const proposalKey = `${msg.id}-${bi}`
-            if (blockProposals[proposalKey]) continue
+            const existing = blockProposals[proposalKey]
+            if (existing && existing.proposal.task_id) continue
             const proposalMatch = block.text.match(/<schedule-proposal>([\s\S]*?)<\/schedule-proposal>/)
             if (proposalMatch) {
               try {
