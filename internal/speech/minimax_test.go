@@ -96,6 +96,118 @@ func TestStripMarkdown_EmptyString(t *testing.T) {
 	assert.Equal(t, "", result)
 }
 
+func TestStripMarkdown_Strikethrough(t *testing.T) {
+	input := "This is ~~deleted~~ text."
+	result := StripMarkdown(input)
+	assert.Equal(t, "This is deleted text.", result)
+}
+
+func TestStripMarkdown_Blockquote(t *testing.T) {
+	input := "> 引用文本\n> 另一行引用\n正常文本"
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, ">")
+	assert.Contains(t, result, "引用文本")
+	assert.Contains(t, result, "另一行引用")
+	assert.Contains(t, result, "正常文本")
+}
+
+func TestStripMarkdown_UnorderedList(t *testing.T) {
+	input := "- 项目一\n- 项目二\n* 项目三\n+ 项目四"
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, "- ")
+	assert.NotContains(t, result, "* ")
+	assert.NotContains(t, result, "+ ")
+	assert.Contains(t, result, "项目一")
+	assert.Contains(t, result, "项目四")
+}
+
+func TestStripMarkdown_OrderedList(t *testing.T) {
+	input := "1. 第一项\n2. 第二项\n10. 第十项"
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, "1.")
+	assert.NotContains(t, result, "10.")
+	assert.Contains(t, result, "第一项")
+	assert.Contains(t, result, "第十项")
+}
+
+func TestStripMarkdown_TaskList(t *testing.T) {
+	input := "- [x] 已完成\n- [ ] 未完成"
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, "[x]")
+	assert.NotContains(t, result, "[ ]")
+	assert.NotContains(t, result, "- ")
+	assert.Contains(t, result, "已完成")
+	assert.Contains(t, result, "未完成")
+}
+
+func TestStripMarkdown_Table(t *testing.T) {
+	input := "| 列1 | 列2 |\n| --- | --- |\n| 值1 | 值2 |"
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, "|")
+	assert.NotContains(t, result, "---")
+	assert.Contains(t, result, "列1")
+	assert.Contains(t, result, "值1")
+}
+
+func TestStripMarkdown_HTMLTags(t *testing.T) {
+	input := "<b>加粗</b>和<br>换行"
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, "<")
+	assert.NotContains(t, result, ">")
+	assert.Contains(t, result, "加粗")
+	assert.Contains(t, result, "换行")
+}
+
+func TestStripMarkdown_XMLTags(t *testing.T) {
+	input := "<tool_use>工具调用</tool_use>"
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, "<")
+	assert.NotContains(t, result, ">")
+	assert.Contains(t, result, "工具调用")
+}
+
+func TestStripMarkdown_EmojiShortcode(t *testing.T) {
+	input := "开心 :smile: 和 :+1: 继续"
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, ":smile:")
+	assert.NotContains(t, result, ":+1:")
+	assert.Contains(t, result, "开心")
+	assert.Contains(t, result, "继续")
+}
+
+func TestStripMarkdown_Footnote(t *testing.T) {
+	input := "正文[^1]\n[^1]: 脚注内容"
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, "[^1]")
+	assert.NotContains(t, result, "脚注内容")
+	assert.Contains(t, result, "正文")
+}
+
+func TestStripMarkdown_EscapedChars(t *testing.T) {
+	input := `\*不斜体\*和\#不标题`
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, "\\")
+	assert.Contains(t, result, "不斜体")
+	assert.Contains(t, result, "不标题")
+}
+
+func TestStripMarkdown_BareURL(t *testing.T) {
+	input := "访问 https://example.com 查看详情"
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, "https://")
+	assert.Contains(t, result, "访问")
+	assert.Contains(t, result, "查看详情")
+}
+
+func TestStripMarkdown_Autolink(t *testing.T) {
+	input := "点击 <https://example.com> 查看详情"
+	result := StripMarkdown(input)
+	assert.NotContains(t, result, "<")
+	assert.NotContains(t, result, "https://")
+	assert.Contains(t, result, "点击")
+	assert.Contains(t, result, "查看详情")
+}
+
 func TestStripMarkdown_ComplexMix(t *testing.T) {
 	input := `# Project Setup
 

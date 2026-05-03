@@ -180,10 +180,10 @@ func TTSGenerate(w http.ResponseWriter, r *http.Request) {
 		var err error
 		summary, err = summarizer.Summarize(summarizeCtx, req.Text)
 		if err != nil {
-			slog.Warn("tts summarize failed, using original text",
+			slog.Warn("tts summarize failed, using stripped original text",
 				slog.String("error", err.Error()),
 			)
-			summary = req.Text
+			summary = speech.StripMarkdown(req.Text)
 			summarizeFailed = true
 		}
 
