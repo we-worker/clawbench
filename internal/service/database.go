@@ -306,12 +306,16 @@ func GetTTSSummary(cacheKey string) (string, bool, bool) {
 	// Expire stale failed entries so summarization is retried
 	if summarizeFailed {
 		// Try both datetime formats: SQLite's "YYYY-MM-DD HH:MM:SS" and
-		// the RFC3339 format that modernc.org/sqlite may return ("YYYY-MM-DDTHH:MM:SSZ")
-		t, err := time.Parse("2006-01-02 15:04:05", createdAt)
-		if err != nil {
-			t, err = time.Parse(time.RFC3339, createdAt)
+		// the RFC3339 format that modernc.org/sqlite may return ("YYYY-MM-DDTHH:MM:SSZ").
+		// Use UTC for comparison since SQLite's CURRENT_TIMESTAMP is UTC
+		// and the driver may return it as RFC3339 with Z suffix.
+		var t time.Time
+		if parsed, err := time.Parse(time.RFC3339, createdAt); err == nil {
+			t = parsed
+		} else if parsed, err := time.Parse("2006-01-02 15:04:05", createdAt); err == nil {
+			t = parsed
 		}
-		if err == nil && time.Since(t) > ttsFailedCacheTTL {
+		if !t.IsZero() && time.Since(t) > ttsFailedCacheTTL {
 			slog.Info("tts summary cache expired for failed entry, will retry",
 				slog.String("cache_key", cacheKey),
 			)
