@@ -3,8 +3,6 @@ package com.clawbench.app;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
@@ -16,8 +14,6 @@ import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.Handler;
-import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.MediaStore;
 import android.provider.Settings;
@@ -42,7 +38,6 @@ import android.widget.Toast;
 import android.content.pm.PackageManager;
 import android.Manifest;
 
-import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
@@ -56,7 +51,6 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Main Activity: hosts a fullscreen WebView that connects to the ClawBench server.
@@ -64,7 +58,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Key features:
  * - Server URL configuration dialog on first launch
  * - WebView with JS, DOM storage, and media autoplay enabled
- * - JavaScript interface for native bridge (keep-alive service control, port forwarding)
+ * - JavaScript interface for native bridge (port forwarding, SSH password)
  * - Port forwarding via SSH tunnels (PortForwardService) — transparent localhost access
  * - Proper back navigation within WebView
  * - SSL error handling with user confirmation
@@ -74,8 +68,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREFS_NAME = "clawbench_prefs";
     private static final String KEY_SERVER_URL = "server_url";
     private static final String KEY_SSH_PASSWORD = "ssh_password";
-    private static final String CHANNEL_ID_UNREAD = "clawbench_unread";
-    private static final int UNREAD_NOTIFICATION_ID = 4;
     private static final String TAG = "ClawBench";
 
     private WebView webView;
@@ -86,11 +78,11 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private Uri cameraImageUri; // URI for camera capture image
 
-    // Notification permission launcher (Android 13+)
+    // Notification permission launcher (Android 13+) — required for foreground service notification
     private final ActivityResultLauncher<String> notificationPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
                 if (!isGranted) {
-                    Log.w(TAG, "POST_NOTIFICATIONS permission denied — notifications will not show");
+                    Log.w(TAG, "POST_NOTIFICATIONS permission denied — tunnel notification will not show");
                 }
             });
 
@@ -142,7 +134,7 @@ public class MainActivity extends AppCompatActivity {
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
-        createNotificationChannel();
+        // Request notification permission (Android 13+) — required for foreground service notification
         requestNotificationPermission();
 
         // Auto-restore PortForwardService if there are previously saved ports.
@@ -158,34 +150,6 @@ public class MainActivity extends AppCompatActivity {
             loadUrl(savedUrl);
         } else {
             showServerDialog();
-        }
-
-        // Handle notification tap (open chat panel)
-        handleOpenChatIntent(getIntent());
-    }
-
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        handleOpenChatIntent(intent);
-    }
-
-    /**
-     * If the launching intent has the "open_chat" extra (set by notification PendingIntent),
-     * inject JS to open the chat panel. Called from onCreate and onNewIntent.
-     */
-    private void handleOpenChatIntent(Intent intent) {
-        if (intent != null && intent.getBooleanExtra("open_chat", false)) {
-            intent.removeExtra("open_chat");
-            if (webView != null) {
-                // Wait a short moment for the WebView to be ready if just created
-                webView.postDelayed(() -> {
-                    webView.evaluateJavascript(
-                        "if (typeof window.__clawbenchOpenChat === 'function') window.__clawbenchOpenChat();",
-                        null);
-                }, 300);
-            }
         }
     }
 
@@ -375,6 +339,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
+     * Request POST_NOTIFICATIONS runtime permission on Android 13+ (API 33+).
+     * Required for the PortForwardService foreground notification to be visible.
+     */
+    private void requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+            }
+        }
+    }
+
+    /**
      * Show dialog for user to input ClawBench server URL.
      * Called on first launch or when user wants to change server.
      */
@@ -426,39 +403,10 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationManager nm = getSystemService(NotificationManager.class);
-
-            // Unread messages badge channel
-            NotificationChannel unreadChannel = new NotificationChannel(
-                    CHANNEL_ID_UNREAD,
-                    getString(R.string.notification_channel_unread_name),
-                    NotificationManager.IMPORTANCE_HIGH
-            );
-            unreadChannel.setDescription(getString(R.string.notification_channel_unread_desc));
-            unreadChannel.setShowBadge(true);
-            if (nm != null) nm.createNotificationChannel(unreadChannel);
-        }
-    }
-
-    /**
-     * Request POST_NOTIFICATIONS runtime permission on Android 13+ (API 33+).
-     * Without this, all notifications are silently blocked by the system.
-     */
-    private void requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
-            }
-        }
-    }
-
     /**
      * If there are previously saved forwarded ports in SharedPreferences,
      * start the PortForwardService immediately so the SSH tunnel and its
-     * persistent notification are active on cold start.
+     * notification are active on cold start.
      * This avoids the gap where no notification shows until the WebView
      * finishes loading and syncToNative() fires.
      */
@@ -539,170 +487,12 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @Override
-        public void onPageFinished(WebView view, String url) {
-            super.onPageFinished(view, url);
-            injectChatStateMonitor();
-        }
-
-        @Override
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
             super.onReceivedError(view, request, error);
             if (request.isForMainFrame()) {
                 Toast.makeText(MainActivity.this, R.string.error_connection_failed, Toast.LENGTH_SHORT).show();
             }
         }
-    }
-
-    // --- JavaScript Injection ---
-
-    /**
-     * Inject JavaScript that bridges chat state to native layer.
-     * - Intercepts fetch POST to /api/ai/chat → tells native to start watching
-     * - This is necessary because WebView JS may be suspended when the app
-     *   is in the background, so SSE 'done' events won't fire.
-     *   Native polling ensures the notification is delivered regardless.
-     */
-    private void injectChatStateMonitor() {
-        String js =
-            "(function() {" +
-            "  if (window.__clawbenchMonitorInstalled) return;" +
-            "  window.__clawbenchMonitorInstalled = true;" +
-            "" +
-            "  // Intercept fetch to detect chat messages being sent" +
-            "  var originalFetch = window.fetch;" +
-            "  window.fetch = function() {" +
-            "    var url = arguments[0];" +
-            "    if (typeof url === 'string' && url.indexOf('/api/ai/chat') !== -1 && url.indexOf('/stream') === -1) {" +
-            "      var body = arguments[1] && arguments[1].body;" +
-            "      if (body) {" +
-            "        try {" +
-            "          var obj = JSON.parse(body);" +
-            "          if (obj.agentId && typeof AndroidNative !== 'undefined') {" +
-            "            AndroidNative.onChatStarted();" +
-            "          }" +
-            "        } catch(e) {}" +
-            "      }" +
-            "    }" +
-            "    return originalFetch.apply(this, arguments);" +
-            "  };" +
-            "})();";
-
-        webView.evaluateJavascript(js, null);
-    }
-
-    // --- Native AI session watcher ---
-
-    /**
-     * Background thread that polls the server to detect when an AI session
-     * finishes replying. This is needed because WebView JS is suspended
-     * when the app is in the background, so SSE 'done' events won't fire.
-     */
-    private Thread aiSessionWatcher;
-    private volatile boolean watcherActive = false;
-
-    /**
-     * Called from JS bridge when a chat message is sent.
-     * Starts a background polling loop that checks /api/ai/sessions
-     * every 2s. When all sessions stop running, fires a native notification.
-     */
-    private void startAiSessionWatcher() {
-        if (watcherActive) return;
-        watcherActive = true;
-
-        aiSessionWatcher = new Thread(() -> {
-            Log.i(TAG, "AI session watcher started");
-            int runningCount = 0;
-
-            while (watcherActive && !Thread.currentThread().isInterrupted()) {
-                try {
-                    Thread.sleep(2000);
-                } catch (InterruptedException e) {
-                    break;
-                }
-                if (!watcherActive) break;
-
-                try {
-                    String serverUrl = prefs.getString(KEY_SERVER_URL, "");
-                    if (serverUrl.isEmpty()) continue;
-
-                    java.net.URL url = new java.net.URL(serverUrl + "/api/ai/sessions");
-                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("GET");
-                    conn.setConnectTimeout(3000);
-                    conn.setReadTimeout(3000);
-
-                    // Add auth cookie
-                    String cookies = android.webkit.CookieManager.getInstance().getCookie(serverUrl);
-                    if (cookies != null) {
-                        conn.setRequestProperty("Cookie", cookies);
-                    }
-
-                    int code = conn.getResponseCode();
-                    if (code == 200) {
-                        java.io.BufferedReader reader = new java.io.BufferedReader(
-                                new java.io.InputStreamReader(conn.getInputStream()));
-                        StringBuilder sb = new StringBuilder();
-                        String line;
-                        while ((line = reader.readLine()) != null) sb.append(line);
-                        reader.close();
-
-                        org.json.JSONObject json = new org.json.JSONObject(sb.toString());
-                        org.json.JSONArray sessions = json.optJSONArray("sessions");
-                        int newRunningCount = 0;
-                        if (sessions != null) {
-                            for (int i = 0; i < sessions.length(); i++) {
-                                if (sessions.getJSONObject(i).optBoolean("running", false)) {
-                                    newRunningCount++;
-                                }
-                            }
-                        }
-
-                        // Transition from running → not running = AI finished
-                        if (runningCount > 0 && newRunningCount == 0) {
-                            Log.i(TAG, "AI session watcher: all sessions completed, showing notification");
-                            runOnUiThread(() -> showAiReplyNotification());
-                            break;
-                        }
-                        runningCount = newRunningCount;
-                    }
-                    conn.disconnect();
-                } catch (Exception e) {
-                    Log.w(TAG, "AI session watcher: poll failed", e);
-                }
-            }
-            watcherActive = false;
-            Log.i(TAG, "AI session watcher stopped");
-        }, "AI-SessionWatcher");
-
-        aiSessionWatcher.setDaemon(true);
-        aiSessionWatcher.start();
-    }
-
-    /**
-     * Show the AI reply heads-up notification from the UI thread.
-     */
-    private void showAiReplyNotification() {
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        if (nm == null) return;
-
-        Intent intent = new Intent(this, MainActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        intent.putExtra("open_chat", true);
-        android.app.PendingIntent pendingIntent = android.app.PendingIntent.getActivity(
-                this, 0, intent,
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE
-        );
-
-        android.app.Notification notification = new androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID_UNREAD)
-                .setContentTitle("AI 已回复")
-                .setContentText("点击查看回复内容")
-                .setSmallIcon(R.drawable.ic_notification)
-                .setContentIntent(pendingIntent)
-                .setAutoCancel(true)
-                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
-                .setDefaults(androidx.core.app.NotificationCompat.DEFAULT_ALL)
-                .build();
-        nm.notify(UNREAD_NOTIFICATION_ID, notification);
     }
 
     // --- JavaScript Interface ---
@@ -712,78 +502,6 @@ public class MainActivity extends AppCompatActivity {
 
         public WebAppInterface(MainActivity activity) {
             this.activity = activity;
-        }
-
-        /**
-         * Called from injected JS when a chat message is sent.
-         * Starts a native background thread that polls /api/ai/sessions
-         * to detect when AI finishes replying — works even when
-         * WebView JS is suspended (app in background).
-         */
-        @JavascriptInterface
-        public void onChatStarted() {
-            activity.startAiSessionWatcher();
-        }
-
-        /**
-         * Update unread counts for launcher badge and standalone notification.
-         * Called from frontend polling when session/task unread counts change.
-         * @param chatCount Number of unread chat messages across sessions
-         * @param taskCount Number of unread task executions
-         */
-        @JavascriptInterface
-        public void setUnreadCount(int chatCount, int taskCount) {
-            activity.runOnUiThread(() -> {
-                NotificationManager nm = activity.getSystemService(NotificationManager.class);
-                if (nm == null) return;
-
-                int total = chatCount + taskCount;
-
-                // Cancel if no unread
-                if (total == 0) {
-                    nm.cancel(UNREAD_NOTIFICATION_ID);
-                    return;
-                }
-
-                // Channel created in createNotificationChannel(), but ensure it exists
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    NotificationChannel channel = new NotificationChannel(
-                            CHANNEL_ID_UNREAD,
-                            activity.getString(R.string.notification_channel_unread_name),
-                            NotificationManager.IMPORTANCE_HIGH
-                    );
-                    channel.setDescription(activity.getString(R.string.notification_channel_unread_desc));
-                    channel.setShowBadge(true);
-                    nm.createNotificationChannel(channel);
-                }
-
-                Intent intent = new Intent(activity, MainActivity.class);
-                intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                intent.putExtra("open_chat", true);
-                android.app.PendingIntent pendingIntent = android.app.PendingIntent.getActivity(
-                        activity, 0, intent,
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE
-                );
-
-                StringBuilder text = new StringBuilder();
-                if (chatCount > 0 && taskCount > 0) {
-                    text.append(chatCount).append(" 条新消息, ").append(taskCount).append(" 个任务通知");
-                } else if (chatCount > 0) {
-                    text.append(chatCount).append(" 条新消息");
-                } else {
-                    text.append(taskCount).append(" 个任务通知");
-                }
-
-                android.app.Notification notification = new androidx.core.app.NotificationCompat.Builder(activity, CHANNEL_ID_UNREAD)
-                        .setContentTitle("ClawBench")
-                        .setContentText(text.toString())
-                        .setSmallIcon(R.drawable.ic_notification)
-                        .setContentIntent(pendingIntent)
-                        .setAutoCancel(true)
-                        .setNumber(total)
-                        .build();
-                nm.notify(UNREAD_NOTIFICATION_ID, notification);
-            });
         }
 
         @JavascriptInterface

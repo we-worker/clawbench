@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ClawBench</string>
-    <string name="notification_channel_unread_name">未读消息</string>
-    <string name="notification_channel_unread_desc">聊天和定时任务的未读消息提醒</string>
     <string name="dialog_title">连接服务器</string>
     <string name="dialog_hint">https://your-server:20000</string>
     <string name="dialog_positive">连接</string>
