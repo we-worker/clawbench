@@ -42,13 +42,16 @@
     --color-yellow: #a16207;
     --color-red: #dc2626;
     --color-purple: #7c3aed;
+
+    /* Bold text — slightly more saturated than --text-primary for visual distinction */
+    --text-bold: #0d1117;
 }
 
 [data-theme="dark"] {
     --bg-primary: #0d1117;
     --bg-secondary: #161b22;
     --bg-tertiary: #21262d;
-    --text-primary: #e6edf3;
+    --text-primary: #c9d1d9;
     --text-secondary: #8b949e;
     --text-muted: #6e7681;
     --border-color: #30363d;
@@ -79,4 +82,7 @@
     --color-yellow: #e3b341;
     --color-red: #f85149;
     --color-purple: #a371f7;
+
+    /* Bold text — pure white stands out against dimmed --text-primary */
+    --text-bold: #e6edf3;
 }

@@ -3,15 +3,23 @@
    Shared by: .markdown-body (file preview), .chat-message.assistant and .chat-message.user (chat)
    ========================================================================== */
 
-/* Strong / Bold */
+/* Strong / Bold — font-weight + text-shadow for cross-device consistency
+ * -webkit-text-stroke is unreliable in Android WebView.
+ * text-shadow is universally supported and creates a visible glow/thicken effect. */
 .markdown-body strong,
 .markdown-body b,
 .chat-message.assistant strong,
-.chat-message.assistant b,
+.chat-message.assistant b {
+    font-weight: bold;
+    text-shadow: 0 0 1px currentColor;
+    color: var(--text-bold);
+}
+
 .chat-message.user strong,
 .chat-message.user b {
     font-weight: bold;
-    -webkit-text-stroke: 0.3px currentColor;
+    text-shadow: 0 0 0.8px currentColor;
+    color: #ffffff;
 }
 
 /* Links */
