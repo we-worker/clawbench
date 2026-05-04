@@ -308,6 +308,7 @@ export default {
       folderCreated: '文件夹已创建',
       switchProjectFailed: '切换项目失败: {error}',
       switchProjectFailedShort: '切换项目失败',
+      dirLoadFailed: '目录不存在或无法访问',
     },
     prompt: {
       fileName: '输入文件名：',

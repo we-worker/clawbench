@@ -3,6 +3,7 @@ import { reactive } from 'vue'
 import { apiGet, apiPost } from '@/utils/api.ts'
 import { baseName, dirName } from '@/utils/helpers.ts'
 import { gt } from '@/composables/useLocale'
+import { useToast } from '@/composables/useToast'
 
 interface DirEntry {
     name: string
@@ -157,6 +158,9 @@ async function setProject(path: string): Promise<void> {
 // =============================================
 
 async function loadFiles(dir = ''): Promise<void> {
+    const prevDir = state.currentDir
+    const prevEntries = state.dirEntries.slice()
+    const prevAllItems = state.allItems.slice()
     state.dirLoading = true
     try {
         const url = dir ? `/api/dir?path=${encodeURIComponent(dir)}` : '/api/dir?path='
@@ -165,7 +169,11 @@ async function loadFiles(dir = ''): Promise<void> {
         state.dirEntries = data.items || []
         state.allItems = state.dirEntries.slice()
     } catch (err) {
-        console.error('Failed to load directory:', err)
+        // Roll back to previous state on failure
+        state.currentDir = prevDir
+        state.dirEntries = prevEntries
+        state.allItems = prevAllItems
+        useToast().show(gt('file.toast.dirLoadFailed'), { type: 'error', icon: '⚠️' })
     } finally {
         state.dirLoading = false
     }
@@ -310,18 +318,15 @@ async function renameFile(path: string, newName: string): Promise<void> {
 // =============================================
 
 async function navigateToDir(dirPath: string): Promise<void> {
-    state.currentDir = dirPath
     await loadFiles(dirPath)
 }
 
 async function navigateUp(): Promise<void> {
     if (!state.currentDir) return
-    state.currentDir = dirName(state.currentDir)
-    await loadFiles(state.currentDir)
+    await loadFiles(dirName(state.currentDir))
 }
 
 async function navigateToRoot(): Promise<void> {
-    state.currentDir = ''
     await loadFiles('')
 }
 

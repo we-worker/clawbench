@@ -308,6 +308,7 @@ export default {
       folderCreated: 'Folder created',
       switchProjectFailed: 'Switch project failed: {error}',
       switchProjectFailedShort: 'Switch project failed',
+      dirLoadFailed: 'Directory not found or inaccessible',
     },
     prompt: {
       fileName: 'Enter file name:',
