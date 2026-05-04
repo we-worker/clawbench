@@ -220,7 +220,7 @@ onUnmounted(() => {
     font-weight: 500;
     max-width: 220px;
     transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
-    line-height: 1;
+    line-height: 1.4;
 }
 
 .project-switch-btn:hover {
@@ -374,7 +374,7 @@ onUnmounted(() => {
     margin-left: auto;
     font-size: 12px;
     font-weight: 600;
-    line-height: 1;
+    line-height: 1.4;
 }
 
 .locale-toggle:hover {
