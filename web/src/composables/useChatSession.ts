@@ -391,6 +391,7 @@ export function useChatSession(options: UseChatSessionOptions) {
           if (taskResp.ok) {
             const taskData = await taskResp.json()
             store.state.taskUnread = !!taskData.hasUnread
+            store.state.tasks = taskData.tasks || []
             totalTaskUnread = (taskData.tasks || []).reduce((sum: number, t: any) => sum + (t.unreadCount || 0), 0)
           }
         } catch (_) {}

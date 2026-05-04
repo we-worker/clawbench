@@ -64,7 +64,7 @@
 
 <script setup>
 import { Clock, Plus, Pencil, Pause, Play, Trash2 } from 'lucide-vue-next'
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BottomSheet from '@/components/common/BottomSheet.vue'
 import TaskFormDialog from '@/components/task/TaskFormDialog.vue'
@@ -82,7 +82,7 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 
 const bottomSheetRef = ref(null)
-const tasks = ref([])
+const tasks = computed(() => store.state.tasks)
 const loading = ref(false)
 const formDialogOpen = ref(false)
 const formMode = ref('create')
@@ -97,7 +97,7 @@ async function loadTasks() {
   try {
     const resp = await fetch('/api/tasks')
     const data = await resp.json()
-    tasks.value = data.tasks || []
+    store.state.tasks = data.tasks || []
   } catch (err) {
     console.error('Failed to load tasks:', err)
   } finally {

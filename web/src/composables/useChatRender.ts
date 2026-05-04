@@ -21,6 +21,30 @@ export function useChatRender(options) {
     updateRenderedContents(true)
   })
 
+  // Sync blockProposals with latest task data from store (global polling updates store.state.tasks)
+  watch(() => store.state.tasks, (tasks) => {
+    if (!tasks || tasks.length === 0) return
+    for (const key of Object.keys(blockProposals)) {
+      const proposal = blockProposals[key].proposal
+      if (proposal.task_id) {
+        const task = tasks.find(t => t.id === proposal.task_id)
+        if (task) {
+          blockProposals[key] = {
+            proposal: {
+              ...proposal,
+              name: task.name,
+              cron_expr: task.cronExpr,
+              agent_id: task.agentId,
+              repeat_mode: task.repeatMode,
+              max_runs: task.maxRuns,
+              prompt: task.prompt,
+            }
+          }
+        }
+      }
+    }
+  }, { deep: true })
+
   function renderMarkdown(text) {
     let html = marked.parse((text || '').trim())
     html = renderKatexInString(html)

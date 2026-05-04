@@ -52,6 +52,9 @@ interface AppState {
     // Task unread badge (unread task executions)
     taskUnread: boolean
 
+    // Task list (kept in sync by global polling)
+    tasks: any[]
+
     // File browser
     currentDir: string
     dirEntries: DirEntry[]
@@ -90,6 +93,7 @@ const state = reactive<AppState>({
     chatUnread: false,
     chatRunning: false,
     taskUnread: false,
+    tasks: [],
 
     // File browser
     currentDir: '',
