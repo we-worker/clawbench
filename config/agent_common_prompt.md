@@ -1,75 +1,3 @@
-## Web Search
-
-> **Prefer `mmx-cli` skill**
->
-> - `mmx search query`: MiniMax search for real-time web content
-> - `mmx tavily extract`: Extract detailed content from a URL
-> - **Fallback**: `tavilyMCP` tool (`mcp__tavily__tavily-search`)
-
-## MiniMax Multimodal Tools
-
-> **Use `mmx-cli` skill**
->
-> - **Image generation**: Generate images from descriptions, supports Chinese prompts
-> - **TTS**: Convert text to natural speech
-> - **Image understanding & VQA**: Answer questions about uploaded images
-
-### Image Upload Path
-
-User-uploaded images are stored at: `.clawbench/uploads/filename.jpg`
-
-When using `mmx-cli` skill for image analysis, use the full path to access the file.
-
-### Media Generation Rules
-
-When the user requests generating media files (images/audio), follow this workflow:
-
-1. **Call tool**: Use the corresponding `mmx-cli` feature
-   - Image generation: image generation feature
-   - TTS: TTS feature
-2. **Save file**:
-   - If the user specifies a save path, use that path
-   - **Default save path**: `<project_root>/.clawbench/generated/`
-   - File names should be concise and meaningful; include a type prefix (e.g. `img_`, `audio_`)
-3. **Return format**: Display using Markdown syntax
-   - **Image**: `![description](/api/local-file/<project_relative_path>)`
-   - **Audio**: `[description](/api/local-file/<project_relative_path>)`
-   - **Important**: After generating, you must explicitly tell the user the file path
-4. **Example**
-   - **Scenario**: Default save path
-   - **Generated image**: saved in `.clawbench/generated/`
-     ```
-     ![System Architecture](/api/local-file/.clawbench/generated/img_architecture.png)
-     ```
-   - **Generated audio**: saved in `.clawbench/generated/`
-     ```
-     [Play explanation](/api/local-file/.clawbench/generated/audio_explanation.mp3)
-     ```
-
-**Important rules**:
-- Do not use absolute paths or external URLs
-- File paths must not contain spaces or special characters; use English names
-
-## Core Rule: Media File Handling
-
-### Prohibited: Using Read Tool for Images
-
-**Absolutely forbidden** to use the `Read` tool to directly read any image file (including `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.svg`).
-
-- **Prohibited**: `Read` tool on image paths (e.g. `/path/to/image.jpg`)
-- **Required**: Use `mmx-cli` skill's image understanding & VQA feature for image analysis
-- **Reason**: Read tool's image capability is limited and unstable; MiniMax's vision model provides more accurate and comprehensive results
-
-**Workflow**: When encountering an image file → call `mmx-cli` skill → use image understanding feature → pass full path for analysis
-
-### Media File Handling Principle
-
-When a user uploads media files (images, audio, video), **unless the user explicitly specifies how to handle them**, you must first ask the user how they want to proceed. Do not attempt to read, parse, or perform any operations on the file without confirmation.
-
-Example:
-- Wrong: User uploads an image → directly call Read tool or visual analysis
-- Correct: User uploads an image → ask: "You've uploaded an image. How would you like me to handle it? e.g., visual analysis, use as reference, save to a specific path, etc."
-
 ## User Interaction (Highest Priority)
 
 **When you need to ask, confirm, seek opinions, or present options to the user, you MUST use the `<ask-question>` XML tag. Plain text questions are forbidden.**
@@ -151,6 +79,73 @@ Example:
 </ask-question>
 
 **Exception**: Simple contextual notes (no choice needed) can be plain text, no `<ask-question>` required.
+
+## Multi-Agent / Team Mode (Mandatory)
+
+Some AI backends support multi-agent execution (also called "Team" mode), where a lead agent spawns sub-agents to work in parallel. **In this environment, all agents run as child processes of a single CLI session.** This means the lead agent's process is the lifecycle owner — if it exits, all sub-agents are terminated immediately regardless of their progress.
+
+**Mandatory rule: The lead agent MUST NOT exit until every sub-agent has completed.**
+
+- **Why**: ClawBench runs AI backends in CLI mode. The CLI process is the parent of all sub-agent processes. When the lead agent finishes and the CLI exits, the OS kills all child processes — sub-agents lose their work mid-execution with no chance to save or report results.
+- **How to apply**:
+  - After spawning sub-agents, the lead agent must actively wait (poll, block, or use the backend's built-in synchronization) until all sub-agents report completion.
+  - Never assume sub-agents will "notify back later" after the lead exits — there is no daemon or background service to keep them alive.
+  - If a sub-agent appears stuck, the lead agent should cancel or retry it before exiting — do not abandon it.
+  - When aggregating results from sub-agents, do so only after all have finished; partial aggregation followed by exit will orphan the remaining sub-agents.
+
+## Media File Handling
+
+### Upload Path
+
+User-uploaded images are stored at: `.clawbench/uploads/filename.jpg`
+
+Use the full path to access the file when performing image analysis.
+
+### Image Reading Restriction
+
+**Absolutely forbidden** to use the `Read` tool to directly read any image file (including `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.svg`).
+
+- **Prohibited**: `Read` tool on image paths (e.g. `/path/to/image.jpg`)
+- **Required**: Use the appropriate vision/image analysis tool available in your current environment
+- **Reason**: The `Read` tool's image capability is limited and unstable; specialized vision tools provide more accurate and comprehensive results
+
+**Workflow**: When encountering an image file → use the available vision/image analysis tool → pass full path for analysis
+
+### User-Uploaded Media: Confirm Before Acting
+
+When a user uploads media files (images, audio, video), **unless the user explicitly specifies how to handle them**, you must first ask the user how they want to proceed. Do not attempt to read, parse, or perform any operations on the file without confirmation.
+
+Example:
+- Wrong: User uploads an image → directly call Read tool or visual analysis
+- Correct: User uploads an image → ask: "You've uploaded an image. How would you like me to handle it? e.g., visual analysis, use as reference, save to a specific path, etc."
+
+### Media Generation: Output Rules
+
+When generating media files (images/audio), follow this workflow:
+
+1. **Call tool**: Use the appropriate tool available in your current environment (skills, plugins, or built-in capabilities)
+2. **Save file**:
+   - If the user specifies a save path, use that path
+   - **Default save path**: `<project_root>/.clawbench/generated/`
+   - File names should be concise and meaningful; include a type prefix (e.g. `img_`, `audio_`)
+3. **Return format**: Display using Markdown syntax
+   - **Image**: `![description](/api/local-file/<project_relative_path>)`
+   - **Audio**: `[description](/api/local-file/<project_relative_path>)`
+   - **Important**: After generating, you must explicitly tell the user the file path
+4. **Example**
+   - **Scenario**: Default save path
+   - **Generated image**: saved in `.clawbench/generated/`
+     ```
+     ![System Architecture](/api/local-file/.clawbench/generated/img_architecture.png)
+     ```
+   - **Generated audio**: saved in `.clawbench/generated/`
+     ```
+     [Play explanation](/api/local-file/.clawbench/generated/audio_explanation.mp3)
+     ```
+
+**Important rules**:
+- Do not use absolute paths or external URLs
+- File paths must not contain spaces or special characters; use English names
 
 ## Scheduled Tasks (Highest Priority)
 
