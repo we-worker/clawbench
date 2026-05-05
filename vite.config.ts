@@ -75,6 +75,8 @@ export default defineConfig({
       '/login': `http://localhost:${backendPort}`,
       '/dialog': `http://localhost:${backendPort}`,
       '/assets': `http://localhost:${backendPort}`,
+      '/sw.js': `http://localhost:${backendPort}`,
+      '/manifest.json': `http://localhost:${backendPort}`,
     },
   },
   build: {
