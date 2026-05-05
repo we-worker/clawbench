@@ -206,20 +206,10 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 	allFilePaths := req.FilePaths
 
 	basePath, _ := filepath.Abs(projectPath)
-	var fileDir string
-	if len(allFilePaths) > 0 {
-		firstAbsPath, ok := validateAndResolvePath(w, basePath, allFilePaths[0])
-		if !ok {
-			return
-		}
-		if _, err := os.Stat(firstAbsPath); err != nil {
-			model.WriteError(w, model.NotFound(nil, "File not found"))
-			return
-		}
-		fileDir = filepath.Dir(firstAbsPath)
-	} else {
-		fileDir = basePath
-	}
+	// Always use project root as workDir for CLI backends. Using filepath.Dir(attachment)
+	// breaks --resume because Claude/Codebuddy CLI looks up session files by cwd — a different
+	// cwd means it can't find the existing session, producing "No conversation found" errors.
+	fileDir := basePath
 
 	// Validate all attached file paths are within project
 	validatedFilePaths := make([]string, 0, len(allFilePaths))
