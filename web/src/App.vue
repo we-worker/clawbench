@@ -52,6 +52,7 @@
             @toggle-toc="openDrawer('toc')"
             @toggle-search="currentFile?.content && openDrawer('search')"
             @toggle-view="markdownViewMode = markdownViewMode === 'rendered' ? 'raw' : 'rendered'"
+            @refresh="handleRefresh"
           />
         </div>
       </main>
@@ -141,7 +142,7 @@
 
       <!-- Bottom dock -->
       <div v-if="isAuthenticated" class="bottom-dock-wrapper">
-        <div class="bottom-dock">
+        <div class="bottom-dock" @click="closeAllDrawers">
           <button
             class="dock-nav-btn"
             :class="{ disabled: !canGoBack }"
@@ -163,9 +164,6 @@
             </button>
             <button class="dock-btn" :class="{ active: proxyOpen }" @click.stop="openDrawer('proxy')" :title="t('nav.portForward')">
               <EthernetPort />
-            </button>
-            <button class="dock-btn" @click.stop="handleRefresh" :title="t('nav.refresh')">
-              <RotateCw />
             </button>
           </div>
 
@@ -190,7 +188,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, provide, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, ChevronRight, MessageSquare, Folder, GitBranch, EthernetPort, RotateCw } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, MessageSquare, Folder, GitBranch, EthernetPort } from 'lucide-vue-next'
 import AppHeader from './components/common/AppHeader.vue'
 import FileManager from './components/file/FileManager.vue'
 import WelcomeView from './components/WelcomeView.vue'
@@ -329,6 +327,13 @@ function ensureDrawerOpen(name) {
   })
   // 打开目标抽屉
   drawerStates[name].value = true
+}
+
+// 关闭所有抽屉
+function closeAllDrawers() {
+  Object.values(drawerStates).forEach((ref) => {
+    if (ref.value) ref.value = false
+  })
 }
 
 function toggleHistoryDrawer() {

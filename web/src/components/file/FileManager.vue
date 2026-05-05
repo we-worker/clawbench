@@ -36,7 +36,16 @@
         <button class="toolbar-btn" :disabled="!currentFile?.path" @click="syncToCurrentFile" :title="t('file.syncToCurrentDir')">
           <ArrowRightLeft :size="14" />
         </button>
-        <SearchInput v-model="searchQuery" :placeholder="t('search.defaultPlaceholder')" @dblclick="searchQuery = ''" />
+        <button class="toolbar-btn" @click="$emit('refresh')" :title="t('nav.refresh')">
+          <RotateCw :size="14" />
+        </button>
+        <!-- Expandable search -->
+        <button v-if="!searchExpanded" class="toolbar-btn" @click="expandSearch" :title="t('search.defaultPlaceholder')">
+          <Search :size="14" />
+        </button>
+        <div v-else class="search-expanded">
+          <SearchInput ref="searchInputRef" v-model="searchQuery" :placeholder="t('search.defaultPlaceholder')" @blur="onSearchBlur" @dblclick="searchQuery = ''" />
+        </div>
       </div>
       <DirBreadcrumb :path="currentDir" @navigate="$emit('navigateDir', $event)" />
     </div>
@@ -146,7 +155,7 @@
 <script setup>
 import { ref, computed, reactive, inject, nextTick, Teleport, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Folder, ArrowDownAz, ArrowUpDown, ChevronDown, ChevronUp, Clock, FileText, Eye, EyeOff, ArrowRightLeft, Loader, FileImage, FileMusic, ChevronRight, Copy, Scissors, ClipboardPaste, FilePlus, FolderPlus, Pencil, Download, Trash2, FolderOpen } from 'lucide-vue-next'
+import { Folder, ArrowDownAz, ArrowUpDown, ChevronDown, ChevronUp, Clock, FileText, Eye, EyeOff, ArrowRightLeft, Loader, FileImage, FileMusic, ChevronRight, Copy, Scissors, ClipboardPaste, FilePlus, FolderPlus, Pencil, Download, Trash2, FolderOpen, RotateCw, Search } from 'lucide-vue-next'
 import BottomSheet from '@/components/common/BottomSheet.vue'
 import HeaderMarquee from '@/components/common/HeaderMarquee.vue'
 import { getFileType } from '@/utils/fileType.ts'
@@ -196,6 +205,24 @@ function copyProjectPath() {
 }
 
 const searchQuery = ref('')
+const searchExpanded = ref(false)
+const searchInputRef = ref(null)
+
+function expandSearch() {
+    searchExpanded.value = true
+    nextTick(() => {
+        searchInputRef.value?.focus()
+    })
+}
+
+function onSearchBlur() {
+    // Delay to allow clear button click to register
+    setTimeout(() => {
+        if (!searchQuery.value) {
+            searchExpanded.value = false
+        }
+    }, 150)
+}
 
 // Sync button: navigate to the directory of the currently opened file
 const isInSync = computed(() => {
@@ -216,6 +243,7 @@ function syncToCurrentFile() {
 // Clear search when directory changes
 watch(() => props.currentDir, () => {
     searchQuery.value = ''
+    searchExpanded.value = false
 })
 
 const ctxMenu = reactive({ visible: false, x: 0, y: 0, entry: null })
@@ -550,8 +578,18 @@ function doDelete() {
 .dir-toolbar :deep(.search-pill) {
     flex: 1;
     min-width: 0;
-    max-width: 180px;
-    margin-left: auto;
+}
+
+.search-expanded {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+}
+
+.search-expanded :deep(.search-pill) {
+    width: 100%;
+    max-width: none;
 }
 
 .dir-nav :deep(.dir-breadcrumb) {

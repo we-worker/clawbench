@@ -16,6 +16,7 @@
       @toggle-search="emit('toggleSearch')"
       @open-as-text="handleOpenAsText"
       @toggle-word-wrap="toggleWordWrap"
+      @refresh="emit('refresh')"
     />
 
     <div class="file-viewer-content" ref="contentRef">
@@ -128,7 +129,7 @@ const props = defineProps({
     searchOpen: Boolean,
     markdownViewMode: String,
 })
-const emit = defineEmits(['delete', 'showDetails', 'openGitHistory', 'toggleToc', 'toggleSearch', 'toggleView'])
+const emit = defineEmits(['delete', 'showDetails', 'openGitHistory', 'toggleToc', 'toggleSearch', 'toggleView', 'refresh'])
 
 const fileType = computed(() => props.file ? getFileType(props.file.name) : null)
 const rawFileLanguage = computed(() => getFileType(props.file?.name)?.lang || 'plaintext')

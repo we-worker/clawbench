@@ -15,6 +15,11 @@
         <Search :size="13" />
       </button>
 
+      <!-- Refresh button -->
+      <button class="file-header-btn" @click.stop="$emit('refresh')" :title="t('nav.refresh')">
+        <RotateCw :size="13" />
+      </button>
+
       <!-- More actions dropdown -->
       <div class="dropdown-wrapper" ref="dropdownRef">
         <button class="file-header-btn" @click.stop="menuOpen = !menuOpen" :title="t('file.header.more')">
@@ -59,7 +64,7 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { List, Search, MoreVertical, Code2, Download, Trash2, GitBranch, TextWrap } from 'lucide-vue-next'
+import { List, Search, MoreVertical, Code2, Download, Trash2, GitBranch, TextWrap, RotateCw } from 'lucide-vue-next'
 import { getFileType } from '@/utils/fileType.ts'
 import { useAppMode } from '@/composables/useAppMode.ts'
 
@@ -70,7 +75,7 @@ const props = defineProps({
     searchOpen: Boolean,
     wordWrap: Boolean,
 })
-const emit = defineEmits(['delete', 'toggleView', 'showDetails', 'openGitHistory', 'toggleToc', 'toggleSearch', 'openAsText', 'toggleWordWrap'])
+const emit = defineEmits(['delete', 'toggleView', 'showDetails', 'openGitHistory', 'toggleToc', 'toggleSearch', 'openAsText', 'toggleWordWrap', 'refresh'])
 
 const { isAppMode } = useAppMode()
 const { t } = useI18n()

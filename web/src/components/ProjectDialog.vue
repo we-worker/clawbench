@@ -14,7 +14,16 @@
           <EyeOff v-if="!showHidden" :size="14" />
           <Eye v-else :size="14" />
         </button>
-        <SearchInput v-model="searchQuery" :placeholder="t('projectDialog.search')" />
+        <button class="toolbar-btn" @click="loadBrowse" :title="t('nav.refresh')">
+          <RotateCw :size="14" />
+        </button>
+        <!-- Expandable search -->
+        <button v-if="!searchExpanded" class="toolbar-btn" @click="expandSearch" :title="t('projectDialog.search')">
+          <Search :size="14" />
+        </button>
+        <div v-else class="search-expanded">
+          <SearchInput ref="searchInputRef" v-model="searchQuery" :placeholder="t('projectDialog.search')" @blur="onSearchBlur" />
+        </div>
       </div>
       <DirBreadcrumb :path="browsePath === '/' ? '' : browsePath" @navigate="onBreadcrumbNavigate" />
     </div>
@@ -52,8 +61,8 @@
 </template>
 
 <script setup>
-import { Projector, FolderPlus, Eye, EyeOff, Pencil, Trash2 } from 'lucide-vue-next'
-import { ref, computed, watch, inject } from 'vue'
+import { Projector, FolderPlus, Eye, EyeOff, Pencil, Trash2, RotateCw, Search } from 'lucide-vue-next'
+import { ref, computed, watch, inject, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ModalDialog from './common/ModalDialog.vue'
 import SearchInput from './common/SearchInput.vue'
@@ -71,7 +80,24 @@ const toast = inject('toast', null)
 const loading = ref(false)
 const selectedPath = ref('')
 const searchQuery = ref('')
+const searchExpanded = ref(false)
+const searchInputRef = ref(null)
 const showHidden = ref(false)
+
+function expandSearch() {
+    searchExpanded.value = true
+    nextTick(() => {
+        searchInputRef.value?.focus()
+    })
+}
+
+function onSearchBlur() {
+    setTimeout(() => {
+        if (!searchQuery.value) {
+            searchExpanded.value = false
+        }
+    }, 150)
+}
 
 // Browse state
 const browsePath = ref('/')
@@ -233,8 +259,20 @@ async function confirm() {
 }
 
 .dialog-toolbar-row :deep(.search-pill) {
-  flex: 1;
-  min-width: 0;
+    flex: 1;
+    min-width: 0;
+}
+
+.search-expanded {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+}
+
+.search-expanded :deep(.search-pill) {
+    width: 100%;
+    max-width: none;
 }
 
 .dialog-nav :deep(.dir-breadcrumb) {
