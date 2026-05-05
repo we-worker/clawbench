@@ -3,19 +3,7 @@
 
     <!-- Collapsible content wrapper -->
     <div ref="wrapperRef" class="msg-content-wrapper" :class="{ collapsed }" :style="collapsed ? { maxHeight: store.state.chatCollapsedHeight + 'px' } : {}">
-      <div v-if="msg.role === 'user' && msg.files && msg.files.length > 0 && !hasImagesInContent(msg.content)" class="chat-files">
-        <template v-for="(f, idx) in msg.files" :key="idx">
-          <span v-if="isUploadPath(normalizeFileEntry(f).path)" class="chat-file-attachment attachment-upload" @click="$emit('file-tag-click', normalizeFileEntry(f).path)" :title="t('chat.attach.openFile')">
-            <FileImage v-if="isImageFile(normalizeFileEntry(f).path)" :size="12" :stroke-width="1.5" />
-            <FileText v-else :size="12" :stroke-width="1.5" />
-            <span class="chat-file-name">{{ getFileName(normalizeFileEntry(f).path) }}</span>
-          </span>
-          <span v-else class="chat-file-attachment attachment-ref" @click="$emit('file-tag-click', normalizeFileEntry(f).path)" :title="t('chat.attach.openFile')">
-            <Paperclip :size="12" :stroke-width="1.5" />
-            <span class="chat-file-name">{{ getFileName(normalizeFileEntry(f).path) }}</span>
-          </span>
-        </template>
-      </div>
+      <FileAttachmentList v-if="msg.role === 'user' && msg.files && msg.files.length > 0 && !hasImagesInContent(msg.content)" :files="msg.files" @file-tag-click="$emit('file-tag-click', $event)" />
 
       <!-- Message content — unified ContentBlocks rendering for both user and assistant -->
       <ContentBlocks
@@ -104,11 +92,11 @@
 <script setup>
 import { ref, inject, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FileImage, FileText, Paperclip, ChevronDown, ChevronUp, Clock, Pause, Volume2, Info } from 'lucide-vue-next'
-import { baseName } from '@/utils/path.ts'
+import { ChevronDown, ChevronUp, Clock, Pause, Volume2, Info } from 'lucide-vue-next'
 import { formatDuration } from '@/utils/format.ts'
 import { store } from '@/stores/app.ts'
 import ContentBlocks from './ContentBlocks.vue'
+import FileAttachmentList from './FileAttachmentList.vue'
 
 
 const { t } = useI18n()
@@ -222,26 +210,6 @@ const chatSession = inject('chatSession', {})
 
 const { renderTextBlock, formatMessageTime, toolCallSummary, formatToolInput, humanizeCron, repeatLabel, truncate, hasImagesInContent } = chatRender
 const { getAgentIcon, getAgentName } = chatSession
-
-function normalizeFileEntry(f) {
-  if (typeof f === 'string') return { path: f }
-  return { path: f.path || '' }
-}
-
-function isUploadPath(path) {
-  return path.startsWith('.clawbench/uploads/') || path.startsWith('.clawbench\\uploads\\')
-}
-
-function isImageFile(path) {
-  if (!path) return false
-  const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico', '.tiff', '.tif', '.avif']
-  const lower = path.toLowerCase()
-  return imageExts.some(ext => lower.endsWith(ext))
-}
-
-function getFileName(path) {
-  return baseName(path)
-}
 </script>
 
 <style scoped>

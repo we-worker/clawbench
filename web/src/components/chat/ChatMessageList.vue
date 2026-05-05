@@ -64,6 +64,7 @@
         :msg="msg"
         :index="i"
         @remove="$emit('remove-pending', $event)"
+        @file-tag-click="$emit('file-tag-click', $event)"
       />
     </div>
   </div>
