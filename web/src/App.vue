@@ -213,6 +213,7 @@ import { useSessionIdentity } from './composables/useSessionIdentity.ts'
 import { useToast } from './composables/useToast.ts'
 import { useAppMode } from './composables/useAppMode.ts'
 import { usePortForward, setOpenPortBrowser } from './composables/usePortForward.ts'
+import { useFileWatch } from './composables/useFileWatch.ts'
 import { store } from './stores/app.ts'
 import { initMermaid, reRenderMermaid } from './utils/mermaid.ts'
 import { getFileType } from './utils/fileType.ts'
@@ -256,10 +257,19 @@ const showHidden = ref(JSON.parse(localStorage.getItem('clawbenchShowHidden') ||
 const sortField = ref(null)
 const sortDir = ref('asc')
 
+// File watch auto-refresh (fsnotify + SSE)
+useFileWatch({
+  fileManagerOpen,
+  currentDir: computed(() => store.state.currentDir),
+  currentFile: computed(() => store.state.currentFile),
+})
+
 // App mode & port forwarding
 const { isAppMode } = useAppMode()
 const { syncToNative } = usePortForward()
 const proxyOpen = ref(false)
+
+// File watch auto-refresh (fsnotify + SSE)
 
 // Quote question feature
 const quoteQuestion = useQuoteQuestion()
@@ -431,13 +441,11 @@ async function handleDelete(path) {
 }
 
 function handleChatMessage() {
-    handleRefresh()
+    // File refresh is handled by fsnotify auto-refresh (useFileWatch)
     if (!chatOpen.value) store.state.chatUnread = true
 }
 
 async function handleRefresh() {
-    sortField.value = null
-    sortDir.value = 'asc'
     await store.loadFiles(currentDir.value)
     if (currentFile.value) {
         await store.selectFile(currentFile.value.path)
@@ -478,8 +486,77 @@ function handleOpenFileManager() {
     openDrawer('fileManager')
 }
 
+// Quote-question flying-dot animation: light dot flies from QuoteBar send btn → dock Chat btn
+// Coordinates are captured BEFORE the bar collapses and passed via event.detail.
+function playQuoteEmitAnimation(e) {
+  const { from, to } = e?.detail ?? {}
+  if (!from || !to) return
+
+  const x0 = from.x
+  const y0 = from.y
+  const x1 = to.x
+  const y1 = to.y
+
+  // Mid-point with slight upward arc (parabola peak offset)
+  const mx = (x0 + x1) / 2
+  const my = Math.min(y0, y1) - 30 // arc 30px above the higher point
+
+  // Create flying dot
+  const dot = document.createElement('div')
+  dot.className = 'quote-emit-dot'
+  dot.style.cssText = `
+    position: fixed;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent-color, #0066cc);
+    box-shadow: 0 0 10px 3px color-mix(in srgb, var(--accent-color, #0066cc) 50%, transparent);
+    z-index: 9999;
+    pointer-events: none;
+    left: 0; top: 0;
+    will-change: transform, opacity;
+  `
+  document.body.appendChild(dot)
+
+  const duration = 420
+  const start = performance.now()
+
+  function animate(now) {
+    const t = Math.min((now - start) / duration, 1)
+    // Ease-out cubic
+    const ease = 1 - Math.pow(1 - t, 3)
+
+    // Quadratic Bezier: P0=(x0,y0), P1=(mx,my), P2=(x1,y1)
+    const x = (1 - ease) * (1 - ease) * x0 + 2 * (1 - ease) * ease * mx + ease * ease * x1
+    const y = (1 - ease) * (1 - ease) * y0 + 2 * (1 - ease) * ease * my + ease * ease * y1
+
+    // Scale: small→full→shrink at end; opacity: fade in briefly, fade out at tail
+    const scale = t < 0.1 ? t / 0.1 : t > 0.85 ? 1 - (t - 0.85) / 0.15 : 1
+    const opacity = t < 0.08 ? t / 0.08 : t > 0.7 ? 1 - (t - 0.7) / 0.3 : 1
+
+    dot.style.transform = `translate(${x - 4}px, ${y - 4}px) scale(${scale})`
+    dot.style.opacity = opacity
+
+    if (t < 1) {
+      requestAnimationFrame(animate)
+    } else {
+      dot.remove()
+      // Trigger receive pulse on Chat dock button
+      const chatDockBtn = document.querySelector('.dock-center')?.querySelector('.dock-btn')
+      if (chatDockBtn) {
+        chatDockBtn.classList.add('quote-emit-receive')
+        chatDockBtn.addEventListener('animationend', () => {
+          chatDockBtn.classList.remove('quote-emit-receive')
+        }, { once: true })
+      }
+    }
+  }
+
+  requestAnimationFrame(animate)
+}
+
 onMounted(async () => {
     window.addEventListener('open-file-manager', handleOpenFileManager)
+    window.addEventListener('quote-sent', playQuoteEmitAnimation)
     applyTheme(theme.value)
     let resp
     try {
@@ -591,6 +668,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
     window.removeEventListener('open-file-manager', handleOpenFileManager)
+    window.removeEventListener('quote-sent', playQuoteEmitAnimation)
 })
 </script>
 
@@ -744,5 +822,25 @@ onUnmounted(() => {
 
 @keyframes dock-spin-light {
     to { transform: rotate(360deg); }
+}
+
+/* Quote-emit receive pulse — light burst when flying dot arrives at Chat dock button */
+.dock-btn.quote-emit-receive {
+    animation: quote-emit-pulse 0.4s ease-out;
+}
+
+@keyframes quote-emit-pulse {
+    0% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-color, #0066cc) 60%, transparent);
+    }
+    40% {
+        transform: scale(1.25);
+        box-shadow: 0 0 14px 4px color-mix(in srgb, var(--accent-color, #0066cc) 40%, transparent);
+    }
+    100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-color, #0066cc) 0%, transparent);
+    }
 }
 </style>

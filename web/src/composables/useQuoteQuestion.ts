@@ -170,11 +170,28 @@ export function useQuoteQuestion() {
     // the [当前文件: ...] prompt prefix and sets the CLI work_dir.
     const filePaths = q.filePath ? [q.filePath] : []
 
+    // Capture animation coordinates BEFORE any await — the bar's handleSend()
+    // sets expanded=false synchronously right after emit('send'), so the
+    // .qq-send-btn element will be removed from DOM on the next tick.
+    const sendBtn = document.querySelector('.qq-send-btn')
+    const dockChatBtn = document.querySelector('.dock-center')?.querySelector('.dock-btn')
+    const animFrom = sendBtn?.getBoundingClientRect() ?? null
+    const animTo = dockChatBtn?.getBoundingClientRect() ?? null
+
     // Delegate to session identity singleton — it routes to ChatPanel's
     // sendMessage if registered, otherwise falls back to a direct API call.
     try {
       await sessionIdentity.sendMessage(message, filePaths)
       toast.show(gt('quoteBar.sentToSession'), { icon: '✅', type: 'success', duration: 2000 })
+      // Dispatch animation event with pre-captured coordinates
+      if (animFrom && animTo) {
+        window.dispatchEvent(new CustomEvent('quote-sent', {
+          detail: {
+            from: { x: animFrom.left + animFrom.width / 2, y: animFrom.top + animFrom.height / 2 },
+            to: { x: animTo.left + animTo.width / 2, y: animTo.top + animTo.height / 2 },
+          }
+        }))
+      }
     } catch (err) {
       toast.show(gt('quoteBar.sendFailed', { error: (err as Error).message }), { icon: '⚠️', type: 'error' })
     }
