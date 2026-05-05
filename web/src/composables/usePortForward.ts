@@ -49,14 +49,6 @@ const tunnelChecking = ref(false)
 // Auto-refresh interval when tunnel is unhealthy
 let tunnelPollTimer: ReturnType<typeof setInterval> | null = null
 
-// Callback for opening port in the embedded browser (set by App.vue)
-let openPortBrowserFn: ((port: number, protocol?: string) => void) | null = null
-
-/** Register the browser open callback (called once by App.vue) */
-export function setOpenPortBrowser(fn: (port: number, protocol?: string) => void) {
-  openPortBrowserFn = fn
-}
-
 /**
  * Manages port forwarding state: list of forwarded ports, CRUD operations,
  * auto-detection, and registration with Android native layer.
@@ -275,12 +267,30 @@ export function usePortForward() {
     }
   }
 
-  /** Open a forwarded port — in app mode opens system browser, otherwise window.open */
+  /** Open a forwarded port — in app mode opens sandbox browser, otherwise window.open */
   function openPort(targetPort: number, protocol?: string) {
     const scheme = protocol === 'https' ? 'https' : 'http'
-    // In Android app mode, open in system browser via native bridge
-    if (isAppMode.value && (window as any).AndroidNative?.openInBrowser) {
-      ;(window as any).AndroidNative.openInBrowser(targetPort, scheme)
+    if (isAppMode.value) {
+      const native = (window as any).AndroidNative
+      // Prefer sandbox browser (isolated process), fall back to external browser
+      if (native?.openInSandbox) {
+        native.openInSandbox(targetPort, scheme)
+      } else if (native?.openInBrowser) {
+        native.openInBrowser(targetPort, scheme)
+      }
+    } else {
+      window.open(`${scheme}://localhost:${targetPort}`, '_blank')
+    }
+  }
+
+  /** Open a forwarded port in external/system browser */
+  function openInExternalBrowser(targetPort: number, protocol?: string) {
+    const scheme = protocol === 'https' ? 'https' : 'http'
+    if (isAppMode.value) {
+      const native = (window as any).AndroidNative
+      if (native?.openInBrowser) {
+        native.openInBrowser(targetPort, scheme)
+      }
     } else {
       window.open(`${scheme}://localhost:${targetPort}`, '_blank')
     }
@@ -303,5 +313,6 @@ export function usePortForward() {
     loadSSHInfo,
     checkTunnelHealth,
     openPort,
+    openInExternalBrowser,
   }
 }

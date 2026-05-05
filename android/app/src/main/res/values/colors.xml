@@ -20,4 +20,13 @@
     <color name="dialog_divider">#21262d</color>
     <!-- Icon tint for dialog decorative icons -->
     <color name="dialog_icon_tint">#58a6ff</color>
+
+    <!-- Browser sandbox colors -->
+    <color name="browser_background">#0d1117</color>
+    <color name="browser_toolbar_bg">#161b22</color>
+    <color name="browser_url_bg">#0d1117</color>
+    <color name="browser_url_stroke">#30363d</color>
+    <color name="browser_url_text">#e6edf3</color>
+    <color name="browser_url_hint_color">#484f58</color>
+    <color name="browser_icon_tint">#8b949e</color>
 </resources>

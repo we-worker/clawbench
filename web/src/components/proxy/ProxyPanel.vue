@@ -99,6 +99,7 @@
           :active="p.active"
           :tunnel-disconnected="tunnelStatus === 'disconnected'"
           @open="openPort"
+          @open-external="openInExternalBrowser"
           @remove="handleRemove"
         />
       </div>
@@ -197,7 +198,7 @@ const detecting = ref(false)
 const portInputRef = ref(null)
 const tunnelGuideExpanded = ref(false)
 
-const { ports, detectedPorts, loading, isAppMode, sshInfo, tunnelStatus, tunnelMessage, tunnelChecking, registerPort, unregisterPort, detectPorts, checkTunnelHealth, openPort } = usePortForward()
+const { ports, detectedPorts, loading, isAppMode, sshInfo, tunnelStatus, tunnelMessage, tunnelChecking, registerPort, unregisterPort, detectPorts, checkTunnelHealth, openPort, openInExternalBrowser } = usePortForward()
 const toast = useToast()
 
 const sshCopied = ref(false)

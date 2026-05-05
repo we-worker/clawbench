@@ -350,7 +350,7 @@ export default {
     tunnelDisconnectedDetail: 'Port forwarding unavailable, please check network or reload',
     portsNoResponse: 'Forwarded ports not responding',
     tunnelConnectedButNoResponse: 'SSH tunnel connected, but all port services are unresponsive',
-    backgroundTip: 'Allow background running, otherwise the tunnel may be killed when app goes to background',
+    backgroundTip: 'When using external browser, ensure background running permission is granted — otherwise the SSH tunnel will be killed when app goes to background',
     retryCheck: 'Retry',
     noPorts: 'No forwarded ports',
     emptyHint: 'Add a server port to access it directly from browser or other apps',
@@ -378,6 +378,8 @@ export default {
       tunnelDown: 'Tunnel down',
       inactive: 'Offline',
     },
+    openInSandbox: 'Open in sandbox',
+    openInBrowser: 'Open in browser',
     toast: {
       checkFailed: 'Detection failed, please check network',
       tunnelRecovered: 'SSH tunnel recovered',

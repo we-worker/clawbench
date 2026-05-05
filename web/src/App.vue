@@ -59,8 +59,6 @@
 
       <Lightbox />
 
-      <PortForwardBrowser v-if="isAppMode" ref="portForwardBrowserRef" />
-
       <ChatPanel
         :open="chatOpen"
         :current-file="currentFile"
@@ -204,13 +202,12 @@ import SearchDrawer from './components/common/SearchDrawer.vue'
 import ToastNotification from './components/common/ToastNotification.vue'
 import SessionDrawer from './components/session/SessionDrawer.vue'
 import ProxyPanel from './components/proxy/ProxyPanel.vue'
-import PortForwardBrowser from './components/proxy/PortForwardBrowser.vue'
 import QuoteQuestionBar from './components/common/QuoteQuestionBar.vue'
 import { useQuoteQuestion } from './composables/useQuoteQuestion.ts'
 import { useSessionIdentity } from './composables/useSessionIdentity.ts'
 import { useToast } from './composables/useToast.ts'
 import { useAppMode } from './composables/useAppMode.ts'
-import { usePortForward, setOpenPortBrowser } from './composables/usePortForward.ts'
+import { usePortForward } from './composables/usePortForward.ts'
 import { useFileWatch } from './composables/useFileWatch.ts'
 import { store } from './stores/app.ts'
 import { initMermaid, reRenderMermaid } from './utils/mermaid.ts'

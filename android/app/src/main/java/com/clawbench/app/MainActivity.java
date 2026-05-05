@@ -624,6 +624,22 @@ public class MainActivity extends AppCompatActivity {
         }
 
         /**
+         * Open a forwarded port in the sandbox browser (BrowserActivity).
+         * Runs in a separate process for full Cookie/Storage isolation from the main app.
+         * Called from the port forwarding panel "open" button (preferred over openInBrowser).
+         */
+        @JavascriptInterface
+        public void openInSandbox(int port, String protocol) {
+            activity.runOnUiThread(() -> {
+                String scheme = "https".equalsIgnoreCase(protocol) ? "https" : "http";
+                Intent intent = new Intent(activity, BrowserActivity.class);
+                intent.putExtra("port", port);
+                intent.putExtra("protocol", scheme);
+                activity.startActivity(intent);
+            });
+        }
+
+        /**
          * Get the saved SSH/web password for auto-login.
          * Returns empty string if no password is saved.
          */

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/browser_background">
+
+    <!-- Toolbar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:paddingTop="0dp"
+        android:background="@color/browser_toolbar_bg"
+        android:elevation="2dp">
+
+        <!-- Back button -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnBack"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@drawable/ic_browser_back"
+            android:background="@drawable/bg_toolbar_btn"
+            android:contentDescription="@string/browser_back"
+            android:padding="6dp"
+            android:scaleType="fitCenter"
+            app:tint="@color/browser_icon_tint" />
+
+        <!-- URL bar -->
+        <EditText
+            android:id="@+id/urlBar"
+            android:layout_width="0dp"
+            android:layout_height="30dp"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_url_bar"
+            android:hint="@string/browser_url_hint"
+            android:imeOptions="actionGo"
+            android:inputType="textUri"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:selectAllOnFocus="true"
+            android:singleLine="true"
+            android:textColor="@color/browser_url_text"
+            android:textColorHint="@color/browser_url_hint_color"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:ellipsize="end" />
+
+        <!-- Refresh button -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnRefresh"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@drawable/ic_browser_refresh"
+            android:background="@drawable/bg_toolbar_btn"
+            android:contentDescription="@string/browser_refresh"
+            android:padding="6dp"
+            android:scaleType="fitCenter"
+            app:tint="@color/browser_icon_tint" />
+
+        <!-- Clear data button -->
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/btnClearData"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@drawable/ic_browser_clear"
+            android:background="@drawable/bg_toolbar_btn"
+            android:contentDescription="@string/browser_clear_data"
+            android:padding="6dp"
+            android:scaleType="fitCenter"
+            app:tint="@color/browser_icon_tint" />
+
+    </LinearLayout>
+
+    <!-- Progress bar -->
+    <ProgressBar
+        android:id="@+id/progressBar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="2dp"
+        android:max="100"
+        android:progressDrawable="@drawable/bg_progress_bar"
+        android:visibility="gone" />
+
+    <!-- WebView -->
+    <WebView
+        android:id="@+id/browserWebView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+</LinearLayout>

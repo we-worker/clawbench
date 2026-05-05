@@ -16,6 +16,7 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
+        android:name=".ClawBenchApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -38,6 +39,15 @@
         <service
             android:name=".PortForwardService"
             android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+        <!-- Sandbox browser for testing forwarded ports — runs in separate process for Cookie/Storage isolation -->
+        <activity
+            android:name=".BrowserActivity"
+            android:process=":browser"
+            android:theme="@style/Theme.ClawBench.Browser"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
             android:exported="false" />
 
         <!-- FileProvider for sharing camera-captured images with WebView -->

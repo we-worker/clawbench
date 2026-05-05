@@ -13,7 +13,10 @@
       </div>
     </div>
     <div class="port-actions">
-      <button class="port-action-btn open" @click.stop="$emit('open', port, protocol)" :title="t('common.open')">
+      <button class="port-action-btn sandbox" @click.stop="$emit('open', port, protocol)" :title="t('proxy.openInSandbox')">
+        <Box :size="14" />
+      </button>
+      <button class="port-action-btn open" @click.stop="$emit('openExternal', port, protocol)" :title="t('proxy.openInBrowser')">
         <ExternalLink :size="14" />
       </button>
       <button class="port-action-btn delete" @click.stop="$emit('remove', port)" :title="t('common.delete')">
@@ -24,7 +27,7 @@
 </template>
 
 <script setup>
-import { ExternalLink, Trash2 } from 'lucide-vue-next'
+import { Box, ExternalLink, Trash2 } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -38,7 +41,7 @@ const props = defineProps({
   tunnelDisconnected: { type: Boolean, default: false },
 })
 
-defineEmits(['open', 'remove'])
+defineEmits(['open', 'openExternal', 'remove'])
 
 const statusClass = computed(() => {
   if (props.active) return 'active'
@@ -173,6 +176,11 @@ const statusTitle = computed(() => {
 
 .port-action-btn.open:hover {
   color: var(--accent-color, #0066cc);
+  background: var(--bg-tertiary, #f0f0f0);
+}
+
+.port-action-btn.sandbox:hover {
+  color: #8b5cf6;
   background: var(--bg-tertiary, #f0f0f0);
 }
 

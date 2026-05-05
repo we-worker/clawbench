@@ -14,5 +14,19 @@
     <string name="download_failed">下载失败</string>
     <string name="download_description">ClawBench 文件下载</string>
     <string name="ssh_notification_reconnecting">SSH 隧道断开，正在重连…</string>
-    <string name="ssh_notification_recovered">SSH 隧道已恢复</string>
+    <string name="ssh_notification_recovering">SSH 隧道已恢复</string>
+    <!-- Browser sandbox -->
+    <string name="browser_back">返回</string>
+    <string name="browser_refresh">刷新</string>
+    <string name="browser_clear_data">清除数据</string>
+    <string name="browser_url_hint">输入地址</string>
+    <string name="browser_clear_title">清除浏览数据</string>
+    <string name="browser_clear_message">将清除所有 Cookie、缓存和网站数据，当前登录状态将丢失。</string>
+    <string name="browser_clear_positive">清除</string>
+    <string name="browser_clear_negative">取消</string>
+    <string name="browser_clear_done">浏览数据已清除</string>
+    <string name="browser_ssl_title">SSL 证书验证失败</string>
+    <string name="browser_ssl_message">该站点使用了不受信任的证书，连接可能不安全。\n\n仅当您信任该站点时才继续。</string>
+    <string name="browser_ssl_positive">信任并继续</string>
+    <string name="browser_ssl_negative">取消连接</string>
 </resources>

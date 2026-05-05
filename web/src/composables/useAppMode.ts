@@ -12,9 +12,9 @@ let initialized = false
  * 2. window === window.top (we are in the top-level frame, not an iframe)
  *
  * Condition 2 is critical: Android's addJavascriptInterface injects the bridge
- * into ALL frames including child iframes. When PortForwardBrowser opens a
- * ClawBench dev page in an iframe, it inherits the bridge but should run in
- * web mode (no port forward button, no native auto-login, etc.).
+ * into ALL frames including child iframes. If a child iframe inherits the bridge
+ * but should run in web mode (no port forward button, no native auto-login, etc.),
+ * the top-frame check prevents false positives.
  * User-Agent is intentionally NOT checked — it's inherited by iframes and
  * causes false positives in port-forwarded pages.
  */

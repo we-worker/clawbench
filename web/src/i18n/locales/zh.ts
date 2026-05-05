@@ -350,7 +350,7 @@ export default {
     tunnelDisconnectedDetail: '端口转发将无法使用，请检查网络或重新打开页面',
     portsNoResponse: '转发端口无响应',
     tunnelConnectedButNoResponse: 'SSH 隧道已连接，但所有端口的服务均未响应',
-    backgroundTip: '请允许应用后台运行，否则隧道可能在 APP 进入后台后被系统终止',
+    backgroundTip: '使用外部浏览器时，请确保已授予应用后台运行权限，否则 APP 进入后台后 SSH 隧道会被系统终止',
     retryCheck: '重新检测',
     noPorts: '暂无转发端口',
     emptyHint: '添加服务器上的端口，即可在浏览器或其他应用中直接访问',
@@ -378,6 +378,8 @@ export default {
       tunnelDown: '隧道断开',
       inactive: '离线',
     },
+    openInSandbox: '沙箱打开',
+    openInBrowser: '浏览器打开',
     toast: {
       checkFailed: '检测失败，请检查网络连接',
       tunnelRecovered: 'SSH 隧道已恢复',
