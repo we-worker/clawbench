@@ -35,7 +35,7 @@
         <!-- Input -->
         <div class="qq-input-container">
           <div class="qq-input-row">
-            <button v-if="inputText" class="qq-clear-btn" @click="inputText = ''; collapseTextarea()" :title="t('quoteBar.clear')">
+            <button v-if="inputText" class="qq-clear-btn" @click="inputText = ''" :title="t('quoteBar.clear')">
               <XCircle :size="16" />
             </button>
             <textarea
@@ -130,7 +130,6 @@ async function expand() {
 function collapse() {
   expanded.value = false
   inputText.value = ''
-  collapseTextarea()
   emit('unpin')
 }
 
@@ -138,16 +137,18 @@ function autoResizeTextarea() {
   const el = inputRef.value
   if (!el) return
   el.style.height = 'auto'
-  const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20
-  const maxHeight = lineHeight * 3 + 8
+  const computed = getComputedStyle(el)
+  const lineHeight = parseFloat(computed.lineHeight) || 20
+  const paddingTop = parseFloat(computed.paddingTop) || 0
+  const paddingBottom = parseFloat(computed.paddingBottom) || 0
+  const maxContentHeight = lineHeight * 3
+  const maxHeight = maxContentHeight + paddingTop + paddingBottom
   el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
 }
 
-function collapseTextarea() {
-  const el = inputRef.value
-  if (!el) return
-  el.style.height = 'auto'
-}
+// Watch inputText changes (both user input and programmatic changes)
+// to ensure textarea height stays in sync with content
+watch(inputText, () => nextTick(() => autoResizeTextarea()))
 
 function openSessionDrawer() {
   emit('open-sessions')
@@ -158,7 +159,6 @@ function handleSend() {
   emit('send', inputText.value)
   expanded.value = false
   inputText.value = ''
-  collapseTextarea()
 }
 </script>
 
@@ -348,7 +348,7 @@ function handleSend() {
   resize: none;
   overflow-y: auto;
   min-height: 28px;
-  max-height: 68px;
+  max-height: calc(20px * 3 + 4px + 4px); /* 3 lines + padding-top + padding-bottom */
   font-family: inherit;
 }
 

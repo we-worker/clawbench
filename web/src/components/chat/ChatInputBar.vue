@@ -80,7 +80,7 @@
             <Paperclip :size="16" />
           </button>
         </div>
-        <button v-if="inputText && !loading" class="chat-clear-btn" @click="inputText = ''; collapseTextarea()" :title="t('chat.input.clearInput')">
+        <button v-if="inputText && !loading" class="chat-clear-btn" @click="inputText = ''" :title="t('chat.input.clearInput')">
           <XCircle :size="16" />
         </button>
         <textarea class="chat-textarea"
@@ -90,9 +90,7 @@
           :placeholder="pendingFiles.length > 0 ? t('chat.input.placeholderOptional') : loading ? t('chat.input.placeholderQueue') : t('chat.input.placeholder')"
           rows="1"
           @keydown.enter.exact.prevent="$emit('send', inputText.trim())"
-          @input="autoResizeTextarea"
-          @blur="collapseTextarea"></textarea>
-        <button v-if="!stopPrimed" class="chat-send-btn" :class="{ disabled: !hasInputContent && !hasQuickSend, queued: loading }" @click.stop="handleSendClick" :title="loading ? t('chat.input.enqueue') : t('chat.input.send')">
+          @blur="autoResizeTextarea"></textarea>        <button v-if="!stopPrimed" class="chat-send-btn" :class="{ disabled: !hasInputContent && !hasQuickSend, queued: loading }" @click.stop="handleSendClick" :title="loading ? t('chat.input.enqueue') : t('chat.input.send')">
           <!-- Queue mode: inbox with down arrow (enqueue) -->
           <Inbox v-if="loading" :size="16" />
           <!-- Normal mode: paper plane (send) -->
@@ -226,7 +224,7 @@ watch(() => props.currentSessionId, (newId, oldId) => {
   }
   // Restore draft for the new session (or clear if none)
   inputText.value = newId ? (draftCache.get(newId) || '') : ''
-  nextTick(() => collapseTextarea())
+  // autoResizeTextarea is called automatically by the inputText watcher
 })
 
 const uploadingFiles = computed(() => props.pendingFiles.filter(f => f.uploading))
@@ -352,16 +350,18 @@ function autoResizeTextarea() {
   const el = textareaRef.value
   if (!el) return
   el.style.height = 'auto'
-  const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20
-  const maxHeight = lineHeight * 3 + 8
+  const computed = getComputedStyle(el)
+  const lineHeight = parseFloat(computed.lineHeight) || 20
+  const paddingTop = parseFloat(computed.paddingTop) || 0
+  const paddingBottom = parseFloat(computed.paddingBottom) || 0
+  const maxContentHeight = lineHeight * 3
+  const maxHeight = maxContentHeight + paddingTop + paddingBottom
   el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
 }
 
-function collapseTextarea() {
-  const el = textareaRef.value
-  if (!el) return
-  el.style.height = 'auto'
-}
+// Watch inputText changes (both user input and programmatic changes like draft restore)
+// to ensure textarea height stays in sync with content
+watch(inputText, () => nextTick(() => autoResizeTextarea()))
 
 function onFileSelect(e) {
   emit('file-select', e)
@@ -402,7 +402,6 @@ function clearInput() {
   if (props.currentSessionId) {
     draftCache.delete(props.currentSessionId)
   }
-  nextTick(() => collapseTextarea())
 }
 
 function handleAttachFile(filePath) {
@@ -1042,7 +1041,7 @@ defineExpose({
   resize: none;
   overflow-y: auto;
   min-height: 28px;
-  max-height: 68px;
+  max-height: calc(20px * 3 + 4px + 4px); /* 3 lines + padding-top + padding-bottom */
   font-family: inherit;
 }
 
