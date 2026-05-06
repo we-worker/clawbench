@@ -53,6 +53,7 @@
       @send-message="$emit('send-message', $event)"
       @expand="handleExpand"
       @collapse="handleCollapse"
+      @render-flush="emit('render-flush')"
     />
     </div>
 
@@ -95,7 +96,7 @@ const props = defineProps({
   pendingMessages: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['toggle-tool', 'show-metadata', 'file-tag-click', 'file-open', 'load-more', 'edit-task', 'send-message', 'remove-pending'])
+const emit = defineEmits(['toggle-tool', 'show-metadata', 'file-tag-click', 'file-open', 'load-more', 'edit-task', 'send-message', 'remove-pending', 'render-flush'])
 
 const messagesRef = ref(null)
 const { handleDblClick } = useDoubleClickCopy()
@@ -252,17 +253,31 @@ function scrollToBottom(force = false) {
     const el = messagesRef.value
     if (force || isAtBottom) {
       el.scrollTop = el.scrollHeight
-      isAtBottom = true
-      // After forced scroll, re-check after a short delay to handle
-      // async content rendering (Mermaid, KaTeX) that changes height
-      if (force) {
-        setTimeout(() => {
-          if (messagesRef.value) {
-            messagesRef.value.scrollTop = messagesRef.value.scrollHeight
-            isAtBottom = true
-          }
-        }, 300)
-      }
+      // Verify the scroll actually reached the bottom — content may have grown
+      // between the scrollToBottom call and this nextTick callback, or may grow
+      // after this callback completes (streaming text, throttled render flush).
+      // Use requestAnimationFrame to re-check after the browser has laid out
+      // the DOM changes, and do a second scroll if still not at the bottom.
+      requestAnimationFrame(() => {
+        if (!messagesRef.value) return
+        const el = messagesRef.value
+        const gap = el.scrollHeight - el.scrollTop - el.clientHeight
+        if (gap > 0) {
+          el.scrollTop = el.scrollHeight
+        }
+        // Final isAtBottom state based on actual scroll position after correction
+        isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD
+        // For force scrolls, also do a delayed re-scroll to catch async content
+        // rendering (Mermaid, KaTeX, collapse transitions) that settles later.
+        if (force) {
+          setTimeout(() => {
+            if (!messagesRef.value) return
+            const el = messagesRef.value
+            el.scrollTop = el.scrollHeight
+            isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD
+          }, 300)
+        }
+      })
     }
   })
 }

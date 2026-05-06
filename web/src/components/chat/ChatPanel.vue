@@ -31,6 +31,7 @@
       @edit-task="openTaskEdit"
       @send-message="handleToolSendMessage"
       @remove-pending="manager.handleRemovePending"
+      @render-flush="scrollBottom()"
     />
 
     <!-- Session switching overlay — placed here to cover the entire message area -->

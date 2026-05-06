@@ -158,7 +158,7 @@ const props = defineProps({
   getAgentName: { type: Function, default: () => '' },
 })
 
-const emit = defineEmits(['toggle-tool', 'edit-task', 'send-message'])
+const emit = defineEmits(['toggle-tool', 'edit-task', 'send-message', 'render-flush'])
 
 // Key helper: use msgId if available, otherwise msgIndex
 function key(bi) {
@@ -238,6 +238,10 @@ function flushBlockHtml() {
     }
   }
   blockHtmlCache.value = newCache
+  // Throttled render flush can change content height (paragraph wrapping, code blocks, etc.)
+  // without a corresponding onScrollBottom call from the stream handler. Notify the parent
+  // so it can re-sync the scroll position if the user is at the bottom.
+  emit('render-flush')
 }
 
 function getBlockHtml(bi, block) {

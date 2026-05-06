@@ -27,6 +27,7 @@
         @toggle-tool="$emit('toggle-tool', $event)"
         @edit-task="$emit('edit-task', $event)"
         @send-message="$emit('send-message', $event)"
+        @render-flush="$emit('render-flush')"
       />
     </div>
 
@@ -111,7 +112,7 @@ const props = defineProps({
   shouldCollapse: Boolean,
 })
 
-const emit = defineEmits(['toggle-tool', 'show-metadata', 'file-tag-click', 'expand', 'collapse', 'edit-task', 'send-message'])
+const emit = defineEmits(['toggle-tool', 'show-metadata', 'file-tag-click', 'expand', 'collapse', 'edit-task', 'send-message', 'render-flush'])
 
 const autoSpeech = inject('autoSpeech')
 const layoutRefreshKey = inject('layoutRefreshKey', ref(0))
