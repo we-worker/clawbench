@@ -24,6 +24,8 @@ node_modules/
 vite.log
 public/
 web/coverage/
+web/package.json
+web/package-lock.json
 
 # App runtime data
 .ClawBench/
