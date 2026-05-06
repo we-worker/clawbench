@@ -18,7 +18,25 @@
     <!-- List view -->
     <div v-if="view === 'list'" class="executions-content">
       <div v-if="loading" class="dialog-empty">{{ t('common.loading') }}</div>
-      <div v-else-if="executions.length === 0" class="dialog-empty">{{ t('task.exec.noExecutions') }}</div>
+      <div v-else-if="executions.length === 0 && runningExecutions.length === 0" class="dialog-empty">{{ t('task.exec.noExecutions') }}</div>
+      <!-- Running executions (virtual items) -->
+      <div v-for="exec in runningExecutions" :key="exec.id" class="execution-item running" @click.self>
+        <div class="execution-row">
+          <div class="execution-info">
+            <div class="execution-time-row">
+              <span class="exec-running-dot"></span>
+              <span class="exec-running-label">{{ t('task.exec.running') }}</span>
+              <span class="exec-relative-time">{{ chatRender.formatMessageTime(exec.startedAt) }}</span>
+              <span v-if="exec.triggerType === 'manual'" class="exec-trigger-type manual">{{ t('task.exec.manual') }}</span>
+              <span v-else class="exec-trigger-type auto">{{ t('task.exec.auto') }}</span>
+            </div>
+          </div>
+          <button class="cancel-exec-btn" @click.stop="cancelExecution(exec.id)" :title="t('task.exec.cancel')">
+            <Square :size="12" />
+          </button>
+        </div>
+      </div>
+      <!-- Completed executions -->
       <div v-for="(exec, idx) in executions" :key="idx" class="execution-item" :class="{ unread: exec.isUnread }" @click="openDetail(exec)">
         <div class="execution-row">
           <div class="execution-info">
@@ -69,8 +87,10 @@
     </div>
 
     <template #footer>
-      <button class="btn btn-primary" @click="triggerTask" :disabled="triggering">
-        {{ triggering ? t('task.exec.executing') : t('task.exec.executeNow') }}
+      <button class="btn btn-primary" @click="triggerTask" :disabled="triggering || runningExecutions.length > 0">
+        <template v-if="runningExecutions.length > 0">{{ t('task.exec.running') }}...</template>
+        <template v-else-if="triggering">{{ t('task.exec.executing') }}</template>
+        <template v-else>{{ t('task.exec.executeNow') }}</template>
       </button>
       <button class="btn btn-secondary" @click="handleClose">{{ t('common.close') }}</button>
     </template>
@@ -78,13 +98,14 @@
 </template>
 
 <script setup>
-import { ref, watch, inject } from 'vue'
+import { ref, watch, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Clock, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { Clock, ChevronLeft, ChevronRight, Square } from 'lucide-vue-next'
 import ModalDialog from '@/components/common/ModalDialog.vue'
 import ContentBlocks from '@/components/chat/ContentBlocks.vue'
 import { useChatRender } from '@/composables/useChatRender.ts'
 import { useToast } from '@/composables/useToast.ts'
+import { useDialog } from '@/composables/useDialog.ts'
 import { formatDuration } from '@/utils/format.ts'
 
 const props = defineProps({
@@ -95,6 +116,7 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 
 const { t } = useI18n()
+const dialog = useDialog()
 
 function formatTokens(meta) {
   const parts = []
@@ -106,9 +128,11 @@ function formatTokens(meta) {
 const loading = ref(false)
 const triggering = ref(false)
 const executions = ref([])
+const runningExecutions = ref([])
 const expandedTools = ref({})
 const view = ref('list')  // 'list' | 'detail'
 const selectedExec = ref(null)
+let pollTimer = null
 
 // Create chatRender instance for rendering execution blocks
 const renderTheme = inject('theme', ref('light'))
@@ -158,8 +182,56 @@ function handleClose() {
   emit('close')
 }
 
+function startPolling() {
+  stopPolling()
+  pollTimer = setInterval(loadRunningStatus, 3000)
+}
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+async function loadRunningStatus() {
+  if (!props.task?.id) return
+  try {
+    const resp = await fetch(`/api/tasks/${props.task.id}`)
+    if (resp.ok) {
+      const data = await resp.json()
+      runningExecutions.value = data.runningExecutions || []
+    }
+  } catch (err) {
+    console.error('Failed to load running status:', err)
+  }
+}
+
+async function cancelExecution(execId) {
+  if (!props.task?.id) return
+  if (!await dialog.confirm(t('task.exec.confirmCancel'))) return
+  try {
+    const resp = await fetch(`/api/tasks/${props.task.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'cancel', executionId: execId }),
+    })
+    if (resp.ok) {
+      toast.show(t('task.exec.cancelled'), { type: 'success' })
+    } else if (resp.status === 404) {
+      // Already finished, just refresh
+      toast.show(t('task.exec.alreadyFinished'), { type: 'info' })
+    }
+    // Immediately refresh running status
+    await loadRunningStatus()
+  } catch (err) {
+    console.error('Failed to cancel execution:', err)
+  }
+}
+
 async function triggerTask() {
   if (!props.task?.id || triggering.value) return
+  if (runningExecutions.value.length > 0) return
   triggering.value = true
   try {
     const resp = await fetch(`/api/tasks/${props.task.id}`, {
@@ -169,6 +241,11 @@ async function triggerTask() {
     })
     if (resp.ok) {
       toast.show(t('task.exec.triggered', { name: props.task.name }), { type: 'success' })
+      // Immediately check for new running execution
+      await loadRunningStatus()
+    } else if (resp.status === 409) {
+      toast.show(t('task.exec.alreadyRunning'), { type: 'warning' })
+      await loadRunningStatus()
     }
   } catch (err) {
     console.error('Failed to trigger task:', err)
@@ -215,7 +292,20 @@ watch(() => props.open, (isOpen) => {
   selectedExec.value = null
   expandedTools.value = {}
   loadExecutions()
+  loadRunningStatus()
   markTaskRead()
+  startPolling()
+})
+
+watch(() => props.open, (isOpen) => {
+  if (!isOpen) {
+    stopPolling()
+    runningExecutions.value = []
+  }
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 </script>
 
@@ -242,6 +332,10 @@ watch(() => props.open, (isOpen) => {
 
 .execution-item:last-child {
   border-bottom: none;
+}
+
+.execution-item.running {
+  background: color-mix(in srgb, var(--success-color, #22c55e) 6%, transparent);
 }
 
 .execution-row {
@@ -330,6 +424,11 @@ watch(() => props.open, (isOpen) => {
   color: #3b82f6;
 }
 
+.exec-trigger-type.auto {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+}
+
 @keyframes exec-unread-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.5; transform: scale(0.7); }
@@ -355,20 +454,6 @@ watch(() => props.open, (isOpen) => {
 .exec-summary.empty {
   color: var(--text-muted, #999);
   font-style: italic;
-}
-
-.exec-trigger-type {
-  font-size: 9px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-weight: 500;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.exec-trigger-type.manual {
-  background: rgba(59, 130, 246, 0.12);
-  color: #3b82f6;
 }
 
 .execution-item.unread .exec-absolute-time {
@@ -405,6 +490,46 @@ watch(() => props.open, (isOpen) => {
 
 .exec-detail-meta .exec-meta-tag {
   font-size: 11px;
+}
+
+/* Running execution indicator */
+.exec-running-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success-color, #22c55e);
+  flex-shrink: 0;
+  animation: exec-running-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes exec-running-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+  50% { opacity: 0.7; box-shadow: 0 0 6px 2px rgba(34, 197, 94, 0.2); }
+}
+
+.exec-running-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success-color, #22c55e);
+}
+
+.cancel-exec-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.cancel-exec-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
 }
 
 .back-btn {

@@ -17,6 +17,7 @@
             <div class="task-item-header">
               <span class="task-item-icon">{{ getAgentIcon(task.agentId) }}</span>
               <span class="task-item-name">{{ task.name }}</span>
+              <span v-if="task.runningCount > 0" class="task-item-running-dot" :title="t('task.exec.running')"></span>
               <span v-if="task.unreadCount > 0" class="task-item-unread">{{ task.unreadCount }}</span>
               <span class="task-item-status" :class="task.status">{{ statusLabel(task.status) }}</span>
             </div>
@@ -311,6 +312,20 @@ watch(() => props.open, async (val) => {
 .task-item-status.completed {
   background: var(--bg-tertiary, #e9ecef);
   color: var(--text-muted, #999);
+}
+
+.task-item-running-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success-color, #22c55e);
+  flex-shrink: 0;
+  animation: task-running-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes task-running-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+  50% { opacity: 0.7; box-shadow: 0 0 6px 2px rgba(34, 197, 94, 0.2); }
 }
 
 .task-item-meta {

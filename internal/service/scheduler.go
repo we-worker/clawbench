@@ -18,11 +18,21 @@ import (
 // GlobalScheduler is the singleton scheduler instance, set during startup.
 var GlobalScheduler *Scheduler
 
+// RunningExecution tracks a currently executing task instance.
+type RunningExecution struct {
+	ID          string
+	TaskID      string
+	CancelFunc  context.CancelFunc
+	StartedAt   time.Time
+	TriggerType string // "auto" | "manual"
+}
+
 // Scheduler manages cron-scheduled AI tasks.
 type Scheduler struct {
-	cron    *cron.Cron
-	entries map[string]cron.EntryID // task ID -> cron entry ID
-	mu      sync.Mutex
+	cron             *cron.Cron
+	entries          map[string]cron.EntryID // task ID -> cron entry ID
+	mu               sync.Mutex
+	runningExecutions sync.Map // key: executionID, value: *RunningExecution
 }
 
 // NewScheduler creates a new Scheduler instance.
@@ -43,6 +53,78 @@ func (s *Scheduler) Start() {
 func (s *Scheduler) Stop() {
 	s.cron.Stop()
 	slog.Info("scheduler stopped")
+}
+
+// GetRunningExecutions returns the running execution views for a specific task.
+func (s *Scheduler) GetRunningExecutions(taskID string) []model.RunningExecutionView {
+	var result []model.RunningExecutionView
+	s.runningExecutions.Range(func(key, value any) bool {
+		exec := value.(*RunningExecution)
+		if exec.TaskID == taskID {
+			result = append(result, model.RunningExecutionView{
+				ID:          exec.ID,
+				StartedAt:   exec.StartedAt,
+				TriggerType: exec.TriggerType,
+			})
+		}
+		return true
+	})
+	return result
+}
+
+// GetRunningCounts returns a map of taskID -> running execution count.
+func (s *Scheduler) GetRunningCounts() map[string]int {
+	counts := make(map[string]int)
+	s.runningExecutions.Range(func(key, value any) bool {
+		exec := value.(*RunningExecution)
+		counts[exec.TaskID]++
+		return true
+	})
+	return counts
+}
+
+// HasRunningExecutions checks if a task has any running executions.
+func (s *Scheduler) HasRunningExecutions(taskID string) bool {
+	found := false
+	s.runningExecutions.Range(func(key, value any) bool {
+		if value.(*RunningExecution).TaskID == taskID {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// CancelExecution cancels a specific running execution by its ID.
+// Returns error if the execution is not found or already finished.
+func (s *Scheduler) CancelExecution(executionID string) error {
+	val, ok := s.runningExecutions.Load(executionID)
+	if !ok {
+		return fmt.Errorf("execution not found: %s", executionID)
+	}
+	exec := val.(*RunningExecution)
+	exec.CancelFunc()
+	slog.Info("cancelled running execution",
+		slog.String("exec_id", executionID),
+		slog.String("task_id", exec.TaskID),
+	)
+	return nil
+}
+
+// CancelAllExecutions cancels all running executions for a specific task.
+func (s *Scheduler) CancelAllExecutions(taskID string) {
+	s.runningExecutions.Range(func(key, value any) bool {
+		exec := value.(*RunningExecution)
+		if exec.TaskID == taskID {
+			exec.CancelFunc()
+			slog.Info("cancelled running execution for task",
+				slog.String("exec_id", exec.ID),
+				slog.String("task_id", taskID),
+			)
+		}
+		return true
+	})
 }
 
 // LoadTasksFromDB loads active tasks from the database and registers them.
@@ -236,8 +318,11 @@ func (s *Scheduler) registerTaskLocked(task *model.ScheduledTask) error {
 // executeTask runs a scheduled task by invoking the AI backend and inserting
 // the result as an assistant message in the original session.
 func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, triggerType string) {
+	execID := generateExecutionID()
+
 	slog.Info("executing scheduled task",
 		slog.String("task_id", task.ID),
+		slog.String("exec_id", execID),
 		slog.String("name", task.Name),
 	)
 
@@ -258,7 +343,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 	// the handler will not create a task from it.
 	chatReq := ai.ChatRequest{
 		Prompt:             task.Prompt,
-		SessionID:          "", // no session — standalone execution
+		SessionID:          execID, // use executionID to identify this run
 		WorkDir:            projectPath,
 		SystemPrompt:       agent.SystemPrompt,
 		Model:              agent.DefaultModelID(),
@@ -270,7 +355,20 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 
 	// Execute AI backend (no timeout - let AI run indefinitely)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+
+	// Register running execution
+	running := &RunningExecution{
+		ID:          execID,
+		TaskID:      task.ID,
+		CancelFunc:  cancel,
+		StartedAt:   time.Now(),
+		TriggerType: triggerType,
+	}
+	s.runningExecutions.Store(execID, running)
+	defer func() {
+		s.runningExecutions.Delete(execID)
+		cancel()
+	}()
 
 	backend, err := ai.NewBackend(backendName)
 	if err != nil {
@@ -300,6 +398,15 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 		default:
 			ai.AccumulateBlock(&blocks, event)
 		}
+	}
+
+	// If context was cancelled, skip persisting the execution result
+	if ctx.Err() == context.Canceled {
+		slog.Info("task execution cancelled, skipping result persistence",
+			slog.String("task_id", task.ID),
+			slog.String("exec_id", execID),
+		)
+		return
 	}
 
 	// Compute wall-clock duration and inject into metadata
@@ -363,6 +470,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 
 	slog.Info("task execution completed",
 		slog.String("task_id", task.ID),
+		slog.String("exec_id", execID),
 		slog.String("status", newStatus),
 	)
 }
@@ -505,4 +613,9 @@ func HasUnreadTasks(projectPath string) (bool, error) {
 // generateTaskID creates a unique ID for a scheduled task.
 func generateTaskID() string {
 	return generateUUID("task-", "scheduled_tasks", "id")
+}
+
+// generateExecutionID creates a unique ID for a task execution instance.
+func generateExecutionID() string {
+	return generateUUID("exec-", "task_executions", "id")
 }

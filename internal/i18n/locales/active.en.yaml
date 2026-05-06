@@ -55,6 +55,9 @@ InvalidPortInQuery: Invalid port number in query
 TaskIdRequired: Task ID required
 TaskNotFound: Task not found
 TaskFieldsRequired: name, cronExpr, agentId, and prompt are required
+TaskAlreadyRunning: Task is already running, please wait for it to finish
+TaskExecutionIdRequired: Execution ID is required
+TaskExecutionNotFound: Execution not found or already finished
 DirectoryNameRequired: Directory name required
 LineNumberOutOfRange: Line number out of range
 InvalidIndex: invalid index
