@@ -497,6 +497,8 @@ defineExpose({
   flex-direction: column;
   flex-shrink: 0;
   margin: 0 8px 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color, #e5e5e5);
 }
 
 /* Top action bar (above input box, compact) */
@@ -504,24 +506,16 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 4px 4px;
+  padding: 2px 4px 6px;
 }
 
 /* Session button group */
 .chat-action-group {
   display: inline-flex;
-  align-items: center;
-  gap: 1px;
-  background: var(--bg-tertiary, #f0f0f0);
-  border-radius: 6px;
-  padding: 1px;
-}
-
-.chat-action-group {
-    display: inline-flex;
-    background: var(--bg-tertiary, #f0f0f0);
-    border-radius: 20px;
-    overflow: hidden;
+  align-items: stretch;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid var(--border-color, #e5e5e5);
 }
 
 .chat-action-group .chat-action-btn {
@@ -537,9 +531,9 @@ defineExpose({
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0 5px 0 7px;
+    padding: 5px 6px 5px 8px;
     color: var(--text-muted, #999);
-    opacity: 0.5;
+    background: var(--bg-tertiary, #f0f0f0);
     pointer-events: none;
     user-select: none;
 }
