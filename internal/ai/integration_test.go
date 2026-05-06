@@ -1120,6 +1120,142 @@ func TestIntegration_Codex_SystemPromptInjection(t *testing.T) {
 	}
 }
 
+// --- Qoder Integration Tests ---
+
+func TestIntegration_Qoder_NewSession(t *testing.T) {
+	requireCLIAvailable(t, "qodercli")
+	backend, err := NewBackend("qoder")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	ch, err := backend.ExecuteStream(ctx, ChatRequest{
+		Prompt:    "说一个字：好",
+		SessionID: newSessionID(),
+		WorkDir:   testWorkDir(),
+	})
+	require.NoError(t, err)
+
+	events := collectEvents(t, ch, 90*time.Second)
+
+	requireEventSequence(t, events, "content", "metadata")
+	content := concatContent(events)
+	assert.NotEmpty(t, content, "should receive content from qoder")
+
+	metaEvents := findEvents(events, "metadata")
+	require.NotEmpty(t, metaEvents, "should have metadata event")
+	assert.NotEmpty(t, metaEvents[0].Meta.SessionID, "qoder metadata should contain session ID")
+
+	doneEvents := findEvents(events, "done")
+	assert.NotEmpty(t, doneEvents, "should receive 'done' event from AutoResumeBackend")
+
+	errorEvents := findEvents(events, "error")
+	assert.Empty(t, errorEvents, "should not have error events")
+}
+
+func TestIntegration_Qoder_StreamEvents(t *testing.T) {
+	requireCLIAvailable(t, "qodercli")
+	backend, err := NewBackend("qoder")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	ch, err := backend.ExecuteStream(ctx, ChatRequest{
+		Prompt:    "1+1等于几？只回答数字",
+		SessionID: newSessionID(),
+		WorkDir:   testWorkDir(),
+	})
+	require.NoError(t, err)
+
+	events := collectEvents(t, ch, 90*time.Second)
+
+	contentEvents := findEvents(events, "content")
+	assert.NotEmpty(t, contentEvents, "should have content events")
+
+	metaEvents := findEvents(events, "metadata")
+	require.NotEmpty(t, metaEvents)
+	assert.NotEmpty(t, metaEvents[0].Meta.SessionID, "qoder metadata should contain session ID")
+
+	// Should have raw_output event for debugging
+	rawEvents := findEvents(events, "raw_output")
+	assert.NotEmpty(t, rawEvents, "should have raw_output event")
+}
+
+func TestIntegration_Qoder_ResumeSession(t *testing.T) {
+	requireCLIAvailable(t, "qodercli")
+	backend, err := NewBackend("qoder")
+	require.NoError(t, err)
+
+	sessionID := newSessionID()
+
+	// Phase 1: new session
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel1()
+
+	ch1, err := backend.ExecuteStream(ctx1, ChatRequest{
+		Prompt:    "记住数字42，稍后我会问你。只回复OK",
+		SessionID: sessionID,
+		WorkDir:   testWorkDir(),
+	})
+	require.NoError(t, err)
+
+	events1 := collectEvents(t, ch1, 90*time.Second)
+	doneEvents1 := findEvents(events1, "metadata")
+	require.NotEmpty(t, doneEvents1, "first conversation should complete with metadata event")
+
+	// Phase 2: resume session
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel2()
+
+	ch2, err := backend.ExecuteStream(ctx2, ChatRequest{
+		Prompt:    "我之前让你记住的数字是什么？只回答数字",
+		SessionID: sessionID,
+		WorkDir:   testWorkDir(),
+		Resume:    true,
+	})
+	require.NoError(t, err)
+
+	events2 := collectEvents(t, ch2, 90*time.Second)
+	requireEventSequence(t, events2, "content", "metadata")
+	content := concatContent(events2)
+	assert.NotEmpty(t, content, "should receive content in resumed session")
+
+	doneEvents2 := findEvents(events2, "done")
+	assert.NotEmpty(t, doneEvents2, "should receive 'done' event in resumed session")
+}
+
+func TestIntegration_Qoder_SystemPromptInjection(t *testing.T) {
+	requireCLIAvailable(t, "qodercli")
+	backend, err := NewBackend("qoder")
+	require.NoError(t, err)
+
+	// Qoder CLI supports --system-prompt flag natively
+	const marker = "INTEGRATION_TEST_MARKER_Q7W3"
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	model.ChatSystemPromptInterval = 10
+
+	ch, err := backend.ExecuteStream(ctx, ChatRequest{
+		Prompt:       "请重复以下标记：" + marker,
+		SessionID:    newSessionID(),
+		WorkDir:      testWorkDir(),
+		SystemPrompt: "你必须在你回复的开头包含标记 " + marker + "，这是系统级要求",
+	})
+	require.NoError(t, err)
+
+	events := collectEvents(t, ch, 90*time.Second)
+	requireEventSequence(t, events, "content", "metadata")
+
+	// Best-effort check — AI compliance is non-deterministic
+	content := concatContent(events)
+	if !strings.Contains(content, marker) {
+		t.Logf("qoder did not include marker %q in response — AI compliance is non-deterministic; content: %s", marker, truncate(content, 200))
+	}
+}
+
 // --- Helpers ---
 
 // truncate returns the first n chars of s with "..." appended if longer.
