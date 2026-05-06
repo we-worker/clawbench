@@ -513,16 +513,16 @@ const { getAgentIcon, getAgentName } = chatSession
 .chat-file-attachment {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   border-radius: 8px;
   padding: 1px 6px;
   margin-bottom: 4px;
-  font-size: 11px;
+  font-size: 12px;
   text-decoration: none;
   cursor: pointer;
   transition: opacity 0.15s;
   white-space: nowrap;
-  max-width: 120px;
+  max-width: 200px;
 }
 
 .chat-file-tag-icon,

@@ -111,8 +111,10 @@ export function useFileUpload() {
 
   async function handleFileSelect(e) {
     const files = Array.from(e.target.files || [])
-    if (files.length === 0) return
+    // Reset input immediately to prevent Android WebView from re-firing
+    // the change event with stale file data on picker cancellation
     e.target.value = ''
+    if (files.length === 0) return
     await uploadFiles(files)
   }
 

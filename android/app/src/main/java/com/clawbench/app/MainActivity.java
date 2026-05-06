@@ -109,7 +109,10 @@ public class MainActivity extends AppCompatActivity {
                 if (results == null && cameraImageUri != null) {
                     results = new Uri[]{ cameraImageUri };
                 }
-                filePathCallback.onReceiveValue(results);
+                // Use empty array instead of null for cancellation — some WebView implementations
+                // fire the JS change event with stale file data when onReceiveValue(null) is called.
+                // An empty array explicitly means "0 files selected".
+                filePathCallback.onReceiveValue(results != null ? results : new Uri[0]);
                 filePathCallback = null;
                 cameraImageUri = null;
             });
