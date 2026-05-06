@@ -139,6 +139,16 @@ func (s *Scheduler) LoadTasksFromDB(projectPath string) error {
 		if task.Status != "active" {
 			continue
 		}
+		// Validate agent_id against loaded agents
+		if _, ok := model.Agents[task.AgentID]; !ok {
+			slog.Warn("pausing task with invalid agent_id",
+				slog.String("task_id", task.ID),
+				slog.String("name", task.Name),
+				slog.String("agent_id", task.AgentID),
+			)
+			s.PauseTask(task.ID)
+			continue
+		}
 		if err := s.registerTask(task); err != nil {
 			slog.Warn("failed to register task on load",
 				slog.String("task_id", task.ID),
@@ -328,7 +338,12 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 
 	agent, ok := model.Agents[task.AgentID]
 	if !ok {
-		slog.Error("agent not found for task", slog.String("agent_id", task.AgentID))
+		slog.Error("agent not found for task, pausing",
+			slog.String("agent_id", task.AgentID),
+			slog.String("task_id", task.ID),
+			slog.String("name", task.Name),
+		)
+		s.PauseTask(task.ID)
 		return
 	}
 
