@@ -37,11 +37,14 @@
         :title="t('chat.actions.autoSpeech')">
         <Volume2 :size="14" />
       </button>
-      <!-- Model switcher chip (only for multi-model agents) -->
-      <button v-if="showModelChip" class="chat-action-btn model-chip" @click.stop="toggleModelMenu" :title="t('chat.actions.switchModel')">
+      <!-- Model chip (show for all agents, click only for multi-model) -->
+      <button class="chat-action-btn model-chip"
+        :class="{ clickable: isMultiModel(currentAgentId) }"
+        @click.stop="toggleModelMenu"
+        :title="isMultiModel(currentAgentId) ? t('chat.actions.switchModel') : currentModelName">
         <Cpu :size="14" />
         <span class="chat-action-label">{{ currentModelName }}</span>
-        <ChevronDown :size="10" />
+        <ChevronDown v-if="isMultiModel(currentAgentId)" :size="10" />
       </button>
     </div>
     <!-- Input container -->
@@ -180,7 +183,8 @@ const props = defineProps({
   currentModelId: String,
   currentModelName: String,
   agentModels: { type: Array, default: () => [] },
-  showModelChip: Boolean,
+  isMultiModel: { type: Function, default: () => false },
+  currentAgentId: String,
 })
 
 const emit = defineEmits([
@@ -1177,6 +1181,19 @@ defineExpose({
 /* Model switcher chip */
 .model-chip {
   font-variant-numeric: tabular-nums;
+}
+
+.model-chip:not(.clickable) {
+  cursor: default;
+}
+
+.model-chip:not(.clickable):hover {
+  background: none;
+  color: var(--text-muted, #999);
+}
+
+.model-chip:not(.clickable):active {
+  transform: none;
 }
 
 .model-chip .chat-action-label {
