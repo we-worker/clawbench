@@ -35,25 +35,19 @@
 # 智能体的唯一标识符，全局不可重复。
 # Used in API routes, session association, and scheduled task agent assignment.
 # 用于 API 路由、会话关联、定时任务指定执行者等场景。
-# Naming convention: lowercase letters + digits + hyphens, short and meaningful, e.g. "coder", "devops".
-# 命名建议：小写字母 + 数字 + 连字符，简短有意义，如 "coder"、"devops"。
-id: example
+# Naming convention: lowercase letters + digits + hyphens, short and meaningful.
+# 命名建议：小写字母 + 数字 + 连字符，简短有意义。
+id: claude-coder
 
 # name [string, required]
 # Display name shown in the frontend agent selector, session list, etc.
 # 智能体的显示名称，展示在前端 UI 的智能体选择器、会话列表等位置。
-# Supports Chinese, English, and spaces; recommended length 2–8 characters.
-# 支持中文、英文、空格，长度建议 2-8 个字符。
-name: 示例智能体
+name: Claude 编码
 
 # icon [string, required]
 # Agent icon as a single Emoji character.
 # 智能体的图标，使用单个 Emoji 字符。
-# Displayed in the agent selector, session title bar, etc.
-# 显示在智能体选择器、会话标题栏等位置。
-# Tip: choose an Emoji relevant to the agent's role, e.g. 💻 (coding), 🎨 (design), 📊 (data).
-# 建议：选择与智能体职能相关的 Emoji，如 💻（编码）、🎨（设计）、📊（数据）。
-icon: 📋
+icon: 🟣
 
 # specialty [string, required]
 # One-line description of the agent's expertise / specialty.
@@ -62,24 +56,18 @@ icon: 📋
 # 用于前端智能体选择器中展示该智能体擅长什么，帮助用户快速选择。
 # Also injected into the {{AVAILABLE_AGENTS}} placeholder so other agents know each other's capabilities.
 # 也会被注入到 {{AVAILABLE_AGENTS}} 占位符中，供其他智能体了解可用能力。
-# Examples: "Complex coding, architecture design, code refactoring", "General Q&A, document writing"
-# 示例："复杂编码、架构设计、代码重构"、"通用问答、文档写作"
-specialty: 配置示例与模板参考
+specialty: 复杂编码、架构设计、代码重构
 
 # backend [string, required]
 # AI backend type — determines which CLI tool is used to execute conversations.
 # AI 后端类型，决定使用哪个 CLI 工具执行对话。
 # Available values / 可选值：
 #   - "claude"     → Claude Code CLI, supports AutoResume (detects ExitPlanMode, auto-sends "继续")
-#                    Claude Code CLI，支持 AutoResume（检测 ExitPlanMode 自动发送"继续"）
 #   - "codebuddy"  → CodeBuddy CLI, supports AutoResume (same as above)
-#                    CodeBuddy CLI，支持 AutoResume（同上）
 #   - "opencode"   → OpenCode CLI
 #   - "gemini"     → Gemini CLI (Google Gemini)
 #   - "codex"      → OpenAI Codex CLI
-# Different backends use different JSON streaming formats; the system auto-selects the matching LineParser.
-# 不同后端的 JSON 流式输出格式不同，系统会自动选择对应的 LineParser 解析。
-backend: codebuddy
+backend: claude
 
 # ----- Optional Fields / 可选字段 -----
 
@@ -89,20 +77,19 @@ backend: codebuddy
 # When omitted, the CLI uses its built-in default model.
 # 省略时，CLI 使用其内置默认模型。
 # Available values depend on the backend type and CLI tool version.
-# 具体可用值取决于 backend 类型和 CLI 工具版本。
-# Common examples / 常见示例：
+# 具体可用值取决于 backend 类型和 CLI 工具版本：
 #   backend=claude    → "claude-sonnet-4-6", "claude-opus-4"
 #   backend=codebuddy → "glm-5.1", "gpt-5.4", "gemini-3.1-pro", "kimi-k2.5"
 #   backend=opencode  → "opencode/minimax-m2.5-free", "minimax-cn/MiniMax-M2.7"
 #   backend=gemini    → "gemini-3.1-pro"
 #   backend=codex     → "gpt-5.4"
-model: glm-5.1
+model: claude-sonnet-4-6
 
 # system_prompt [string, optional]
 # The agent's system prompt / role definition.
 # 智能体的系统提示词 / 角色设定。
-# When omitted, the agent uses only agent_common_prompt.md as its system prompt (if it exists).
-# 省略时，智能体仅使用 agent_common_prompt.md 作为系统提示词（如果存在）。
+# When omitted, the agent uses only agent_common_prompt.md as its system prompt.
+# 省略时，智能体仅使用 agent_common_prompt.md 作为系统提示词。
 # When set, agent_common_prompt.md content is automatically prepended.
 # 设置后，加载时会自动在前面拼接 agent_common_prompt.md 的内容。
 # Supports multi-line text using YAML | (preserve newlines) or > (fold newlines) syntax.
@@ -111,15 +98,11 @@ model: glm-5.1
 # list of all agent IDs and their specialties.
 # 可使用占位符 {{AVAILABLE_AGENTS}}，运行时会被替换为所有智能体的 ID 和专长列表。
 system_prompt: |
-  你是一名示例智能体，用于展示配置格式。请根据实际需求修改此提示词。
+  You are an expert software engineer specializing in complex coding, architecture design, and code refactoring.
+  You write clean, maintainable code and provide thorough explanations of your design decisions.
 
-  ## 可用的占位符 / Available Placeholders
-
-  当前平台上可用的智能体列表：
+  Available agents on this platform:
   {{AVAILABLE_AGENTS}}
-
-  （上面的占位符会在加载时自动替换为实际的智能体列表。）
-  (The placeholder above is automatically replaced with the actual agent list at load time.)
 
 # command [string, optional]
 # Custom CLI executable path or command (with optional arguments).
@@ -129,13 +112,6 @@ system_prompt: |
 # When set, it overrides the default command. Useful for:
 # 设置后，会覆盖默认命令，适用于：
 #   - Using a different version of the CLI (e.g. /home/user/codebuddy2)
-#     指定不同版本的 CLI
 #   - Passing CLI startup arguments (e.g. "codex --profile m27")
-#     传递 CLI 启动参数
 #   - Using a CLI installed at a custom path
-#     使用自定义路径安装的 CLI 工具
-# Examples / 示例：
-#   command: /home/user/codebuddy2          # Use an alternate codebuddy binary / 使用另一个版本的 codebuddy
-#   command: codex --profile m27            # Pass profile argument / 传递 profile 参数
-#   command: /usr/local/bin/my-custom-cli   # Custom path / 自定义路径
-#command: /home/user/codebuddy2
+#command: /home/user/claude-local
