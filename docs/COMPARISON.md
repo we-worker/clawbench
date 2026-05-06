@@ -17,59 +17,59 @@
 | **FeiLaude** | IM 机器人遥控器 | 飞书 Bot 桥接本地 Claude Code（消息驱动执行+流式状态推送） | ✅ MIT | 2 |
 | **Claude Dispatch** | 官方远程控制 | Anthropic 官方手机遥控 Claude Code（Cowork 家族） | ❌ 闭源 | — |
 | **Claude Remote** | 远程遥控器 | 非官方 Claude Code 远程控制，支持 API 用户 | ✅ | 30 |
+| **Paseo** | 代理编排平台 | 多设备 AI 代理编排平台（Daemon+Relay，跨手机/桌面/CLI 控制多个 AI Agent） | ✅ AGPL-3.0 | 5.5k |
 | **Cursor Background Agent** | 云端异步 Agent | 网页/手机提交任务，云端异步执行，查看结果/创建 PR | ❌ 闭源 | — |
 | **GitHub Copilot** | 官方集成 | GitHub 移动端 + 网页端 AI 编程助手 | ❌ 闭源 | — |
 
 ## 功能矩阵
 
-| 功能 | ClawBench | Operit | Yep Anywhere | Happy | AnyCoding | AI Agent Remote | FeiLaude | Claude Dispatch | Claude Remote | Cursor Agent | GitHub Copilot |
+| 功能 | ClawBench | Operit | Yep Anywhere | Happy | AnyCoding | AI Agent Remote | FeiLaude | Claude Dispatch | Claude Remote | Cursor Agent | GitHub Copilot | Paseo |
 |------|-----------|--------|-------------|-------|-----------|-----------------|----------|-----------------|---------------|--------------|----------------|
-| **AI 后端数量** | 5 | 10+ | 2 | 2 | 2+ | 5 | 1 | 1 | 1 | 内置 | 内置 |
-| **文件浏览/编辑** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **代码预览/语法高亮** | ✅ | ✅ | ✅（服务端渲染） | ❌ | ✅（终端） | ✅（终端） | ❌ | ❌ | ✅ | ✅ | ✅ |
-| **Git 集成** | ✅（分支图/Diff/历史） | ✅（基础） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（PR 创建/Diff） | ✅（PR Review） |
-| **Markdown 渲染** | ✅（KaTeX/Mermaid） | ✅（KaTeX/Mermaid） | ✅（服务端渲染） | ❌ | ❌ | ❌ | ✅（飞书卡片） | ❌ | ✅ | ❌ | ❌ |
-| **定时任务（Cron）** | ✅ | ✅（工作流定时触发） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **TTS 语音合成** | ✅（5 种引擎） | ✅（本地+云端） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **媒体预览** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **SSH 隧道端口转发** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **端到端加密** | ❌ | ❌ | ✅（SRP-6a+TweetNaCl） | ✅ | ✅（Direct 模式） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **实时语音** | ❌ | ✅（STT+TTS+语音唤醒） | ✅（语音输入） | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **推送通知** | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅（飞书消息推送） | ✅ | ❌ | ❌ | ✅ |
-| **多客户端同步** | ❌ | ❌ | ✅ | ✅ | ✅（多标签+多PC） | ✅（多浏览器） | ✅（多用户） | ✅ | ✅ | ❌ | ❌ |
-| **权限审批** | ❌ | ✅（工具级权限控制） | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ |
-| **PWA 安装** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| **自部署** | ✅ | ❌（仅本地 App） | ✅ | ✅（可选） | ✅（Direct 模式） | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
-| **离线/局域网** | ✅ | ✅（本地模型+离线TTS） | ✅ | ✅（局域网） | ✅（局域网/Direct） | ✅（局域网） | ❌ | ❌ | ✅ | ❌ | ❌ |
-| **本地模型推理** | ❌ | ✅（MNN+llama.cpp） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **内置终端/Linux 环境** | ❌ | ✅（Ubuntu 24 chroot） | ❌ | ❌ | ✅（原生 VT100 终端） | ✅（浏览器终端） | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **UI 自动化（操控手机）** | ❌ | ✅（无障碍/ADB/Root） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **MCP 插件生态** | ❌ | ✅（MCP 市场+技能市场） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **角色卡/人设系统** | ❌ | ✅（导入/导出/群聊） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **内置浏览器** | ❌ | ✅（标签页+Web自动化） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **会话分叉/克隆** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Diff 查看** | ✅（Git Diff） | ❌ | ✅（Agent Diff） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| **文件上传** | ✅ | ✅ | ✅（相机胶卷直传） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **远程设备串流** | ❌ | ❌ | ✅（Android WebRTC） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **IM 消息交互** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（飞书） | ❌ | ❌ | ❌ | ❌ |
-| **多工作区/多会话** | ✅（多会话） | ✅（多会话） | ✅ | ✅ | ✅ | ✅ | ✅（多工作区+多会话） | ❌ | ❌ | ❌ | ❌ |
-| **任务队列** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（自动排队+合并） | ❌ | ❌ | ❌ | ❌ |
-| **Diff 查看** | ✅（Git Diff） | ❌ | ✅（Agent Diff） | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| **文件上传** | ✅ | ✅ | ✅（相机胶卷直传） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **远程设备串流** | ❌ | ❌ | ✅（Android WebRTC） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **AI 后端数量** | 5 | 10+ | 2 | 2 | 2+ | 5 | 1 | 1 | 1 | 内置 | 内置 | 3 |
+| **文件浏览/编辑** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **代码预览/语法高亮** | ✅ | ✅ | ✅（服务端渲染） | ❌ | ✅（终端） | ✅（终端） | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ |
+| **Git 集成** | ✅（分支图/Diff/历史） | ✅（基础） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（PR 创建/Diff） | ✅（PR Review） | ❌（仅 Diff 查看） |
+| **Markdown 渲染** | ✅（KaTeX/Mermaid） | ✅（KaTeX/Mermaid） | ✅（服务端渲染） | ❌ | ❌ | ❌ | ✅（飞书卡片） | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **定时任务（Cron）** | ✅ | ✅（工作流定时触发） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **TTS 语音合成** | ✅（5 种引擎） | ✅（本地+云端） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **媒体预览** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **SSH 隧道端口转发** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **端到端加密** | ❌ | ❌ | ✅（SRP-6a+TweetNaCl） | ✅ | ✅（Direct 模式） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（ECDH+AES-256-GCM） |
+| **实时语音** | ❌ | ✅（STT+TTS+语音唤醒） | ✅（语音输入） | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（Push-to-Talk STT） |
+| **推送通知** | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅（飞书消息推送） | ✅ | ❌ | ❌ | ✅ | ✅ |
+| **多客户端同步** | ❌ | ❌ | ✅ | ✅ | ✅（多标签+多PC） | ✅（多浏览器） | ✅（多用户） | ✅ | ✅ | ❌ | ❌ | ✅ |
+| **权限审批** | ❌ | ✅（工具级权限控制） | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| **PWA 安装** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **自部署** | ✅ | ❌（仅本地 App） | ✅ | ✅（可选） | ✅（Direct 模式） | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ |
+| **离线/局域网** | ✅ | ✅（本地模型+离线TTS） | ✅ | ✅（局域网） | ✅（局域网/Direct） | ✅（局域网） | ❌ | ❌ | ✅ | ❌ | ❌ | ✅（局域网直连） |
+| **本地模型推理** | ❌ | ✅（MNN+llama.cpp） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **内置终端/Linux 环境** | ❌ | ✅（Ubuntu 24 chroot） | ❌ | ❌ | ✅（原生 VT100 终端） | ✅（浏览器终端） | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（内置终端） |
+| **UI 自动化（操控手机）** | ❌ | ✅（无障碍/ADB/Root） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **MCP 插件生态** | ❌ | ✅（MCP 市场+技能市场） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（Daemon 作为 MCP Server） |
+| **角色卡/人设系统** | ❌ | ✅（导入/导出/群聊） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **内置浏览器** | ❌ | ✅（标签页+Web自动化） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **会话分叉/克隆** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Diff 查看** | ✅（Git Diff） | ❌ | ✅（Agent Diff） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅（Agent Diff） |
+| **文件上传** | ✅ | ✅ | ✅（相机胶卷直传） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **远程设备串流** | ❌ | ❌ | ✅（Android WebRTC） | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **IM 消息交互** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（飞书） | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **多工作区/多会话** | ✅（多会话） | ✅（多会话） | ✅ | ✅ | ✅ | ✅ | ✅（多工作区+多会话） | ❌ | ❌ | ❌ | ❌ | ✅（多会话+多主机） |
+| **任务队列** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（自动排队+合并） | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Agent 间协作** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（Skills: handoff/loop/advisor/committee） |
+| **Git Worktree 隔离** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅（自动每 Agent 隔离） |
 
 ## 架构差异
 
-| 维度 | ClawBench | Operit | Yep Anywhere | Happy | AnyCoding | AI Agent Remote | FeiLaude | Claude Dispatch | Claude Remote | Cursor Agent |
-|------|-----------|--------|-------------|-------|-----------|-----------------|----------|-----------------|---------------|--------------|
-| **架构** | C/S（Go Web + SSE） | 本地 Android App | C/S（TypeScript Web + SSE） | P2P + 中继（E2E 加密同步） | C/S（WebSocket 中继） | C/S（WebSocket 桥接） | IM Bot（飞书 WebSocket） | 中心化（Anthropic 服务器中转） | WebSocket 桥接（node-pty） | 云端异步 Agent |
-| **AI 在哪运行** | 服务器本地 CLI | 手机本地（MNN/llama.cpp）+ 云端 API | 电脑本地 CLI（Agent SDK） | 电脑本地 CLI | 电脑本地 CLI（同 PTY） | 电脑本地 CLI | 电脑本地 CLI | 电脑本地 CLI | 电脑本地 CLI | Cursor 云端 |
-| **手机角色** | 完整工作台 | 完整 Agent（本地执行） | Agent 监控/交互器 | 遥控器 | 遥控器（原生终端） | 遥控器（浏览器终端） | 消息发送器 | 遥控器 | 遥控器 | 任务提交器 |
-| **需电脑在线** | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **后端语言** | Go | Kotlin | TypeScript | TypeScript | JavaScript/Java/Kotlin | JavaScript | Python | — | JavaScript | — |
-| **移动端** | 浏览器 + Android WebView | Jetpack Compose 原生 | 浏览器（Mobile-first Web） | Expo（React Native）原生 | Android 原生（Termux VT100） | 浏览器（xterm.js） | 飞书 App | 原生 App | Tauri 2.0（Android） | PWA |
-| **数据存储** | SQLite 本地持久化 | 本地 SQLite | CLI 会话历史（无额外 DB） | 无持久化（加密同步） | 256KB 环形缓冲 | 无 | YAML 文件 | 云端 | 无 | 云端 |
-| **部署方式** | 单二进制解压即用 | APK 安装（仅 Android） | pnpm install + Docker | npm install + App 配对 | npm install + App 配对 | npm install + 浏览器 | pip install + 飞书 App 配置 | App 登录即用 | npm install + 连接 | 浏览器登录 |
+| 维度 | ClawBench | Operit | Yep Anywhere | Happy | AnyCoding | AI Agent Remote | FeiLaude | Claude Dispatch | Claude Remote | Cursor Agent | Paseo |
+|------|-----------|--------|-------------|-------|-----------|-----------------|----------|-----------------|---------------|--------------|-------|
+| **架构** | C/S（Go Web + SSE） | 本地 Android App | C/S（TypeScript Web + SSE） | P2P + 中继（E2E 加密同步） | C/S（WebSocket 中继） | C/S（WebSocket 桥接） | IM Bot（飞书 WebSocket） | 中心化（Anthropic 服务器中转） | WebSocket 桥接（node-pty） | 云端异步 Agent | Daemon + E2E 加密 WebSocket Relay（Cloudflare DO） |
+| **AI 在哪运行** | 服务器本地 CLI | 手机本地（MNN/llama.cpp）+ 云端 API | 电脑本地 CLI（Agent SDK） | 电脑本地 CLI | 电脑本地 CLI（同 PTY） | 电脑本地 CLI | 电脑本地 CLI | 电脑本地 CLI | 电脑本地 CLI | Cursor 云端 | 电脑本地 CLI（Daemon 子进程） |
+| **手机角色** | 完整工作台 | 完整 Agent（本地执行） | Agent 监控/交互器 | 遥控器 | 遥控器（原生终端） | 遥控器（浏览器终端） | 消息发送器 | 遥控器 | 遥控器 | 任务提交器 | Agent 编排器（多 Agent 协调） |
+| **需电脑在线** | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
+| **后端语言** | Go | Kotlin | TypeScript | TypeScript | JavaScript/Java/Kotlin | JavaScript | Python | — | JavaScript | — | TypeScript |
+| **移动端** | 浏览器 + Android WebView | Jetpack Compose 原生 | 浏览器（Mobile-first Web） | Expo（React Native）原生 | Android 原生（Termux VT100） | 浏览器（xterm.js） | 飞书 App | 原生 App | Tauri 2.0（Android） | PWA | Expo（React Native）iOS + Android + Web + Electron 桌面 |
+| **数据存储** | SQLite 本地持久化 | 本地 SQLite | CLI 会话历史（无额外 DB） | 无持久化（加密同步） | 256KB 环形缓冲 | 无 | YAML 文件 | 云端 | 无 | 云端 | 无额外持久化 |
+| **部署方式** | 单二进制解压即用 | APK 安装（仅 Android） | pnpm install + Docker | npm install + App 配对 | npm install + App 配对 | npm install + 浏览器 | pip install + 飞书 App 配置 | App 登录即用 | npm install + 连接 | 浏览器登录 | npm install + Daemon 启动 |
 
 ## 各竞品详析
 
@@ -195,6 +195,28 @@ Claude Cowork 家族成员，手机远程控制 Claude Code。
 - ❌ 功能简单，无文件/Git/定时任务
 - ❌ 仅 Android
 
+### Paseo（GitHub: getpaseo/paseo，5.5k Stars）
+
+开源 AI 代理编排平台，Daemon + E2E 加密 WebSocket Relay 架构，从手机/桌面/Web/CLI 统一编排多个 AI Agent。名字源自西班牙语"散步"——随时随地查看代理状态。
+
+- ✅ 原生移动应用：Expo (React Native) 同时支持 iOS + Android + Web + Electron 桌面，四端统一体验
+- ✅ E2E 加密 Relay：ECDH 密钥交换 + AES-256-GCM，经 Cloudflare Durable Objects 中转但中继无法读/改流量，NAT 穿透零配置
+- ✅ Agent 间协作 Skills 系统：handoff（交接）、loop（循环到验收）、advisor（顾问）、committee（对抗委员会），多 Agent 编排范式
+- ✅ Git Worktree 一等公民：每个 Agent 自动创建独立 worktree，并行执行互不冲突
+- ✅ 多主机支持：一个客户端连接多台机器的 Daemon，统一查看所有 Agent
+- ✅ 语音控制：本地优先 push-to-talk STT，解放双手
+- ✅ 权限审批 + 推送通知，从任何设备审批 Agent 请求
+- ✅ 内置终端 + MCP Server 模式，可被其他工具集成调用
+- ✅ 社区活跃：5.5k stars，86 个 release，3,000+ commits
+- ❌ 仅 3 种 AI 后端（Claude Code / Codex / OpenCode），不支持 CodeBuddy、Gemini、Qoder、VeCLI
+- ❌ 无文件浏览/编辑器——纯 Agent 遥控，无开发环境
+- ❌ 无 Git 可视化 UI（仅 Diff 查看，无分支图/历史）
+- ❌ 无定时任务（Cron 调度）
+- ❌ 无 TTS 语音合成
+- ❌ 无数据持久化——无 SQLite/DB，会话数据不保留
+- ❌ 需电脑在线（Daemon 运行在电脑上）
+- ❌ 非 Go 单二进制部署，需 Node.js + npm
+
 ### Cursor Background Agent（闭源商业）
 
 Cursor 的云端异步 Agent，通过浏览器/手机提交任务。
@@ -241,13 +263,17 @@ GitHub 官方 AI 编程助手，支持移动端。
 
 ## ClawBench 相对劣势
 
-1. **无端到端加密**：Happy 和 Yep Anywhere 的核心卖点，对隐私极度敏感的用户有吸引力
-2. **无实时语音**：Happy 支持，Operit 更有完整语音管线（唤醒+STT+TTS+连续对话），Yep Anywhere 支持语音输入
+1. **无端到端加密**：Happy、Yep Anywhere 和 Paseo 的核心卖点，对隐私极度敏感的用户有吸引力。Paseo 的 ECDH+AES-256-GCM 方案中继无法读/改流量，安全性最高
+2. **无实时语音**：Happy 支持，Operit 更有完整语音管线（唤醒+STT+TTS+连续对话），Yep Anywhere 支持语音输入，Paseo 支持 push-to-talk STT
 3. **无多客户端同步**：同一会话不能多设备同时操控
-4. **无权限审批机制**：AI 工具调用没有人工审批流程（Happy/Dispatch/Remote 都有，Operit 也有工具级权限控制，Yep Anywhere 有推送审批）
-5. **iOS 无原生 App**：Happy 有 iOS 原生 App
+4. **无权限审批机制**：AI 工具调用没有人工审批流程（Happy/Dispatch/Remote 都有，Operit 也有工具级权限控制，Yep Anywhere 有推送审批，Paseo 支持从任何设备审批）
+5. **iOS 无原生 App**：Happy 和 Paseo 都有 iOS 原生 App，Paseo 更是 iOS+Android+Web+Electron 四端
 6. **无本地模型推理**：Operit 支持 MNN + llama.cpp 完全离线推理，ClawBench 依赖云端/服务器端 AI
 7. **无 UI 自动化能力**：Operit 可通过无障碍/ADB/Root 让 AI 自主操控手机界面，ClawBench 无此能力
-8. **无内置终端/Linux 环境**：Operit 内置 Ubuntu 24 chroot 环境，ClawBench 无终端能力
+8. **无内置终端/Linux 环境**：Operit 内置 Ubuntu 24 chroot 环境，Paseo 内置终端，ClawBench 无终端能力
 9. **无会话分叉/克隆**：Yep Anywhere 支持从任意消息点分叉对话，ClawBench 不支持
 10. **无远程设备串流**：Yep Anywhere 支持通过 WebRTC 串流 Android 设备/模拟器，ClawBench 无此能力
+11. **无 Agent 间协作**：Paseo 的 Skills 系统（handoff/loop/advisor/committee）实现了多 Agent 编排，ClawBench 仅 AutoResume 自动继续
+12. **无 Worktree 自动隔离**：Paseo 为每个 Agent 自动创建独立 worktree，ClawBench 多会话共享同一工作目录
+13. **无多主机支持**：Paseo 可一个客户端连接多台机器的 Daemon，ClawBench 仅单主机
+14. **无 MCP Server 模式**：Paseo Daemon 可作为 MCP Server 被其他工具集成，ClawBench 无此能力

@@ -17,56 +17,59 @@ A comprehensive comparison of mobile AI programming tools, covering both open-so
 | **FeiLaude** | IM bot remote controller | Feishu Bot bridging local Claude Code (message-driven execution + streaming status) | ✅ MIT | 2 |
 | **Claude Dispatch** | Official remote control | Anthropic's official mobile remote control for Claude Code (Cowork family) | ❌ Closed source | — |
 | **Claude Remote** | Remote controller | Unofficial Claude Code remote control, supports API users | ✅ | 30 |
+| **Paseo** | Agent orchestration platform | Multi-device AI agent orchestration (Daemon+Relay, control multiple AI Agents across phone/desktop/CLI) | ✅ AGPL-3.0 | 5.5k |
 | **Cursor Background Agent** | Cloud async Agent | Submit tasks via web/mobile, async execution in the cloud, view results / create PRs | ❌ Closed source | — |
 | **GitHub Copilot** | Official integration | GitHub mobile + web AI programming assistant | ❌ Closed source | — |
 
 ## Feature Matrix
 
-| Feature | ClawBench | Operit | Yep Anywhere | Happy | AnyCoding | AI Agent Remote | FeiLaude | Claude Dispatch | Claude Remote | Cursor Agent | GitHub Copilot |
+| Feature | ClawBench | Operit | Yep Anywhere | Happy | AnyCoding | AI Agent Remote | FeiLaude | Claude Dispatch | Claude Remote | Cursor Agent | GitHub Copilot | Paseo |
 |---------|-----------|--------|-------------|-------|-----------|-----------------|----------|-----------------|---------------|--------------|----------------|
-| **AI backend count** | 5 | 10+ | 2 | 2 | 2+ | 5 | 1 | 1 | 1 | Built-in | Built-in |
-| **File browsing/editing** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Code preview/syntax highlighting** | ✅ | ✅ | ✅ (server-rendered) | ❌ | ✅ (terminal) | ✅ (terminal) | ❌ | ❌ | ✅ | ✅ | ✅ |
-| **Git integration** | ✅ (branch graph/Diff/history) | ✅ (basic) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (PR creation/Diff) | ✅ (PR Review) |
-| **Markdown rendering** | ✅ (KaTeX/Mermaid) | ✅ (KaTeX/Mermaid) | ✅ (server-rendered) | ❌ | ❌ | ❌ | ✅ (Feishu cards) | ❌ | ✅ | ❌ | ❌ |
-| **Scheduled tasks (Cron)** | ✅ | ✅ (workflow scheduled triggers) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **TTS speech synthesis** | ✅ (5 engines) | ✅ (local + cloud) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Media preview** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **SSH tunnel port forwarding** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **End-to-end encryption** | ❌ | ❌ | ✅ (SRP-6a + TweetNaCl) | ✅ | ✅ (Direct mode) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Real-time voice** | ❌ | ✅ (STT + TTS + voice wake-up) | ✅ (voice input) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Push notifications** | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ (Feishu message push) | ✅ | ❌ | ❌ | ✅ |
-| **Multi-client sync** | ❌ | ❌ | ✅ | ✅ | ✅ (multi-tab + multi-PC) | ✅ (multi-browser) | ✅ (multi-user) | ✅ | ✅ | ❌ | ❌ |
-| **Permission approval** | ❌ | ✅ (tool-level permission control) | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ |
-| **PWA install** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| **Self-hosted** | ✅ | ❌ (local app only) | ✅ | ✅ (optional) | ✅ (Direct mode) | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
-| **Offline/LAN** | ✅ | ✅ (local models + offline TTS) | ✅ | ✅ (LAN) | ✅ (LAN/Direct) | ✅ (LAN) | ❌ | ❌ | ✅ | ❌ | ❌ |
-| **Local model inference** | ❌ | ✅ (MNN + llama.cpp) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Built-in terminal/Linux env** | ❌ | ✅ (Ubuntu 24 chroot) | ❌ | ❌ | ✅ (native VT100 terminal) | ✅ (browser terminal) | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **UI automation (control phone)** | ❌ | ✅ (Accessibility/ADB/Root) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **MCP plugin ecosystem** | ❌ | ✅ (MCP marketplace + Skill marketplace) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Persona/character cards** | ❌ | ✅ (import/export/group chat) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Built-in browser** | ❌ | ✅ (tabs + web automation) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Session fork/clone** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Diff viewing** | ✅ (Git Diff) | ❌ | ✅ (Agent Diff) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| **File upload** | ✅ | ✅ | ✅ (camera roll direct) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Remote device streaming** | ❌ | ❌ | ✅ (Android WebRTC) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **IM message interaction** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (Feishu) | ❌ | ❌ | ❌ | ❌ |
-| **Multi-workspace/multi-session** | ✅ (multi-session) | ✅ (multi-session) | ✅ | ✅ | ✅ | ✅ | ✅ (multi-workspace + multi-session) | ❌ | ❌ | ❌ | ❌ |
-| **Task queue** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (auto-queue + merge) | ❌ | ❌ | ❌ | ❌ |
+| **AI backend count** | 5 | 10+ | 2 | 2 | 2+ | 5 | 1 | 1 | 1 | Built-in | Built-in | 3 |
+| **File browsing/editing** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Code preview/syntax highlighting** | ✅ | ✅ | ✅ (server-rendered) | ❌ | ✅ (terminal) | ✅ (terminal) | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ |
+| **Git integration** | ✅ (branch graph/Diff/history) | ✅ (basic) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (PR creation/Diff) | ✅ (PR Review) | ❌ (Diff viewing only) |
+| **Markdown rendering** | ✅ (KaTeX/Mermaid) | ✅ (KaTeX/Mermaid) | ✅ (server-rendered) | ❌ | ❌ | ❌ | ✅ (Feishu cards) | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **Scheduled tasks (Cron)** | ✅ | ✅ (workflow scheduled triggers) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **TTS speech synthesis** | ✅ (5 engines) | ✅ (local + cloud) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Media preview** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **SSH tunnel port forwarding** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **End-to-end encryption** | ❌ | ❌ | ✅ (SRP-6a + TweetNaCl) | ✅ | ✅ (Direct mode) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (ECDH + AES-256-GCM) |
+| **Real-time voice** | ❌ | ✅ (STT + TTS + voice wake-up) | ✅ (voice input) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (Push-to-Talk STT) |
+| **Push notifications** | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ (Feishu message push) | ✅ | ❌ | ❌ | ✅ | ✅ |
+| **Multi-client sync** | ❌ | ❌ | ✅ | ✅ | ✅ (multi-tab + multi-PC) | ✅ (multi-browser) | ✅ (multi-user) | ✅ | ✅ | ❌ | ❌ | ✅ |
+| **Permission approval** | ❌ | ✅ (tool-level permission control) | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| **PWA install** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **Self-hosted** | ✅ | ❌ (local app only) | ✅ | ✅ (optional) | ✅ (Direct mode) | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ |
+| **Offline/LAN** | ✅ | ✅ (local models + offline TTS) | ✅ | ✅ (LAN) | ✅ (LAN/Direct) | ✅ (LAN) | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ (LAN direct) |
+| **Local model inference** | ❌ | ✅ (MNN + llama.cpp) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Built-in terminal/Linux env** | ❌ | ✅ (Ubuntu 24 chroot) | ❌ | ❌ | ✅ (native VT100 terminal) | ✅ (browser terminal) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (built-in terminal) |
+| **UI automation (control phone)** | ❌ | ✅ (Accessibility/ADB/Root) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **MCP plugin ecosystem** | ❌ | ✅ (MCP marketplace + Skill marketplace) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (Daemon as MCP Server) |
+| **Persona/character cards** | ❌ | ✅ (import/export/group chat) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Built-in browser** | ❌ | ✅ (tabs + web automation) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Session fork/clone** | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Diff viewing** | ✅ (Git Diff) | ❌ | ✅ (Agent Diff) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ (Agent Diff) |
+| **File upload** | ✅ | ✅ | ✅ (camera roll direct) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Remote device streaming** | ❌ | ❌ | ✅ (Android WebRTC) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **IM message interaction** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (Feishu) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Multi-workspace/multi-session** | ✅ (multi-session) | ✅ (multi-session) | ✅ | ✅ | ✅ | ✅ | ✅ (multi-workspace + multi-session) | ❌ | ❌ | ❌ | ❌ | ✅ (multi-session + multi-host) |
+| **Task queue** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (auto-queue + merge) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Agent-to-agent orchestration** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (Skills: handoff/loop/advisor/committee) |
+| **Git Worktree isolation** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (auto per-Agent worktree) |
 
 ## Architecture Differences
 
-| Dimension | ClawBench | Operit | Yep Anywhere | Happy | AnyCoding | AI Agent Remote | FeiLaude | Claude Dispatch | Claude Remote | Cursor Agent |
-|-----------|-----------|--------|-------------|-------|-----------|-----------------|----------|-----------------|---------------|--------------|
-| **Architecture** | C/S (Go Web + SSE) | Local Android App | C/S (TypeScript Web + SSE) | P2P + relay (E2E encrypted sync) | C/S (WebSocket relay) | C/S (WebSocket bridge) | IM Bot (Feishu WebSocket) | Centralized (Anthropic server relay) | WebSocket bridge (node-pty) | Cloud async Agent |
-| **Where AI runs** | Server-local CLI | Phone-local (MNN/llama.cpp) + cloud API | PC-local CLI (Agent SDK) | PC-local CLI | PC-local CLI (same PTY) | PC-local CLI | PC-local CLI | PC-local CLI | PC-local CLI | Cursor cloud |
-| **Phone's role** | Full workstation | Full Agent (local execution) | Agent monitor/interactor | Remote controller | Remote controller (native terminal) | Remote controller (browser terminal) | Message sender | Remote controller | Remote controller | Task submitter |
-| **PC must be online** | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **Backend language** | Go | Kotlin | TypeScript | TypeScript | JavaScript/Java/Kotlin | JavaScript | Python | — | JavaScript | — |
-| **Mobile client** | Browser + Android WebView | Jetpack Compose native | Browser (Mobile-first Web) | Expo (React Native) native | Android native (Termux VT100) | Browser (xterm.js) | Feishu App | Native App | Tauri 2.0 (Android) | PWA |
-| **Data storage** | SQLite local persistence | Local SQLite | CLI session history (no extra DB) | No persistence (encrypted sync) | 256KB ring buffer | None | YAML files | Cloud | None | Cloud |
-| **Deployment** | Single binary, extract and run | APK install (Android only) | pnpm install + Docker | npm install + App pairing | npm install + App pairing | npm install + browser | pip install + Feishu App config | App login and go | npm install + connect | Browser login |
+| Dimension | ClawBench | Operit | Yep Anywhere | Happy | AnyCoding | AI Agent Remote | FeiLaude | Claude Dispatch | Claude Remote | Cursor Agent | Paseo |
+|-----------|-----------|--------|-------------|-------|-----------|-----------------|----------|-----------------|---------------|--------------|-------|
+| **Architecture** | C/S (Go Web + SSE) | Local Android App | C/S (TypeScript Web + SSE) | P2P + relay (E2E encrypted sync) | C/S (WebSocket relay) | C/S (WebSocket bridge) | IM Bot (Feishu WebSocket) | Centralized (Anthropic server relay) | WebSocket bridge (node-pty) | Cloud async Agent | Daemon + E2E encrypted WebSocket Relay (Cloudflare DO) |
+| **Where AI runs** | Server-local CLI | Phone-local (MNN/llama.cpp) + cloud API | PC-local CLI (Agent SDK) | PC-local CLI | PC-local CLI (same PTY) | PC-local CLI | PC-local CLI | PC-local CLI | PC-local CLI | Cursor cloud | PC-local CLI (Daemon subprocess) |
+| **Phone's role** | Full workstation | Full Agent (local execution) | Agent monitor/interactor | Remote controller | Remote controller (native terminal) | Remote controller (browser terminal) | Message sender | Remote controller | Remote controller | Task submitter | Agent orchestrator (multi-Agent coordination) |
+| **PC must be online** | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
+| **Backend language** | Go | Kotlin | TypeScript | TypeScript | JavaScript/Java/Kotlin | JavaScript | Python | — | JavaScript | — | TypeScript |
+| **Mobile client** | Browser + Android WebView | Jetpack Compose native | Browser (Mobile-first Web) | Expo (React Native) native | Android native (Termux VT100) | Browser (xterm.js) | Feishu App | Native App | Tauri 2.0 (Android) | PWA | Expo (React Native) iOS + Android + Web + Electron desktop |
+| **Data storage** | SQLite local persistence | Local SQLite | CLI session history (no extra DB) | No persistence (encrypted sync) | 256KB ring buffer | None | YAML files | Cloud | None | Cloud | No extra persistence |
+| **Deployment** | Single binary, extract and run | APK install (Android only) | pnpm install + Docker | npm install + App pairing | npm install + App pairing | npm install + browser | pip install + Feishu App config | App login and go | npm install + connect | Browser login | npm install + Daemon start |
 
 ## Detailed Analysis of Each Competitor
 
@@ -194,6 +197,28 @@ An unofficial Claude Code remote control solution that supports API users.
 - ❌ Simple features, no files/Git/scheduled tasks
 - ❌ Android only
 
+### Paseo (GitHub: getpaseo/paseo, 5.5k Stars)
+
+An open-source AI agent orchestration platform with Daemon + E2E encrypted WebSocket Relay architecture. Orchestrate multiple AI Agents from phone, desktop, web, and CLI. The name means "stroll" in Spanish — check on your agents while away from your desk.
+
+- ✅ Native mobile apps: Expo (React Native) supports iOS + Android + Web + Electron desktop, unified experience across all four platforms
+- ✅ E2E encrypted Relay: ECDH key exchange + AES-256-GCM, relayed via Cloudflare Durable Objects but the relay cannot read/modify traffic; zero-config NAT traversal
+- ✅ Agent-to-agent Skills system: handoff (delegate), loop (iterate to acceptance), advisor (second opinion), committee (adversarial panel) — a multi-Agent orchestration paradigm
+- ✅ Git Worktree first-class: each Agent automatically gets its own isolated worktree, parallel execution without conflicts
+- ✅ Multi-host support: one client connects to Daemons on multiple machines, unified view of all Agents
+- ✅ Voice control: local-first push-to-talk STT, hands-free interaction
+- ✅ Permission approval + push notifications, approve Agent requests from any device
+- ✅ Built-in terminal + MCP Server mode, can be integrated by other tools
+- ✅ Active community: 5.5k stars, 86 releases, 3,000+ commits
+- ❌ Only 3 AI backends (Claude Code / Codex / OpenCode), no support for CodeBuddy, Gemini, Qoder, VeCLI
+- ❌ No file browser/editor — pure Agent remote control, no development environment
+- ❌ No Git visualization UI (Diff viewing only, no branch graph/history)
+- ❌ No scheduled tasks (Cron scheduling)
+- ❌ No TTS speech synthesis
+- ❌ No data persistence — no SQLite/DB, session data not retained
+- ❌ PC must be online (Daemon runs on the PC)
+- ❌ Not a Go single-binary deployment, requires Node.js + npm
+
 ### Cursor Background Agent (Closed-source Commercial)
 
 Cursor's cloud async Agent, submit tasks via browser/mobile.
@@ -240,13 +265,17 @@ GitHub's official AI programming assistant, with mobile support.
 
 ## ClawBench Relative Disadvantages
 
-1. **No end-to-end encryption**: Happy's and Yep Anywhere's core selling point, attractive to users extremely sensitive about privacy
-2. **No real-time voice**: Happy supports this, and Operit has a complete voice pipeline (wake-up + STT + TTS + continuous conversation), Yep Anywhere supports voice input
+1. **No end-to-end encryption**: A core selling point of Happy, Yep Anywhere, and Paseo. Paseo's ECDH + AES-256-GCM scheme ensures the relay cannot read/modify traffic — the highest security guarantee
+2. **No real-time voice**: Happy supports this, and Operit has a complete voice pipeline (wake-up + STT + TTS + continuous conversation), Yep Anywhere supports voice input, Paseo supports push-to-talk STT
 3. **No multi-client sync**: The same session cannot be controlled simultaneously from multiple devices
-4. **No permission approval mechanism**: No human approval flow for AI tool calls (Happy/Dispatch/Remote all have this, Operit has tool-level permission control, Yep Anywhere has push approval)
-5. **No native iOS App**: Happy has a native iOS App
+4. **No permission approval mechanism**: No human approval flow for AI tool calls (Happy/Dispatch/Remote all have this, Operit has tool-level permission control, Yep Anywhere has push approval, Paseo supports approval from any device)
+5. **No native iOS App**: Happy and Paseo both have native iOS Apps; Paseo covers iOS + Android + Web + Electron across all four platforms
 6. **No local model inference**: Operit supports MNN + llama.cpp for fully offline inference; ClawBench depends on cloud/server-side AI
 7. **No UI automation capability**: Operit can let AI autonomously control the phone's UI via Accessibility/ADB/Root; ClawBench has no such capability
-8. **No built-in terminal/Linux environment**: Operit has a built-in Ubuntu 24 chroot environment; ClawBench has no terminal capability
+8. **No built-in terminal/Linux environment**: Operit has a built-in Ubuntu 24 chroot environment, Paseo has a built-in terminal; ClawBench has no terminal capability
 9. **No session fork/clone**: Yep Anywhere supports forking conversations from any message point; ClawBench does not
 10. **No remote device streaming**: Yep Anywhere supports streaming Android devices/emulators via WebRTC; ClawBench has no such capability
+11. **No agent-to-agent orchestration**: Paseo's Skills system (handoff/loop/advisor/committee) enables multi-Agent orchestration; ClawBench only has AutoResume auto-continuation
+12. **No automatic Worktree isolation**: Paseo automatically creates an isolated worktree per Agent; ClawBench's multiple sessions share the same working directory
+13. **No multi-host support**: Paseo can connect one client to Daemons on multiple machines; ClawBench is single-host only
+14. **No MCP Server mode**: Paseo's Daemon can serve as an MCP Server for integration by other tools; ClawBench has no such capability
