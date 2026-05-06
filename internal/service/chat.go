@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"clawbench/internal/model"
 )
@@ -111,7 +112,7 @@ func AddChatMessage(projectPath, backend, sessionID, role, content string, files
 	defer tx.Rollback()
 
 	result, err := tx.Exec(
-		"INSERT INTO chat_history (project_path, backend, session_id, role, content, file_path, files, streaming) VALUES (?, ?, ?, ?, ?, '', ?, ?)",
+		"INSERT INTO chat_history (project_path, backend, session_id, role, content, file_path, files, streaming, indexed) VALUES (?, ?, ?, ?, ?, '', ?, ?, 0)",
 		projectPath, backend, sessionID, role, content, filesJSON, streamingInt,
 	)
 	if err != nil {
@@ -325,9 +326,10 @@ func UpdateStreamingMessage(projectPath, backend, sessionID, content string) err
 }
 
 // FinalizeStreamingMessage marks the streaming assistant message as complete and updates its content.
+// Also marks the message as unindexed (indexed=0) so the RAG indexer picks it up.
 func FinalizeStreamingMessage(projectPath, backend, sessionID, content string) error {
 	_, err := DB.Exec(
-		"UPDATE chat_history SET content = ?, streaming = 0 WHERE project_path = ? AND backend = ? AND session_id = ? AND role = 'assistant' AND streaming = 1",
+		"UPDATE chat_history SET content = ?, streaming = 0, indexed = 0 WHERE project_path = ? AND backend = ? AND session_id = ? AND role = 'assistant' AND streaming = 1",
 		content, projectPath, backend, sessionID,
 	)
 	return err
@@ -377,4 +379,44 @@ func GetExternalSessionID(sessionID string) string {
 		return ""
 	}
 	return externalID
+}
+
+// UnindexedMessage represents a chat message that has not yet been indexed by RAG.
+type UnindexedMessage struct {
+	ID          int64     `json:"id"`
+	Content     string    `json:"content"`
+	Role        string    `json:"role"`
+	SessionID   string    `json:"session_id"`
+	ProjectPath string    `json:"project_path"`
+	Backend     string    `json:"backend"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// GetUnindexedMessages fetches chat messages that have not been indexed by RAG.
+// Returns up to limit messages ordered by creation time.
+func GetUnindexedMessages(limit int) ([]UnindexedMessage, error) {
+	rows, err := DB.Query(
+		"SELECT id, content, role, session_id, project_path, backend, created_at FROM chat_history WHERE indexed = 0 AND streaming = 0 ORDER BY created_at ASC LIMIT ?",
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []UnindexedMessage
+	for rows.Next() {
+		var m UnindexedMessage
+		if err := rows.Scan(&m.ID, &m.Content, &m.Role, &m.SessionID, &m.ProjectPath, &m.Backend, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		messages = append(messages, m)
+	}
+	return messages, rows.Err()
+}
+
+// MarkMessageIndexed marks a chat message as indexed by RAG.
+func MarkMessageIndexed(messageID int64) error {
+	_, err := DB.Exec("UPDATE chat_history SET indexed = 1 WHERE id = ?", messageID)
+	return err
 }

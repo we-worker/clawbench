@@ -147,5 +147,30 @@ func ApplyDefaults(cfg *Config, presence map[string]bool) string {
 		cfg.TTS.MaxSummarizeRunes = 10000
 	}
 
+	// --- RAG ---
+	// Bool zero-value: Go defaults to false, which IS the desired default for RAG.
+	// No presence check needed — "rag.enabled" absent means false (disabled).
+	if cfg.RAG.OllamaBaseURL == "" {
+		cfg.RAG.OllamaBaseURL = "http://localhost:11434"
+	}
+	if cfg.RAG.OllamaModel == "" {
+		cfg.RAG.OllamaModel = "bge-m3"
+	}
+	if cfg.RAG.ChunkSize <= 0 {
+		cfg.RAG.ChunkSize = 512
+	}
+	if cfg.RAG.ChunkOverlap <= 0 {
+		cfg.RAG.ChunkOverlap = 64
+	}
+	if cfg.RAG.PollInterval == "" {
+		cfg.RAG.PollInterval = "10s"
+	}
+	if cfg.RAG.BatchSize <= 0 {
+		cfg.RAG.BatchSize = 10
+	}
+	if cfg.RAG.SearchLimit <= 0 {
+		cfg.RAG.SearchLimit = 5
+	}
+
 	return autoPassword
 }

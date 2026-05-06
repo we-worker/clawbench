@@ -162,6 +162,18 @@ func InitDB() error {
 		}
 	}
 
+	// Add indexed column if it doesn't exist (for RAG history memory indexing)
+	var hasIndexed int
+	row = DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('chat_history') WHERE name = 'indexed'")
+	if err := row.Scan(&hasIndexed); err != nil {
+		return fmt.Errorf("failed to check indexed column: %w", err)
+	}
+	if hasIndexed == 0 {
+		if _, err := DB.Exec("ALTER TABLE chat_history ADD COLUMN indexed INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("failed to add indexed column: %w", err)
+		}
+	}
+
 	// Clean up orphaned streaming messages from previous crashes/restarts.
 	// Any message with streaming=1 at startup can never be finalized since
 	// its stream no longer exists. Mark them as cancelled so the UI shows

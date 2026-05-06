@@ -135,3 +135,19 @@ func loadCommonPrompt(dir string) string {
 	}
 	return strings.TrimSpace(string(data))
 }
+
+// RAGPrompt holds the loaded RAG prompt template, ready for injection.
+// Set by LoadRAGPrompt at startup when rag.enabled is true.
+var RAGPrompt string
+
+// LoadRAGPrompt loads the RAG prompt template from config/rag_prompt.md
+// and replaces {{PORT}} with the actual port number.
+func LoadRAGPrompt(configDir string, port int) error {
+	path := filepath.Join(configDir, "rag_prompt.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read rag prompt: %w", err)
+	}
+	RAGPrompt = strings.ReplaceAll(strings.TrimSpace(string(data)), "{{PORT}}", fmt.Sprintf("%d", port))
+	return nil
+}

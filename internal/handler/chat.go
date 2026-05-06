@@ -762,6 +762,15 @@ func buildChatRequest(prompt, sessionID, backendName, agentID, modelOverride, fi
 		}
 	}
 
+	// Inject RAG prompt if enabled
+	if model.RAGPrompt != "" {
+		if systemPrompt != "" {
+			systemPrompt = systemPrompt + "\n\n" + model.RAGPrompt
+		} else {
+			systemPrompt = model.RAGPrompt
+		}
+	}
+
 	// For OpenCode/Codex backends, resolve external session ID when resuming
 	effectiveSessionID := sessionID
 	resume := service.SessionHasAssistant(sessionID)

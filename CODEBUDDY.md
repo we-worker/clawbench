@@ -58,6 +58,7 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 - `internal/middleware/` — Auth, request logging, panic recovery, request ID.
 - `internal/speech/` — TTS abstraction (`SpeechProvider` interface). Implementations: MiniMax (cloud), Edge TTS (cloud, free), Piper (local offline), Kokoro (local ONNX-based). `summarizer.go` provides TTS summarization via multiple AI backends (mmx-cli, claude, codebuddy, gemini, opencode, codex, qoder, vecli, ollama) for long-text compression before speech. `ollama_summarizer.go` calls Ollama HTTP API (`/api/chat`, stream:false) — the first direct HTTP client in the Go backend (all others shell out to CLI tools).
 - `internal/ssh/` — SSH tunnel server (`server.go`). Supports direct-tcpip channels (-L port forwarding), password auth, ECDSA host key generation/persistence. Integrates with ProxyRegistry for port validation.
+- `internal/rag/` — RAG history memory system. DuckDB vector store (`store.go`), text chunker (`chunker.go`), Ollama embedding client (`embedding.go`), indexer worker (`indexer.go`), search (`search.go`), entry point (`rag.go`). When `rag.enabled`, indexes chat messages after finalization and provides semantic search API.
 - `internal/platform/` — Platform-specific adaptations (Windows paths).
 
 **Agent system:** YAML files in `config/agents/` define agents with id, backend, model, system_prompt, and optional `command` (custom CLI path). `agent_common_prompt.md` is prepended to all agents. `{{AVAILABLE_AGENTS}}` placeholder is replaced with the agent list. Loaded at startup by `model.LoadAgents()`. Agent prompts may include `<schedule-proposal>` tag format for the scheduled task system.
@@ -80,6 +81,13 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 1. SSH server listens on `port+1` (or configured port)
 2. Android app connects via SSH and opens direct-tcpip channels
 3. `ProxyRegistry` manages forwarded ports with health checks (5s interval), auto-detection, TLS probing
+
+**RAG history memory system:**
+1. When `rag.enabled: true`, chat messages are indexed into DuckDB vector store after finalization
+2. `chat_history.indexed` column tracks indexing state; indexer polls every 10s for unindexed messages
+3. Text blocks are extracted (excluding thinking/tool_use), chunked with 512-token sliding window, embedded via Ollama BGE-M3
+4. AI agents can search history via `GET /api/rag/search` (no auth, localhost only)
+5. System prompt includes RAG skill description from `config/rag_prompt.md` when enabled
 4. Frontend browses forwarded ports via `PortForwardBrowser` component
 
 **Session runtime management** (`session_runtime.go`):
@@ -189,6 +197,7 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 | TTS | `tts.engine` (minimax/edge/piper/kokoro/moss-nano), `tts.summarize_backend` (mmx-cli/claude/codebuddy/gemini/opencode/codex/qoder/vecli/ollama), `tts.summarize_model`, `tts.speed`, `tts.voice`, engine-specific sub-configs, `tts.ollama.base_url` |
 | Proxy | `proxy.enabled`, `proxy.allowed_ports` |
 | SSH | `ssh.enabled`, `ssh.port`, `ssh.host_key` |
+| RAG | `rag.enabled`, `rag.ollama_base_url`, `rag.ollama_model` (bge-m3), `rag.chunk_size` (512), `rag.chunk_overlap` (64), `rag.poll_interval` (10s), `rag.batch_size` (10), `rag.search_limit` (5) |
 | Dev | `dev.port`, `dev.frontend_port`, `dev.host` |
 | Logging | `log_dir`, `log_max_days`, `default_agent` |
 
@@ -199,4 +208,4 @@ Dev mode uses separate port (20002) and database (`ClawBench-dev.db`).
 - Go tests use `testify/assert`. Test files colocated with source (`*_test.go`). 40 test files across 8 packages.
 - Frontend tests use Vitest + `@vue/test-utils`. Located in `web/src/components/__tests__/`.
 - Many handler tests need a running test server — see `testutil_test.go` in handler package.
-- Key test packages: `ai/` (stream parsers, auto-resume, factory), `handler/` (auth, chat, files, git, proxy, scheduler, SSH info, TTS), `service/` (chat, proxy, scheduler, stream, uuid), `speech/` (minimax, piper, kokoro, moss_tts_nano, ollama), `ssh/` (server).
+- Key test packages: `ai/` (stream parsers, auto-resume, factory), `handler/` (auth, chat, files, git, proxy, scheduler, SSH info, TTS), `service/` (chat, proxy, scheduler, stream, uuid), `speech/` (minimax, piper, kokoro, moss_tts_nano, ollama), `ssh/` (server), `rag/` (chunker, store).

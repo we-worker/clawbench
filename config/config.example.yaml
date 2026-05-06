@@ -231,3 +231,19 @@ ssh:
                             # SSH 端口（0 = 自动 = 主端口+1，如生产环境 20001；也可指定如 20020）
   host_key: ""              # Host key file path (empty = auto-generate ephemeral key; set a path for persistence across restarts)
                             # Host key 文件路径（空 = 自动生成临时密钥，重启后变更；建议指定路径以持久化）
+
+# RAG history memory configuration / RAG 历史记忆配置
+# When enabled, chat messages are automatically indexed into a vector database (DuckDB + BGE-M3),
+# and AI agents can search historical conversations via the RAG API.
+# 启用后，聊天消息自动索引到向量数据库（DuckDB + BGE-M3），AI 智能体可通过 RAG API 搜索历史对话。
+# Prerequisite: Ollama must be running with the bge-m3 model pulled (ollama pull bge-m3)
+# 前提条件：Ollama 需运行并拉取 bge-m3 模型（ollama pull bge-m3）
+# rag:
+#   enabled: false                  # Enable RAG history memory (default: false) / 启用 RAG 历史记忆（默认: false）
+#   ollama_base_url: "http://localhost:11434"  # Ollama API URL / Ollama API 地址
+#   ollama_model: "bge-m3"          # Embedding model name / Embedding 模型名
+#   chunk_size: 512                  # Chunk size in tokens (default: 512) / 分块大小（token，默认: 512）
+#   chunk_overlap: 64                # Overlap between chunks in tokens (default: 64) / 分块重叠（token，默认: 64）
+#   poll_interval: "10s"             # Indexer poll interval (default: 10s) / 索引轮询间隔（默认: 10s）
+#   batch_size: 10                   # Messages per indexer batch (default: 10) / 每轮索引消息数（默认: 10）
+#   search_limit: 5                  # Default search result limit (default: 5) / 默认搜索结果数量（默认: 5）

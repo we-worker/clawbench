@@ -15,6 +15,7 @@ import (
 
 	"clawbench/internal/handler"
 	"clawbench/internal/model"
+	"clawbench/internal/rag"
 	"clawbench/internal/service"
 	"clawbench/internal/ssh"
 	"clawbench/internal/speech"
@@ -409,6 +410,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize RAG history memory system (if enabled)
+	if cfg.RAG.Enabled {
+		if err := rag.Init(cfg.RAG); err != nil {
+			slog.Error("failed to initialize RAG system", slog.String("err", err.Error()))
+			os.Exit(1)
+		}
+		defer rag.Shutdown()
+	}
+
 	// Initialize and start scheduler
 	scheduler := service.NewScheduler()
 	// Load all tasks from all projects
@@ -444,6 +454,28 @@ func main() {
 		slog.String("watch_dir", model.WatchDir),
 		slog.Bool("auth_enabled", model.SessionToken != ""),
 	)
+
+	// Initialize RAG prompt and indexer (needs final port number)
+	if cfg.RAG.Enabled && rag.GlobalStore != nil {
+		// Load RAG prompt template with port substitution
+		configDir := filepath.Join(model.BinDir, "config")
+		if _, err := os.Stat(configDir); os.IsNotExist(err) {
+			configDir = "config"
+		}
+		if err := model.LoadRAGPrompt(configDir, port); err != nil {
+			slog.Warn("failed to load RAG prompt, RAG search will work but AI won't know about it",
+				slog.String("err", err.Error()),
+			)
+		} else {
+			slog.Info("rag prompt loaded", slog.Int("port", port))
+		}
+
+		// Start RAG indexer
+		rag.StartIndexer(cfg.RAG)
+
+		// Configure RAG search handler
+		handler.SetRAGService(rag.GlobalStore, rag.GlobalEmbedder, cfg.RAG.SearchLimit)
+	}
 
 	// Initialize proxy service (port forwarding) — needs the final port number
 	proxyService := service.NewProxyRegistry(cfg.Proxy, port)
