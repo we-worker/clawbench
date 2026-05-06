@@ -455,9 +455,8 @@ onUnmounted(() => {
 }
 
 .chat-tool-call .tool-icon {
-  color: var(--tool-accent);
-  opacity: 0.8;
-  flex-shrink: 0;
+    color: color-mix(in srgb, var(--tool-accent) 80%, transparent);
+    flex-shrink: 0;
 }
 
 .chat-tool-call .tool-name {

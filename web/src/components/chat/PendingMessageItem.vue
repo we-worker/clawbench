@@ -43,13 +43,14 @@ const hasFiles = computed(() => allFiles.value.length > 0)
 <style scoped>
 /* Reuse .chat-message.user styles — only override transparency and dashed border */
 .chat-message.user.pending {
-  opacity: 0.55;
-  border: 1px dashed rgba(255, 255, 255, 0.5);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  animation: pending-fade-in 0.25s ease-out;
+    color: rgba(255, 255, 255, 0.55);
+    background: color-mix(in srgb, var(--user-msg-color) 55%, transparent);
+    border: 1px dashed rgba(255, 255, 255, 0.5);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    animation: pending-fade-in 0.25s ease-out;
 }
 
 .pending-text {
@@ -96,7 +97,7 @@ const hasFiles = computed(() => allFiles.value.length > 0)
 }
 
 @keyframes pending-fade-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 0.55; transform: translateY(0); }
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 </style>

@@ -351,8 +351,7 @@ const { getAgentIcon, getAgentName } = chatSession
     align-items: center;
     gap: 6px;
     font-size: 11px;
-    color: var(--text-secondary);
-    opacity: 0.7;
+    color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
     min-width: 0;
     overflow: hidden;
 }
@@ -434,12 +433,12 @@ const { getAgentIcon, getAgentName } = chatSession
 
 /* User message meta bar */
 .chat-meta-bar-user {
-    opacity: 0.6;
-    transition: opacity 0.2s;
+    color: color-mix(in srgb, var(--text-secondary) 60%, transparent);
+    transition: color 0.2s;
 }
 
 .chat-meta-bar-user:hover {
-    opacity: 1;
+    color: var(--text-secondary);
 }
 
 .chat-info-btn-user {
@@ -469,7 +468,7 @@ const { getAgentIcon, getAgentName } = chatSession
     word-break: break-word;
     max-width: 100%;
     box-sizing: border-box;
-    contain: layout style;
+    contain: style;
 }
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

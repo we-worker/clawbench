@@ -381,9 +381,8 @@ defineExpose({
 }
 
 .agent-welcome-hint {
-  font-size: 12px;
-  color: var(--text-muted);
-  opacity: 0.7;
+    font-size: 12px;
+    color: color-mix(in srgb, var(--text-muted) 70%, transparent);
 }
 
 /* Lazy load feedback area */

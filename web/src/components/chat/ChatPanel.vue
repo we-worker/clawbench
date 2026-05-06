@@ -617,10 +617,13 @@ onUnmounted(() => {
   letter-spacing: 0.3px;
   position: absolute;
   top: 48px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
   z-index: 10;
   max-width: 260px;
+  margin: 0 auto;
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-md);
 }
@@ -710,22 +713,22 @@ onUnmounted(() => {
 @keyframes indicator-slide-left {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateX(30px) scale(0.9);
+    transform: translateX(30px) scale(0.9);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) scale(1);
+    transform: scale(1);
   }
 }
 
 @keyframes indicator-slide-right {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateX(-30px) scale(0.9);
+    transform: translateX(-30px) scale(0.9);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) scale(1);
+    transform: scale(1);
   }
 }
 
@@ -743,6 +746,6 @@ onUnmounted(() => {
 
 .session-indicator-leave-to {
   opacity: 0;
-  transform: translateX(-50%) scale(0.95);
+  transform: scale(0.95);
 }
 </style>

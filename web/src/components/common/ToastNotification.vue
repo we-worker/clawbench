@@ -22,8 +22,9 @@ defineProps({
 .toast {
     position: fixed;
     bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 0;
+    right: 0;
+    margin: 0 auto;
     background: var(--accent-color, #4a90d9);
     color: #fff;
     border-radius: 24px;
@@ -79,7 +80,7 @@ defineProps({
 
 .toast:active {
     opacity: 0.8;
-    transform: translateX(-50%) scale(0.97);
+    transform: scale(0.97);
 }
 
 .toast-icon {
@@ -98,6 +99,6 @@ defineProps({
 .toast-enter-from,
 .toast-leave-to {
     opacity: 0;
-    transform: translateX(-50%) translateY(12px);
+    transform: translateY(12px);
 }
 </style>
