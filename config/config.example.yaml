@@ -248,3 +248,19 @@ ssh:
 #   batch_size: 10                   # Messages per indexer batch (default: 10) / 每轮索引消息数（默认: 10）
 #   search_limit: 5                  # Default search result limit (default: 5) / 默认搜索结果数量（默认: 5）
 #   retention_days: 90               # Soft-deleted data retention days, 0=keep forever (default: 90) / 软删除数据保留天数，0=永久保留（默认: 90）
+
+# Terminal configuration / 终端配置
+# Interactive web terminal with PTY + WebSocket + xterm.js
+# 交互式 Web 终端，基于 PTY + WebSocket + xterm.js
+# Default: enabled / 默认：启用
+# terminal:
+#   enabled: true             # Enable terminal (default: true) / 启用终端（默认: true）
+#   idle_timeout: "10m"       # Close PTY after no WS connections for this duration (default: 10m) / 无连接超时关闭（默认: 10m）
+#   buffer_lines: 2000        # Replay buffer line count (default: 2000) / 回放缓冲行数（默认: 2000）
+#   max_line_bytes: 65536     # Per-line byte cap to prevent memory bloat (default: 64KB) / 单行字节上限（默认: 64KB）
+#   max_buffer_mb: 4          # Total buffer memory cap in MB (default: 4) / 缓冲总内存上限 MB（默认: 4）
+#   quick_commands:           # Quick commands shown in toolbar / 工具栏快捷指令
+#     - label: "Git Status"
+#       command: "git status"
+#     - label: "Build"
+#       command: "npm run build"

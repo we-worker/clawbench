@@ -1,0 +1,577 @@
+<template>
+  <BottomSheet ref="bottomSheetRef" :open="open" @close="$emit('close')" noHeader>
+    <div class="terminal-panel" :style="panelStyle">
+      <!-- Header -->
+      <div class="terminal-header" @click.self="focusTerminal">
+        <div class="terminal-header-left">
+          <TerminalIcon :size="16" />
+          <span class="terminal-title">{{ t('terminal.title') }}</span>
+          <span v-if="currentCwd" class="terminal-cwd" :title="currentCwd">{{ shortCwd }}</span>
+        </div>
+        <div class="terminal-header-right">
+          <span v-if="connectionState === 'connected'" class="terminal-status connected">{{ t('terminal.connected') }}</span>
+          <span v-else-if="connectionState === 'connecting' || connectionState === 'reconnecting'" class="terminal-status connecting">{{ t('terminal.reconnecting') }}</span>
+          <span v-else class="terminal-status disconnected">{{ t('terminal.disconnected') }}</span>
+        </div>
+      </div>
+
+      <!-- Terminal viewport -->
+      <div ref="terminalContainer" class="terminal-container" @click.self="focusTerminal">
+        <!-- Error overlay -->
+        <div v-if="showErrorOverlay" class="terminal-error-overlay">
+          <p>{{ errorDisplayMessage }}</p>
+          <button v-if="canReconnect" class="terminal-reconnect-btn" @click="handleReconnect">{{ t('terminal.reconnect') }}</button>
+        </div>
+
+        <!-- xterm.js will mount here -->
+      </div>
+
+      <!-- Virtual key toolbar -->
+      <div class="terminal-toolbar">
+        <button class="toolbar-btn" @pointerdown.prevent="terminalKeys.sendEscape(); focusTerminal()" :title="'Esc'">Esc</button>
+        <button class="toolbar-btn" @pointerdown.prevent="terminalKeys.sendTab(); focusTerminal()" :title="'Tab'">Tab</button>
+        <button class="toolbar-btn modifier" :class="{ active: terminalKeys.activeModifiers.value.ctrl !== 'inactive', locked: terminalKeys.activeModifiers.value.ctrl === 'locked' }" @pointerdown.prevent="handleModifier('ctrl')" @contextmenu.prevent>Ctl</button>
+        <button class="toolbar-btn modifier" :class="{ active: terminalKeys.activeModifiers.value.alt !== 'inactive', locked: terminalKeys.activeModifiers.value.alt === 'locked' }" @pointerdown.prevent="handleModifier('alt')" @contextmenu.prevent>Alt</button>
+        <button class="toolbar-btn" @pointerdown.prevent="terminalKeys.sendCtrlC(); focusTerminal()" :title="'Ctrl+C'">C-C</button>
+        <button class="toolbar-btn arrow" @pointerdown.prevent="terminalKeys.sendArrowLeft(); focusTerminal()">←</button>
+        <button class="toolbar-btn arrow" @pointerdown.prevent="terminalKeys.sendArrowDown(); focusTerminal()">↓</button>
+        <button class="toolbar-btn arrow" @pointerdown.prevent="terminalKeys.sendArrowUp(); focusTerminal()">↑</button>
+        <button class="toolbar-btn arrow" @pointerdown.prevent="terminalKeys.sendArrowRight(); focusTerminal()">→</button>
+        <button v-if="quickCommands.length > 0" class="toolbar-btn" @click="showCommands = !showCommands" :title="t('terminal.quickCommands')">
+          <ListIcon :size="14" />
+        </button>
+        <button class="toolbar-btn" @click="handleCopyOutput" :title="t('terminal.copyOutput')">
+          <CopyIcon :size="14" />
+        </button>
+        <button class="toolbar-btn danger" @click="handleClose" :title="t('terminal.closeProcess')">
+          <XIcon :size="14" />
+        </button>
+      </div>
+
+      <!-- Quick commands popup -->
+      <div v-if="showCommands" class="terminal-commands-popup">
+        <div v-for="(cmd, i) in quickCommands" :key="i" class="command-item" @click="executeCommand(cmd)">
+          {{ cmd.label }}
+        </div>
+        <div v-if="quickCommands.length === 0" class="command-empty">{{ t('terminal.noQuickCommands') }}</div>
+      </div>
+    </div>
+  </BottomSheet>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import '@xterm/xterm/css/xterm.css'
+
+import BottomSheet from '@/components/common/BottomSheet.vue'
+import { useTerminalSession } from '@/composables/useTerminalSession'
+import { useTerminalViewport } from '@/composables/useTerminalViewport'
+import { useTerminalKeys } from '@/composables/useTerminalKeys'
+import { useTerminalGestures } from '@/composables/useTerminalGestures'
+import { useToast } from '@/composables/useToast'
+import { store } from '@/stores/app'
+
+import { Terminal as TerminalIcon, Copy as CopyIcon, X as XIcon, List as ListIcon } from 'lucide-vue-next'
+
+const props = defineProps<{
+  open: boolean
+}>()
+
+const emit = defineEmits<{
+  close: []
+  open: []
+}>()
+
+const { t } = useI18n()
+const toast = useToast()
+
+// Refs
+const bottomSheetRef = ref<InstanceType<typeof BottomSheet> | null>(null)
+const terminalContainer = ref<HTMLElement | null>(null)
+const xterm = ref<Terminal | null>(null)
+const fitAddon = ref<FitAddon | null>(null)
+const showCommands = ref(false)
+const quickCommands = ref<{ label: string; command: string }[]>([])
+
+// Compute the initial cwd from current file context
+function computeCwd(): string {
+  const currentFile = store.state.currentFile
+  if (currentFile?.path) {
+    // Use the directory of the current file
+    const parts = currentFile.path.split('/')
+    parts.pop()
+    return parts.join('/')
+  }
+  // Fallback: use currentDir or project root
+  return store.state.currentDir || ''
+}
+
+// Terminal session
+const getWsUrl = () => {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const cwd = computeCwd()
+  const cwdParam = cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''
+  return `${proto}//${location.host}/api/terminal/ws${cwdParam}`
+}
+
+const session = useTerminalSession(getWsUrl)
+const { connectionState, errorMessage, errorCode, currentCwd } = session
+
+// Terminal viewport
+const viewport = useTerminalViewport(xterm, terminalContainer)
+
+// Terminal keys
+const terminalKeys = useTerminalKeys(session.sendInput)
+
+// Terminal gestures (Termius-style: swipe arrows, double-tap Tab)
+const gestures = useTerminalGestures(terminalContainer, {
+  sendArrowUp: terminalKeys.sendArrowUp,
+  sendArrowDown: terminalKeys.sendArrowDown,
+  sendArrowLeft: terminalKeys.sendArrowLeft,
+  sendArrowRight: terminalKeys.sendArrowRight,
+  sendTab: terminalKeys.sendTab,
+})
+
+// Computed
+const shortCwd = computed(() => {
+  if (!currentCwd.value) return ''
+  const parts = currentCwd.value.split('/')
+  return parts.length > 2 ? '.../' + parts.slice(-2).join('/') : currentCwd.value
+})
+
+const showErrorOverlay = computed(() => {
+  return connectionState.value === 'error' || connectionState.value === 'disconnected'
+})
+
+const canReconnect = computed(() => {
+  return errorCode.value !== 'session_in_use'
+})
+
+const errorDisplayMessage = computed(() => {
+  if (errorCode.value === 'session_in_use') return t('terminal.sessionInUse')
+  if (errorCode.value === 'terminal_disabled') return t('terminal.disabled')
+  if (errorCode.value === 'shell_start_failed') return t('terminal.shellStartFailed')
+  return errorMessage.value || t('terminal.websocketFailed')
+})
+
+const panelStyle = computed(() => ({
+  '--keyboard-height': `${viewport.keyboardHeight.value}px`,
+}))
+
+// Theme
+function getXtermTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  return isDark ? darkTheme : lightTheme
+}
+
+const darkTheme = {
+  background: '#1e1e2e',
+  foreground: '#cdd6f4',
+  cursor: '#f5e0dc',
+  cursorAccent: '#1e1e2e',
+  selectionBackground: '#585b7066',
+  black: '#45475a', red: '#f38ba8', green: '#a6e3a1', yellow: '#f9e2af',
+  blue: '#89b4fa', magenta: '#f5c2e7', cyan: '#94e2d5', white: '#bac2de',
+  brightBlack: '#585b70', brightRed: '#f38ba8', brightGreen: '#a6e3a1',
+  brightYellow: '#f9e2af', brightBlue: '#89b4fa', brightMagenta: '#f5c2e7',
+  brightCyan: '#94e2d5', brightWhite: '#a6adc8',
+}
+
+const lightTheme = {
+  background: '#eff1f5',
+  foreground: '#4c4f69',
+  cursor: '#dc8a78',
+  cursorAccent: '#eff1f5',
+  selectionBackground: '#acb0be66',
+  black: '#bcc0cc', red: '#d20f39', green: '#40a02b', yellow: '#df8e1d',
+  blue: '#1e66f5', magenta: '#ea76cb', cyan: '#179299', white: '#4c4f69',
+  brightBlack: '#9ca0b0', brightRed: '#d20f39', brightGreen: '#40a02b',
+  brightYellow: '#df8e1d', brightBlue: '#1e66f5', brightMagenta: '#ea76cb',
+  brightCyan: '#179299', brightWhite: '#6c6f85',
+}
+
+// Initialize xterm
+function initTerminal() {
+  if (xterm.value) return
+
+  const term = new Terminal({
+    theme: getXtermTheme(),
+    fontSize: 14,
+    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+    cursorBlink: true,
+    convertEol: true,
+    scrollback: 5000,
+    selectionStyle: 'line',
+  })
+
+  const fit = new FitAddon()
+  term.loadAddon(fit)
+  term.loadAddon(new WebLinksAddon())
+
+  // Store addons for later access
+  ;(term as any).fitAddon = fit
+  fitAddon.value = fit
+
+  // Handle terminal input
+  term.onData((data) => {
+    const processed = terminalKeys.processInput(data)
+    session.sendInput(processed)
+  })
+
+  // Send resize to backend when terminal dimensions change
+  term.onResize(({ cols, rows }) => {
+    session.sendResize(cols, rows)
+  })
+
+  // Set up session callbacks
+  session.setCallbacks({
+    onOutput: (data) => {
+      term.write(data)
+    },
+    onReplay: (data) => {
+      term.write(data)
+    },
+    onStatus: (status) => {
+      // Terminal is ready
+    },
+    onExit: (code) => {
+      toast.show(t('terminal.ptyExited'))
+    },
+    onError: (message, code) => {
+      // Error displayed via overlay
+    },
+  })
+
+  xterm.value = term
+}
+
+// Mount terminal to DOM
+async function mountTerminal() {
+  if (!xterm.value || !terminalContainer.value) return
+
+  // Only open if not already
+  if (xterm.value.element) return
+
+  xterm.value.open(terminalContainer.value)
+
+  await nextTick()
+  viewport.startWatching()
+  gestures.attach()
+  focusTerminal()
+
+  // Connect WebSocket
+  try {
+    await session.connect()
+  } catch (err) {
+    console.error('terminal: connection failed', err)
+  }
+}
+
+function focusTerminal() {
+  xterm.value?.focus()
+}
+
+// Watch open/close
+watch(() => props.open, async (isOpen) => {
+  if (isOpen) {
+    emit('open')
+    initTerminal()
+    await nextTick()
+    await mountTerminal()
+  }
+}, { immediate: true })
+
+// Watch theme changes
+let themeObserver: MutationObserver | null = null
+
+onMounted(async () => {
+  // Load quick commands from config API
+  try {
+    const resp = await fetch('/api/terminal/config')
+    if (resp.ok) {
+      const data = await resp.json()
+      quickCommands.value = data.quick_commands || []
+    }
+  } catch {
+    // Config not available — no quick commands
+  }
+
+  // Watch for theme changes
+  themeObserver = new MutationObserver(() => {
+    if (xterm.value) {
+      xterm.value.options.theme = getXtermTheme()
+    }
+  })
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
+  })
+})
+
+onBeforeUnmount(() => {
+  themeObserver?.disconnect()
+  viewport.stopWatching()
+  gestures.detach()
+  session.disconnect()
+  xterm.value?.dispose()
+  xterm.value = null
+})
+
+// Actions
+function handleModifier(key: 'ctrl' | 'alt' | 'shift') {
+  terminalKeys.toggleModifier(key, false)
+  focusTerminal()
+}
+
+function handleReconnect() {
+  session.disconnect()
+  session.connect().then(() => {
+    focusTerminal()
+  }).catch(() => {
+    // Error will be shown via overlay
+  })
+}
+
+function handleClose() {
+  session.sendClose()
+  terminalKeys.reset()
+  showCommands.value = false
+}
+
+function handleCopyOutput() {
+  if (!xterm.value) return
+  const buffer = xterm.value.buffer.active
+  const lines: string[] = []
+  for (let i = 0; i < buffer.length; i++) {
+    const line = buffer.getLine(i)?.translateToString(true)
+    if (line) lines.push(line)
+  }
+  const text = lines.filter(l => l.trim()).join('\n')
+  navigator.clipboard.writeText(text).catch(() => {})
+  toast.show(t('common.copied') || 'Copied')
+  focusTerminal()
+}
+
+function executeCommand(cmd: { label: string; command: string }) {
+  session.sendInput(cmd.command + '\r')
+  showCommands.value = false
+  focusTerminal()
+}
+</script>
+
+<style scoped>
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border, #e0e0e0);
+  flex-shrink: 0;
+  background: var(--color-bg, #fff);
+  gap: 8px;
+}
+
+.terminal-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.terminal-title {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.terminal-cwd {
+  font-size: 11px;
+  color: var(--color-text-secondary, #888);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.terminal-status {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.terminal-status.connected {
+  color: #4caf50;
+}
+
+.terminal-status.connecting {
+  color: #ff9800;
+}
+
+.terminal-status.disconnected {
+  color: #9e9e9e;
+}
+
+.terminal-container {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  background: #1e1e2e;
+}
+
+.terminal-error-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  z-index: 10;
+  padding: 20px;
+  text-align: center;
+}
+
+.terminal-reconnect-btn {
+  margin-top: 12px;
+  padding: 6px 16px;
+  border: 1px solid #888;
+  border-radius: 6px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.terminal-reconnect-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.terminal-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 4px 6px;
+  gap: 3px;
+  border-top: 1px solid var(--color-border, #e0e0e0);
+  flex-shrink: 0;
+  background: var(--color-bg, #fff);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text, #333);
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.toolbar-btn:hover {
+  background: var(--color-bg-hover, #f0f0f0);
+}
+
+.toolbar-btn:active {
+  background: var(--color-bg-active, #e0e0e0);
+}
+
+.toolbar-btn.modifier.active {
+  background: #e3f2fd;
+  border-color: #2196f3;
+  color: #1976d2;
+}
+
+.toolbar-btn.modifier.locked {
+  background: #bbdefb;
+  border-color: #1565c0;
+  color: #0d47a1;
+}
+
+.toolbar-btn.danger {
+  color: #e53935;
+  border-color: #ef9a9a;
+}
+
+.toolbar-btn.danger:hover {
+  background: #ffebee;
+}
+
+.terminal-commands-popup {
+  position: absolute;
+  bottom: 44px;
+  right: 6px;
+  background: var(--color-bg, #fff);
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 20;
+  min-width: 160px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.command-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.command-item:hover {
+  background: var(--color-bg-hover, #f0f0f0);
+}
+
+.command-empty {
+  padding: 12px;
+  color: var(--color-text-secondary, #888);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* Mobile: adjust toolbar for soft keyboard */
+@media (max-width: 768px) {
+  .terminal-toolbar {
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Touch device: prevent sticky hover */
+@media (hover: none) {
+  .toolbar-btn:hover {
+    background: transparent;
+  }
+  .toolbar-btn:active {
+    background: var(--color-bg-active, #e0e0e0);
+  }
+}
+</style>

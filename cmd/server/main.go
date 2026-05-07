@@ -19,6 +19,7 @@ import (
 	"clawbench/internal/service"
 	"clawbench/internal/ssh"
 	"clawbench/internal/speech"
+	"clawbench/internal/terminal"
 )
 
 // multiHandler sends log records to multiple handlers
@@ -509,6 +510,17 @@ func main() {
 		)
 	} else {
 		defer service.StopFileWatcher()
+	}
+
+	// Initialize terminal manager (interactive web terminal)
+	if cfg.Terminal.Enabled {
+		terminalMgr := terminal.NewManager(cfg.Terminal, port)
+		handler.SetTerminalManager(terminalMgr)
+		defer terminalMgr.Close()
+		slog.Info("terminal manager initialized",
+			slog.String("idle_timeout", cfg.Terminal.IdleTimeout),
+			slog.Int("buffer_lines", cfg.Terminal.BufferLines),
+		)
 	}
 
 	mux := http.NewServeMux()

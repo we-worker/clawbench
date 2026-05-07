@@ -213,6 +213,12 @@ func RegisterRoutes(mux *http.ServeMux) {
 	register("/api/rag/message", RAGMessage)
 	register("/api/rag/session", RAGSession)
 
+	// Terminal (interactive web terminal with PTY + WebSocket + xterm.js)
+	register("/api/terminal/ws", middleware.Auth(TerminalWebSocket))
+	register("/api/terminal/status", middleware.Auth(TerminalStatus))
+	register("/api/terminal/close", middleware.Auth(TerminalClose))
+	register("/api/terminal/config", TerminalConfigHandler) // no auth — read-only config for frontend init
+
 	if _, err := os.Stat("public"); err == nil {
 		mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir("public"))))
 	} else {

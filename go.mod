@@ -3,6 +3,8 @@ module clawbench
 go 1.25.0
 
 require (
+	github.com/coder/websocket v1.8.14
+	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/google/uuid v1.6.0
 	github.com/marcboeker/go-duckdb v1.8.5

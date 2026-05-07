@@ -175,5 +175,23 @@ func ApplyDefaults(cfg *Config, presence map[string]bool) string {
 		cfg.RAG.RetentionDays = 90
 	}
 
+	// --- Terminal ---
+	// Bool zero-value trap: same as proxy/ssh — default to true when absent.
+	if !presence["terminal.enabled"] {
+		cfg.Terminal.Enabled = true
+	}
+	if cfg.Terminal.IdleTimeout == "" {
+		cfg.Terminal.IdleTimeout = "10m"
+	}
+	if cfg.Terminal.BufferLines <= 0 {
+		cfg.Terminal.BufferLines = 2000
+	}
+	if cfg.Terminal.MaxLineBytes <= 0 {
+		cfg.Terminal.MaxLineBytes = 65536 // 64KB per line
+	}
+	if cfg.Terminal.MaxBufferMB <= 0 {
+		cfg.Terminal.MaxBufferMB = 4
+	}
+
 	return autoPassword
 }

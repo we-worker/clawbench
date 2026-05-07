@@ -47,9 +47,26 @@ type Config struct {
 		MossNano          MossNanoConfig `yaml:"moss_nano"`          // MOSS-TTS-Nano-specific configuration (only used when engine: "moss-nano")
 		Ollama            OllamaConfig   `yaml:"ollama"`             // Ollama-specific configuration (only used when summarize_backend: "ollama")
 	} `yaml:"tts"`
-	Proxy ProxyConfig `yaml:"proxy"` // Port forwarding configuration
-	SSH   SSHConfig   `yaml:"ssh"`   // SSH tunnel server configuration
-	RAG   RAGConfig   `yaml:"rag"`   // RAG history memory configuration
+	Proxy    ProxyConfig    `yaml:"proxy"`     // Port forwarding configuration
+	SSH      SSHConfig      `yaml:"ssh"`       // SSH tunnel server configuration
+	RAG      RAGConfig      `yaml:"rag"`       // RAG history memory configuration
+	Terminal TerminalConfig `yaml:"terminal"`  // Interactive web terminal configuration
+}
+
+// TerminalConfig holds configuration for the interactive web terminal.
+type TerminalConfig struct {
+	Enabled       bool           `yaml:"enabled"`          // Enable interactive terminal (default: true)
+	IdleTimeout   string         `yaml:"idle_timeout"`     // Close PTY after no WS connections for this duration (default: "10m")
+	BufferLines   int            `yaml:"buffer_lines"`     // Replay buffer line count (default: 2000)
+	MaxLineBytes  int            `yaml:"max_line_bytes"`   // Per-line byte cap to prevent memory bloat (default: 65536 = 64KB)
+	MaxBufferMB   int            `yaml:"max_buffer_mb"`    // Total buffer memory cap in MB (default: 4)
+	QuickCommands []QuickCommand `yaml:"quick_commands"`   // Quick commands shown in terminal toolbar
+}
+
+// QuickCommand defines a terminal quick command entry.
+type QuickCommand struct {
+	Label   string `yaml:"label"`   // Display label shown in toolbar
+	Command string `yaml:"command"` // Command to send to the shell
 }
 
 // RAGConfig holds configuration for the RAG history memory system.

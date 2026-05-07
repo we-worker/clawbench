@@ -60,6 +60,10 @@ export default defineConfig({
     allowedHosts: ['xulongzhe.top', 'your-domain.com', 'localhost', '127.0.0.1'],
     port: frontendPort,
     proxy: {
+      '/api/terminal/ws': {
+        target: `ws://localhost:${backendPort}`,
+        ws: true,
+      },
       '/api': {
         target: `http://localhost:${backendPort}`,
         // Don't buffer SSE responses - needed for streaming chat

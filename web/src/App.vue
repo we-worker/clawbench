@@ -113,6 +113,12 @@
         @close="proxyOpen = false"
       />
 
+      <TerminalPanel
+        :open="terminalOpen"
+        @close="terminalOpen = false"
+        @open="ensureDrawerOpen('terminal')"
+      />
+
       <!-- Quote question floating bar — uses session identity singleton -->
       <QuoteQuestionBar
         :visible="quoteQuestion.visible.value"
@@ -163,6 +169,9 @@
             <button class="dock-btn" :class="{ active: proxyOpen }" @click.stop="openDrawer('proxy')" :title="t('nav.portForward')">
               <EthernetPort />
             </button>
+            <button class="dock-btn" :class="{ active: terminalOpen }" @click.stop="openDrawer('terminal')" :title="t('terminal.title')">
+              <TerminalIcon />
+            </button>
           </div>
 
           <button
@@ -189,7 +198,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, provide, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, ChevronRight, MessageSquare, Folder, GitBranch, EthernetPort } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, MessageSquare, Folder, GitBranch, EthernetPort, Terminal as TerminalIcon } from 'lucide-vue-next'
 import AppHeader from './components/common/AppHeader.vue'
 import FileManager from './components/file/FileManager.vue'
 import WelcomeView from './components/WelcomeView.vue'
@@ -206,6 +215,7 @@ import ToastNotification from './components/common/ToastNotification.vue'
 import DialogOverlay from './components/common/DialogOverlay.vue'
 import SessionDrawer from './components/session/SessionDrawer.vue'
 import ProxyPanel from './components/proxy/ProxyPanel.vue'
+import TerminalPanel from './components/terminal/TerminalPanel.vue'
 import QuoteQuestionBar from './components/common/QuoteQuestionBar.vue'
 import { useQuoteQuestion } from './composables/useQuoteQuestion.ts'
 import { useSessionIdentity } from './composables/useSessionIdentity.ts'
@@ -268,6 +278,7 @@ useFileWatch({
 const { isAppMode } = useAppMode()
 const { syncToNative } = usePortForward()
 const proxyOpen = ref(false)
+const terminalOpen = ref(false)
 
 // File watch auto-refresh (fsnotify + SSE)
 
@@ -304,6 +315,7 @@ const drawerStates = {
   search: searchOpen,
   details: detailsOpen,
   proxy: proxyOpen,
+  terminal: terminalOpen,
 }
 
 function openDrawer(name, tab = null) {
