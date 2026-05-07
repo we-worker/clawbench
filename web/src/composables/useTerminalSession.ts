@@ -12,7 +12,6 @@ export interface TerminalStatus {
 const NO_RECONNECT_CODES = new Set([
   'terminal_disabled',
   'shell_start_failed',
-  'session_in_use',
 ])
 
 export function useTerminalSession(getWsUrl: () => string) {

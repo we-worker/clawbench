@@ -180,16 +180,14 @@ const showErrorOverlay = computed(() => {
 })
 
 const canReconnect = computed(() => {
-  // Don't allow reconnect for session_in_use (another client is connected)
-  if (errorCode.value === 'session_in_use') return false
   // terminal_disabled means the feature is turned off — no point reconnecting
   if (errorCode.value === 'terminal_disabled') return false
-  // All other errors (shell_start_failed, websocket_failed, etc.) are retryable
+  // All other errors are retryable (session_in_use is no longer possible —
+  // backend now kicks the old client and lets the new one take over)
   return true
 })
 
 const errorDisplayMessage = computed(() => {
-  if (errorCode.value === 'session_in_use') return t('terminal.sessionInUse')
   if (errorCode.value === 'terminal_disabled') return t('terminal.disabled')
   if (errorCode.value === 'shell_start_failed') return t('terminal.shellStartFailed')
   return errorMessage.value || t('terminal.websocketFailed')

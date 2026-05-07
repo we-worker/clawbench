@@ -133,7 +133,8 @@ func (s *Session) waitProcess() {
 }
 
 // Connect attaches a WebSocket client to this session.
-// Returns an error if a client is already connected.
+// If a previous client is still connected (e.g. zombie from disconnect race),
+// it is kicked to allow the new client to take over.
 func (s *Session) Connect(conn *websocket.Conn) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -142,9 +143,14 @@ func (s *Session) Connect(conn *websocket.Conn) error {
 		return fmt.Errorf("session is closed")
 	}
 
+	// Kick any existing client — this handles the race where the old
+	// WebSocket's read loop hasn't exited yet (e.g. reconnect scenario)
 	if s.wsConn != nil {
-		// Reject — session already has an active connection
-		return fmt.Errorf("session already has active connection")
+		slog.Info("terminal: kicking existing client for new connection")
+		s.wsMu.Lock()
+		s.wsConn.Close(websocket.StatusNormalClosure, "replaced by new client")
+		s.wsMu.Unlock()
+		s.wsConn = nil
 	}
 
 	// Stop idle timer — we have a client now

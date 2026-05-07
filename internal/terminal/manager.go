@@ -121,11 +121,10 @@ func (m *Manager) HandleWebSocket(w http.ResponseWriter, r *http.Request, projec
 		return fmt.Errorf("websocket upgrade failed: %w", err)
 	}
 
-	// Try to connect to the session (rejects if already connected)
+	// Connect to the session (will kick any zombie client)
 	if err := session.Connect(conn); err != nil {
-		// Session already has a client — send error and close
-		sendWSError(conn, ErrCodeSessionInUse, err.Error())
-		conn.Close(websocket.StatusPolicyViolation, "session in use")
+		sendWSError(conn, ErrCodeShellFailed, err.Error())
+		conn.Close(websocket.StatusInternalError, "connect failed")
 		return nil
 	}
 
