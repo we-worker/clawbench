@@ -142,11 +142,12 @@
             <FolderOpen :size="14" />
             {{ t('file.context.openAsProject') }}
           </div>
-          <div class="context-menu-item" @click.stop="doOpenTerminal">
-            <TerminalIcon :size="14" />
-            {{ t('file.context.openTerminal') }}
-          </div>
         </template>
+        <div class="context-menu-divider" />
+        <div class="context-menu-item" @click.stop="doOpenTerminal">
+          <TerminalIcon :size="14" />
+          {{ t('file.context.openTerminal') }}
+        </div>
       </div>
       <div v-if="ctxMenu.visible" class="ctx-overlay" @click="ctxMenu.visible = false" @touchstart="ctxMenu.visible = false" />
     </Teleport>
@@ -486,12 +487,14 @@ function doOpenAsProject() {
 }
 
 function doOpenTerminal() {
-    if (!ctxMenu.entry || ctxMenu.entry.type !== 'dir') return
     ctxMenu.visible = false
-    // Navigate into the directory first (updates currentDir + dirEntries properly)
-    // then open the terminal — computeCwd() reads store.state.currentDir
-    emit('navigateDir', ctxMenu.entry.path)
-    emit('openTerminal', ctxMenu.entry.path)
+    if (ctxMenu.entry && ctxMenu.entry.type === 'dir') {
+        // Navigate into the directory first (updates currentDir + dirEntries)
+        // then open the terminal — computeCwd() reads store.state.currentDir
+        emit('navigateDir', ctxMenu.entry.path)
+    }
+    // If no entry (blank area), currentDir is already correct
+    emit('openTerminal')
 }
 
 async function doRename() {
