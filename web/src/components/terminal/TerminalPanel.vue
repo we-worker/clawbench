@@ -29,27 +29,29 @@
 
       <!-- Virtual key toolbar -->
       <div class="terminal-toolbar">
-        <button class="toolbar-btn" @pointerdown.prevent="terminalKeys.sendEscape(); focusTerminal()" :title="'Esc'">Esc</button>
-        <button class="toolbar-btn" @pointerdown.prevent="terminalKeys.sendTab(); focusTerminal()" :title="'Tab'">Tab</button>
-        <button class="toolbar-btn modifier" :class="{ active: terminalKeys.activeModifiers.value.ctrl !== 'inactive', locked: terminalKeys.activeModifiers.value.ctrl === 'locked' }" @pointerdown.prevent="handleModifier('ctrl')" @contextmenu.prevent>Ctl</button>
-        <button class="toolbar-btn modifier" :class="{ active: terminalKeys.activeModifiers.value.alt !== 'inactive', locked: terminalKeys.activeModifiers.value.alt === 'locked' }" @pointerdown.prevent="handleModifier('alt')" @contextmenu.prevent>Alt</button>
-        <button class="toolbar-btn" @pointerdown.prevent="terminalKeys.sendCtrlC(); focusTerminal()" :title="'Ctrl+C'">C-C</button>
-        <button class="toolbar-btn" @pointerdown.prevent="session.sendInput('/'); focusTerminal()">/</button>
-        <button class="toolbar-btn" @pointerdown.prevent="session.sendInput('-'); focusTerminal()">-</button>
-        <button class="toolbar-btn" @pointerdown.prevent="session.sendInput('|'); focusTerminal()">|</button>
-        <button class="toolbar-btn" @pointerdown.prevent="session.sendInput('_'); focusTerminal()">_</button>
-        <button class="toolbar-btn modifier" :class="{ active: gestures.enabled.value }" @pointerdown.prevent="gestures.toggle(); focusTerminal()" @contextmenu.prevent :title="t('terminal.gestures')">
+        <button class="toolbar-btn modifier gesture-toggle" :class="{ active: gestures.enabled.value }" @pointerdown.prevent="gestures.toggle(); focusTerminal()" @contextmenu.prevent :title="t('terminal.gestures')">
           <HandIcon :size="14" />
         </button>
-        <button v-if="quickCommands.length > 0" class="toolbar-btn" @click="showCommands = !showCommands" :title="t('terminal.quickCommands')">
-          <ListIcon :size="14" />
-        </button>
-        <button class="toolbar-btn" @click="handleCopyOutput" :title="t('terminal.copyOutput')">
-          <CopyIcon :size="14" />
-        </button>
-        <button class="toolbar-btn danger" @click="handleClose" :title="t('terminal.closeProcess')">
-          <XIcon :size="14" />
-        </button>
+        <div class="toolbar-scroll">
+          <button class="toolbar-btn" @pointerdown.prevent="terminalKeys.sendEscape(); focusTerminal()" :title="'Esc'">Esc</button>
+          <button class="toolbar-btn" @pointerdown.prevent="terminalKeys.sendTab(); focusTerminal()" :title="'Tab'">Tab</button>
+          <button class="toolbar-btn modifier" :class="{ active: terminalKeys.activeModifiers.value.ctrl !== 'inactive', locked: terminalKeys.activeModifiers.value.ctrl === 'locked' }" @pointerdown.prevent="handleModifier('ctrl')" @contextmenu.prevent>Ctl</button>
+          <button class="toolbar-btn modifier" :class="{ active: terminalKeys.activeModifiers.value.alt !== 'inactive', locked: terminalKeys.activeModifiers.value.alt === 'locked' }" @pointerdown.prevent="handleModifier('alt')" @contextmenu.prevent>Alt</button>
+          <button class="toolbar-btn" @pointerdown.prevent="terminalKeys.sendCtrlC(); focusTerminal()" :title="'Ctrl+C'">C-C</button>
+          <button class="toolbar-btn" @pointerdown.prevent="session.sendInput('/'); focusTerminal()">/</button>
+          <button class="toolbar-btn" @pointerdown.prevent="session.sendInput('-'); focusTerminal()">-</button>
+          <button class="toolbar-btn" @pointerdown.prevent="session.sendInput('|'); focusTerminal()">|</button>
+          <button class="toolbar-btn" @pointerdown.prevent="session.sendInput('_'); focusTerminal()">_</button>
+          <button v-if="quickCommands.length > 0" class="toolbar-btn" @click="showCommands = !showCommands" :title="t('terminal.quickCommands')">
+            <ListIcon :size="14" />
+          </button>
+          <button class="toolbar-btn" @click="handleCopyOutput" :title="t('terminal.copyOutput')">
+            <CopyIcon :size="14" />
+          </button>
+          <button class="toolbar-btn danger" @click="handleClose" :title="t('terminal.closeProcess')">
+            <XIcon :size="14" />
+          </button>
+        </div>
       </div>
 
       <!-- Quick commands popup -->
@@ -555,8 +557,26 @@ function executeCommand(cmd: { label: string; command: string }) {
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;
   background: var(--bg-secondary);
+}
+
+.gesture-toggle {
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.toolbar-scroll {
+  display: flex;
+  align-items: center;
+  gap: 3px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  flex: 1;
+  min-width: 0;
+  /* Hide scrollbar for cleaner look */
+  scrollbar-width: none;
+}
+.toolbar-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .toolbar-btn {
