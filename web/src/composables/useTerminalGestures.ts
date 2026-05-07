@@ -17,6 +17,9 @@ type Direction = 'up' | 'down' | 'left' | 'right'
  * - Hold direction → auto-repeat arrow keys
  * - Pinch (two-finger) → zoom font size
  *
+ * When gestures are disabled, all touch listeners are detached so that
+ * xterm.js native touch selection (long-press to select) works normally.
+ *
  * Gestures are bound only to the xterm container element,
  * not the entire BottomSheet, to avoid conflicting with drawer drag.
  */
@@ -31,6 +34,7 @@ export function useTerminalGestures(
 
   // Gesture enable/disable state
   const enabled = ref(true)
+  let listenersAttached = false
 
   let touchStartX = 0
   let touchStartY = 0
@@ -93,8 +97,6 @@ export function useTerminalGestures(
   }
 
   function onTouchStart(e: TouchEvent) {
-    if (!enabled.value) return
-
     if (e.touches.length === 2) {
       // Pinch gesture start
       initialPinchDistance = getTouchDistance(e.touches[0], e.touches[1])
@@ -116,8 +118,6 @@ export function useTerminalGestures(
   }
 
   function onTouchMove(e: TouchEvent) {
-    if (!enabled.value) return
-
     // Pinch zoom
     if (e.touches.length === 2 && initialPinchDistance > 0) {
       const currentDistance = getTouchDistance(e.touches[0], e.touches[1])
@@ -179,25 +179,19 @@ export function useTerminalGestures(
     }
   }
 
-  function toggle() {
-    enabled.value = !enabled.value
-    if (!enabled.value) {
-      stopRepeat()
-      isActive = false
-      currentDirection = null
-    }
-  }
-
-  function attach() {
+  function attachListeners() {
+    if (listenersAttached) return
     const el = elementRef.value
     if (!el) return
 
     el.addEventListener('touchstart', onTouchStart, { passive: true })
     el.addEventListener('touchmove', onTouchMove, { passive: true })
     el.addEventListener('touchend', onTouchEnd, { passive: true })
+    listenersAttached = true
   }
 
-  function detach() {
+  function detachListeners() {
+    if (!listenersAttached) return
     const el = elementRef.value
     if (!el) return
 
@@ -205,6 +199,40 @@ export function useTerminalGestures(
     el.removeEventListener('touchstart', onTouchStart)
     el.removeEventListener('touchmove', onTouchMove)
     el.removeEventListener('touchend', onTouchEnd)
+    listenersAttached = false
+  }
+
+  // Apply gesture state: attach when enabled, detach when disabled
+  // so that xterm.js native touch selection works when gestures are off
+  function applyState() {
+    if (enabled.value) {
+      attachListeners()
+    } else {
+      detachListeners()
+    }
+  }
+
+  function toggle() {
+    enabled.value = !enabled.value
+    if (!enabled.value) {
+      stopRepeat()
+      isActive = false
+      currentDirection = null
+    }
+    applyState()
+  }
+
+  // Called by TerminalPanel on mount
+  function attach() {
+    if (enabled.value) {
+      attachListeners()
+    }
+    // When disabled, don't attach — let xterm.js handle touch natively
+  }
+
+  // Called by TerminalPanel on unmount
+  function detach() {
+    detachListeners()
   }
 
   return {
