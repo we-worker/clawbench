@@ -425,10 +425,18 @@ function handleClose() {
 }
 
 async function handleRebuild() {
-  // Close current session (kills PTY process on backend)
-  session.sendClose()
   terminalKeys.reset()
   showCommands.value = false
+
+  // Close session via HTTP API (synchronous — ensures PTY is dead and m.session = nil)
+  try {
+    await fetch('/api/terminal/close', { method: 'POST' })
+  } catch {
+    // Ignore — best effort
+  }
+
+  // Reset session state (closes WS, clears errors, resets reconnect counter)
+  session.reset()
 
   // Clear terminal display
   if (xterm.value) {

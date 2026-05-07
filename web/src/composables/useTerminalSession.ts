@@ -114,6 +114,23 @@ export function useTerminalSession(getWsUrl: () => string) {
     connectionState.value = 'disconnected'
   }
 
+  // reset clears all state for a fresh connect (used by rebuild session)
+  function reset() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    reconnectAttempts = 0
+    fatalError = false
+    errorMessage.value = ''
+    errorCode.value = ''
+    if (ws.value) {
+      ws.value.close()
+      ws.value = null
+    }
+    connectionState.value = 'disconnected'
+  }
+
   function tryReconnect() {
     if (reconnectAttempts >= maxReconnectAttempts || fatalError) {
       connectionState.value = 'error'
@@ -206,6 +223,7 @@ export function useTerminalSession(getWsUrl: () => string) {
     currentCwd,
     connect,
     disconnect,
+    reset,
     setCallbacks,
     sendInput,
     sendResize,
