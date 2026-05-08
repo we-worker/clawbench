@@ -190,8 +190,6 @@ func RegisterRoutes(mux *http.ServeMux) {
 	register("/api/recent-projects", middleware.Auth(ServeRecentProjects))
 	register("/api/local-file/", middleware.Auth(ServeLocalFile))
 	register("/api/agents", middleware.Auth(ServeAgents))
-	register("/api/skills", ServeSkills)         // no auth: AI reads skill details from localhost
-	register("/api/skills/", ServeSkillFile)     // no auth: AI reads skill details from localhost
 	register("/api/tasks", middleware.Auth(ServeTasks))
 	register("/api/tasks/", middleware.Auth(ServeTaskByID))
 	register("/api/tts/generate", middleware.Auth(TTSGenerate))

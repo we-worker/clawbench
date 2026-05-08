@@ -99,7 +99,6 @@ func TestLoadAgents_CommonPromptGenerated(t *testing.T) {
 	t.Cleanup(func() {
 		model.Agents = nil
 		model.AgentList = nil
-		model.Skills = nil
 		model.ServerPort = 0
 	})
 
@@ -119,7 +118,7 @@ system_prompt: My specific prompt
 	assert.NoError(t, err)
 	agent := model.Agents["with-common"]
 	assert.NotNil(t, agent)
-	// Common prompt is now rules.md + skills table; without skills only agent prompt is present
+	// Without rules.md in parent dir, only agent prompt is present
 	assert.Contains(t, agent.SystemPrompt, "My specific prompt")
 }
 
@@ -127,7 +126,6 @@ func TestLoadAgents_CommonPromptOnlyNoSystemPrompt(t *testing.T) {
 	t.Cleanup(func() {
 		model.Agents = nil
 		model.AgentList = nil
-		model.Skills = nil
 		model.ServerPort = 0
 	})
 
@@ -146,65 +144,8 @@ backend: claude
 	assert.NoError(t, err)
 	agent := model.Agents["no-prompt"]
 	assert.NotNil(t, agent)
-	// When agent has no system_prompt and no skills/rules, system prompt is empty
+	// When agent has no system_prompt and no rules.md, system prompt is empty
 	assert.Empty(t, agent.SystemPrompt)
-}
-
-func TestLoadAgents_AvailableAgentsInSkillBody(t *testing.T) {
-	t.Cleanup(func() {
-		model.Agents = nil
-		model.AgentList = nil
-		model.Skills = nil
-		model.ServerPort = 0
-	})
-
-	skillsDir := t.TempDir()
-	agentsDir := t.TempDir()
-	model.ServerPort = 20000
-
-	// Write a skill with {{AVAILABLE_AGENTS}} in body
-	skillContent := `---
-name: scheduled-tasks
-description: Schedule tasks
-triggers:
-  - scheduling
----
-agent_id field: {{AVAILABLE_AGENTS}}
-`
-	err := os.WriteFile(filepath.Join(skillsDir, "scheduled-tasks.md"), []byte(skillContent), 0644)
-	require.NoError(t, err)
-
-	yaml1 := `id: codebuddy
-name: CodeBuddy
-icon: "A"
-specialty: General
-backend: codebuddy
-system_prompt: You are codebuddy.
-`
-	yaml2 := `id: coder
-name: Coder
-icon: "C"
-specialty: Code
-backend: claude
-system_prompt: You are coder.
-`
-	os.WriteFile(filepath.Join(agentsDir, "codebuddy.yaml"), []byte(yaml1), 0644)
-	os.WriteFile(filepath.Join(agentsDir, "coder.yaml"), []byte(yaml2), 0644)
-
-	// Load skills first
-	err = model.LoadSkills(skillsDir, 20000)
-	require.NoError(t, err)
-
-	// Load agents
-	err = model.LoadAgents(agentsDir)
-	assert.NoError(t, err)
-
-	// Verify {{AVAILABLE_AGENTS}} was replaced in skill body
-	skill := model.GetSkillByFilename("scheduled-tasks.md")
-	require.NotNil(t, skill)
-	assert.NotContains(t, skill.Body, "{{AVAILABLE_AGENTS}}")
-	assert.Contains(t, skill.Body, "codebuddy")
-	assert.Contains(t, skill.Body, "coder")
 }
 
 func TestLoadAgents_NonExistentDir(t *testing.T) {
@@ -224,6 +165,66 @@ func TestLoadAgents_InvalidYAML(t *testing.T) {
 	err := model.LoadAgents(dir)
 	assert.NoError(t, err)
 	assert.Empty(t, model.AgentList)
+}
+
+func TestBuildCommonPrompt_ScheduledRemovesSection(t *testing.T) {
+	t.Cleanup(func() {
+		model.Agents = nil
+		model.AgentList = nil
+		model.ServerPort = 0
+	})
+
+	// Create temp dir with agents/ and rules.md containing SCHEDULED markers
+	tmpDir := t.TempDir()
+	agentsDir := filepath.Join(tmpDir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0755))
+
+	rulesContent := `## User Interaction
+
+Some rules here.
+
+<!-- SCHEDULED_BEGIN -->
+## Scheduled Tasks
+
+Task rules and CLI reference here.
+
+<!-- SCHEDULED_END -->
+
+## RAG History Search
+
+RAG rules here.
+`
+	err := os.WriteFile(filepath.Join(tmpDir, "rules.md"), []byte(rulesContent), 0644)
+	require.NoError(t, err)
+
+	// Write an agent YAML so LoadAgents sets up agentsDir properly
+	yaml := `id: test-agent
+name: Test
+icon: "T"
+specialty: Testing
+backend: codebuddy
+system_prompt: You test.
+`
+	err = os.WriteFile(filepath.Join(agentsDir, "test-agent.yaml"), []byte(yaml), 0644)
+	require.NoError(t, err)
+
+	model.ServerPort = 20000
+	err = model.LoadAgents(agentsDir)
+	require.NoError(t, err)
+
+	// Normal: Scheduled Tasks section is present
+	normalPrompt := model.BuildCommonPrompt(false)
+	assert.Contains(t, normalPrompt, "Scheduled Tasks")
+	assert.Contains(t, normalPrompt, "RAG History Search")
+	assert.NotContains(t, normalPrompt, "SCHEDULED_BEGIN")
+	assert.NotContains(t, normalPrompt, "SCHEDULED_END")
+
+	// Scheduled: Scheduled Tasks section is removed
+	scheduledPrompt := model.BuildCommonPrompt(true)
+	assert.NotContains(t, scheduledPrompt, "Scheduled Tasks")
+	assert.Contains(t, scheduledPrompt, "RAG History Search")
+	assert.NotContains(t, scheduledPrompt, "SCHEDULED_BEGIN")
+	assert.NotContains(t, scheduledPrompt, "SCHEDULED_END")
 }
 
 func TestGetDefaultAgentID_Configured(t *testing.T) {

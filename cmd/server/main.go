@@ -419,21 +419,6 @@ func main() {
 		port = cliPort
 	}
 
-	// Load skills (must be before LoadAgents so skills data is available)
-	skillsDir := filepath.Join(model.BinDir, "config", "skills")
-	if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
-		skillsDir = filepath.Join("config", "skills")
-	}
-	if err := model.LoadSkills(skillsDir, port); err != nil {
-		slog.Warn("failed to load skills", slog.String("err", err.Error()))
-	} else {
-		// Filter out skills whose runtime conditions are not met
-		model.RemoveSkillsByCondition(map[string]bool{
-			"rag.enabled": cfg.RAG.Enabled,
-		})
-		slog.Info("skills loaded", slog.Int("count", len(model.Skills)))
-	}
-
 	// Load agent configurations (set ServerPort first for {{PORT}} replacement)
 	model.ServerPort = port
 	agentsDir := filepath.Join(model.BinDir, "config", "agents")

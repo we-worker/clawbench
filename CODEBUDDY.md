@@ -61,9 +61,7 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 - `internal/rag/` — RAG history memory system. DuckDB vector store (`store.go`), text chunker (`chunker.go`), Ollama embedding client (`embedding.go`), indexer worker (`indexer.go`), search (`search.go`), cleanup worker (`cleanup.go`), entry point (`rag.go`). When `rag.enabled`, indexes chat messages after finalization and provides semantic search API. Cleanup worker runs regardless of RAG enablement to purge soft-deleted data past retention.
 - `internal/platform/` — Platform-specific adaptations (Windows paths).
 
-**Agent system:** YAML files in `config/agents/` define agents with id, backend, model, system_prompt, and optional `command` (custom CLI path). `agent_common_prompt.md` is prepended to all agents and contains a skills summary table (`{{SKILLS_TABLE}}`) plus placeholders `{{AVAILABLE_AGENTS}}` and `{{PORT}}`. Loaded at startup by `model.LoadAgents()`. Agent prompts may include `<schedule-proposal>` tag format for the scheduled task system.
-
-**Skill system:** Markdown files in `config/skills/` define on-demand skill rules with YAML frontmatter (name, description, triggers). At startup, `model.LoadSkills()` parses frontmatter, generates a summary table injected into the system prompt, and stores resolved body content (with `{{PORT}}` and `{{AVAILABLE_AGENTS}}` replaced). AI reads skill details on demand via `GET /api/skills/{filename}` or by reading `config/skills/{filename}` directly.
+**Agent system:** YAML files in `config/agents/` define agents with id, backend, model, system_prompt, and optional `command` (custom CLI path). `config/rules.md` is always fully injected into every agent's system prompt at startup by `model.LoadAgents()` → `BuildCommonPrompt()`. It contains mandatory rules and CLI references (scheduled tasks, RAG search, etc.). Placeholders `{{AVAILABLE_AGENTS}}` and `{{PORT}}` are replaced at load time. The `<!-- SCHEDULED_BEGIN/END -->` markers in rules.md wrap the scheduled tasks section, which is stripped by `BuildCommonPrompt(true)` during scheduled executions (anti-recursion).
 
 **Data flow for chat:**
 1. Frontend sends POST to `/api/ai/chat`
@@ -88,7 +86,7 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 1. When `rag.enabled: true`, chat messages are indexed into DuckDB vector store after finalization
 2. `chat_history.indexed` column tracks indexing state; indexer polls every 10s for unindexed messages
 3. Text blocks are extracted (excluding thinking/tool_use), chunked with 512-token sliding window, embedded via Ollama BGE-M3
-4. AI agents can search history via `GET /api/rag/search` (no auth, localhost only); AI discovers RAG search capability via the `rag-search` skill in `config/skills/rag-search.md`
+4. AI agents can search history via `GET /api/rag/search` (no auth, localhost only); RAG search rules and CLI reference are in `config/rules.md`
 5. Frontend browses forwarded ports via `PortForwardBrowser` component
 
 **Soft-delete & cleanup:**
@@ -213,7 +211,7 @@ Dev mode uses separate port (20002) and database (`ClawBench-dev.db`).
 
 ## Testing
 
-- Go tests use `testify/assert`. Test files colocated with source (`*_test.go`). 40 test files across 8 packages.
+- Go tests use `testify/assert`. Test files colocated with source (`*_test.go`).
 - Frontend tests use Vitest + `@vue/test-utils`. Located in `web/src/components/__tests__/`.
 - Many handler tests need a running test server — see `testutil_test.go` in handler package.
 - Key test packages: `ai/` (stream parsers, auto-resume, factory), `handler/` (auth, chat, files, git, proxy, scheduler, SSH info, TTS), `service/` (chat, proxy, scheduler, stream, uuid, soft-delete, cleanup), `speech/` (minimax, piper, kokoro, moss_tts_nano, ollama), `ssh/` (server), `rag/` (chunker, store, cleanup).
