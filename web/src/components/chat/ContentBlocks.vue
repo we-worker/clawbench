@@ -63,11 +63,7 @@
             <div class="stask-row"><strong>{{ t('chat.contentBlocks.frequency') }}</strong>{{ humanizeCron(blockTasks[sKey].task.cronExpr) }}</div>
             <div class="stask-row"><strong>{{ t('chat.contentBlocks.executor') }}</strong>{{ getAgentIcon(blockTasks[sKey].task.agentId) }} {{ getAgentName(blockTasks[sKey].task.agentId) }}</div>
             <div class="stask-row"><strong>{{ t('chat.contentBlocks.repeat') }}</strong>{{ repeatLabel(blockTasks[sKey].task.repeatMode, blockTasks[sKey].task.maxRuns) }}</div>
-            <div class="stask-status">
-              <strong>{{ t('chat.contentBlocks.status') }}</strong>
-              <span class="stask-status-dot" :class="statusClass(blockTasks[sKey].task)"></span>
-              {{ statusLabel(blockTasks[sKey].task) }}
-            </div>
+            <div class="stask-row"><strong>{{ t('chat.contentBlocks.status') }}</strong><span class="stask-status-dot" :class="statusClass(blockTasks[sKey].task)"></span>{{ statusLabel(blockTasks[sKey].task) }}</div>
             <div v-if="blockTasks[sKey].task.lastRunAt" class="stask-row"><strong>{{ t('chat.contentBlocks.lastRun') }}</strong>{{ formatTime(blockTasks[sKey].task.lastRunAt) }}</div>
             <div v-if="blockTasks[sKey].task.nextRunAt" class="stask-row"><strong>{{ t('chat.contentBlocks.nextRun') }}</strong>{{ formatTime(blockTasks[sKey].task.nextRunAt) }}</div>
             <div class="stask-actions">
@@ -690,19 +686,13 @@ onUnmounted(() => {
   color: var(--text-secondary, #495057);
 }
 
-.stask-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 0;
-  margin-bottom: 4px;
-}
-
 .stask-status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   display: inline-block;
+  flex-shrink: 0;
+  align-self: center;
 }
 
 .stask-status-dot.status-active {
