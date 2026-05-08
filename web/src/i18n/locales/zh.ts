@@ -169,6 +169,8 @@ export default {
       resume: '恢复',
       trigger: '立即执行',
       delete: '删除',
+      lastRun: '上次',
+      nextRun: '下次',
       warningReasons: {
         user_cancel: '用户已中断',
         disconnect: '连接已断开，AI 响应中断',

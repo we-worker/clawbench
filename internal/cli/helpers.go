@@ -1,0 +1,193 @@
+package cli
+
+import (
+	"bytes"
+	"crypto/tls"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+
+	"clawbench/internal/model"
+
+	"gopkg.in/yaml.v3"
+)
+
+// loadConfig loads the YAML config file and applies defaults.
+// It is safe to call multiple times — subsequent calls are no-ops
+// once model.ConfigInstance is populated.
+func loadConfig() {
+	if model.ConfigInstance.WatchDir != "" {
+		return // already loaded
+	}
+
+	absBinPath, _ := filepath.Abs(os.Args[0])
+	model.BinDir = filepath.Dir(absBinPath)
+
+	var cfg model.Config
+	var presence map[string]bool
+	configPath := filepath.Join(model.BinDir, "config", "config.yaml")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		configPath = filepath.Join("config", "config.yaml")
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			configPath = filepath.Join(model.BinDir, "config.yaml")
+			if _, err := os.Stat(configPath); os.IsNotExist(err) {
+				configPath = "config.yaml"
+			}
+		}
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err == nil {
+		var raw map[string]any
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to parse config: %v\n", err)
+			return
+		}
+		presence = model.ParsePresenceMap(raw)
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to parse config: %v\n", err)
+			return
+		}
+	}
+	model.ApplyDefaults(&cfg, presence)
+	model.ConfigInstance = cfg
+}
+
+// apiURL returns the base URL for the local server API.
+// Uses https:// when TLS is enabled in config, otherwise http://.
+func apiURL() string {
+	port := model.ConfigInstance.Port
+	if port == 0 {
+		port = 20000
+	}
+	scheme := "http"
+	if model.ConfigInstance.TLS.Enabled {
+		scheme = "https"
+	}
+	return scheme + "://localhost:" + strconv.Itoa(port)
+}
+
+// httpClient returns an HTTP client that skips TLS verification.
+// CLI connects to localhost — self-signed certs are expected.
+var httpClient = &http.Client{
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	},
+}
+
+// httpDo performs an HTTP request to the server API.
+// No auth needed — CLI runs on localhost which is auto-trusted by the server.
+func httpDo(method, path string, body any) (map[string]any, int, error) {
+	var reqBody io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, 0, fmt.Errorf("marshal request: %w", err)
+		}
+		reqBody = bytes.NewReader(b)
+	}
+
+	req, err := http.NewRequest(method, apiURL()+path, reqBody)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("server not reachable at %s: %w", apiURL(), err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("parse response: %w (body: %s)", err, string(respBody))
+	}
+
+	return result, resp.StatusCode, nil
+}
+
+// httpDoWithProject is like httpDo but sets the clawbench_project cookie
+// so the server can bind the operation to the correct project.
+func httpDoWithProject(method, path string, body any, projectPath string) (map[string]any, int, error) {
+	var reqBody io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, 0, fmt.Errorf("marshal request: %w", err)
+		}
+		reqBody = bytes.NewReader(b)
+	}
+
+	req, err := http.NewRequest(method, apiURL()+path, reqBody)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Set project cookie so server's requireProject() can extract it
+	if projectPath != "" {
+		req.AddCookie(&http.Cookie{
+			Name:  "clawbench_project",
+			Value: url.QueryEscape(projectPath),
+		})
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("server not reachable at %s: %w", apiURL(), err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("parse response: %w (body: %s)", err, string(respBody))
+	}
+
+	return result, resp.StatusCode, nil
+}
+
+// outputJSON prints v as JSON to stdout.
+func outputJSON(v any) {
+	b, _ := json.Marshal(v)
+	fmt.Println(string(b))
+}
+
+// outputError prints a JSON error and returns exit code 1.
+func outputError(msg string) int {
+	outputJSON(map[string]any{"ok": false, "error": msg})
+	return 1
+}
+
+// mustMarshal returns the JSON encoding of v, or "{}" on error.
+func mustMarshal(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// flagSet creates a FlagSet with output directed to io.Discard
+// (custom help is handled by parseOrHelp).
+func flagSet(name string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	return fs
+}

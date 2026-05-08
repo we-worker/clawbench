@@ -47,6 +47,12 @@ _stop_release() {
         if kill -0 "$pid" 2>/dev/null; then
             echo "Stopping release backend (PID $pid)..."
             kill "$pid"
+            sleep 1
+            # Force kill if still alive
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -9 "$pid" 2>/dev/null
+                sleep 1
+            fi
         fi
         rm -f "$PID_FILE"
     fi
@@ -56,7 +62,22 @@ _stop_release() {
     if [[ -n "$pids" ]]; then
         echo "Killing orphan process on port ${PORT:-$RELEASE_PORT} (PIDs: $pids)..."
         echo "$pids" | xargs kill 2>/dev/null || true
+        sleep 1
     fi
+
+    # Clear stale DuckDB lock files to resolve RAG lock conflicts
+    local lock_file="/home/xulongzhe/projects/clawbench/.clawbench/rag.duckdb"
+    if [[ -f "${lock_file}.lock" ]]; then
+        echo "Removing stale DuckDB lock..."
+        rm -f "${lock_file}.lock"
+    fi
+
+    # Wait for port to be fully released
+    local waited=0
+    while lsof -ti :${PORT:-$RELEASE_PORT} 2>/dev/null && [[ $waited -lt 5 ]]; do
+        sleep 0.5
+        waited=$((waited + 1))
+    done
 }
 
 start_release() {

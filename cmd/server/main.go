@@ -67,6 +67,24 @@ func (h *multiHandler) WithGroup(name string) slog.Handler {
 }
 
 func main() {
+	// Root --help handler
+	if len(os.Args) > 1 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
+		fmt.Println("ClawBench - Mobile-first AI workstation")
+		fmt.Println()
+		fmt.Println("Usage: clawbench <command> [options]")
+		fmt.Println()
+		fmt.Println("Commands:")
+		fmt.Println("  task    Manage scheduled tasks (cron-based AI execution)")
+		fmt.Println("  rag     Search and retrieve conversation history")
+		fmt.Println()
+		fmt.Println("Run \"clawbench <command> --help\" for more information.")
+		fmt.Println()
+		fmt.Println("Server options:")
+		fmt.Println("  --dev       Run in development mode")
+		fmt.Println("  --port PORT Server port (default: 20000)")
+		os.Exit(0)
+	}
+
 	// Task subcommand dispatch (e.g., "clawbench task create --name ...")
 	if len(os.Args) > 1 && os.Args[1] == "task" {
 		os.Exit(cli.RunTaskCommand(os.Args[2:]))
@@ -386,8 +404,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize SQLite database
-	if err := service.InitDB(); err != nil {
+	// Initialize SQLite database (runFromServer=true: clean up orphaned streaming messages)
+	if err := service.InitDB(true); err != nil {
 		slog.Error("failed to initialize database", slog.String("err", err.Error()))
 		os.Exit(1)
 	}
@@ -419,8 +437,8 @@ func main() {
 		port = cliPort
 	}
 
-	// Load agent configurations (set ServerPort first for {{PORT}} replacement)
-	model.ServerPort = port
+	// Load agent configurations (set ClawbenchBin first for placeholder replacement)
+	model.ClawbenchBin = absBinPath
 	agentsDir := filepath.Join(model.BinDir, "config", "agents")
 	if _, err := os.Stat(agentsDir); os.IsNotExist(err) {
 		agentsDir = filepath.Join("config", "agents")
@@ -479,9 +497,6 @@ func main() {
 	if cfg.RAG.Enabled && rag.GlobalStore != nil {
 		// Start RAG indexer
 		rag.StartIndexer(cfg.RAG)
-
-		// Configure RAG search handler
-		handler.SetRAGService(rag.GlobalStore, rag.GlobalEmbedder, cfg.RAG.SearchLimit)
 	}
 
 	// Start cleanup worker for soft-deleted data (runs even without RAG)

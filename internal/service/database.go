@@ -16,7 +16,10 @@ import (
 var DB *sql.DB
 
 // InitDB initializes the SQLite database with latest schema.
-func InitDB() error {
+// When runFromServer is true (server startup), orphaned streaming messages
+// from previous crashes are cleaned up. When false (CLI subcommand), cleanup
+// is skipped because the server process may still be actively streaming.
+func InitDB(runFromServer ...bool) error {
 	dbDir := filepath.Join(model.BinDir, ".clawbench")
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		return fmt.Errorf("failed to create db directory: %w", err)
@@ -145,51 +148,56 @@ func InitDB() error {
 	// Any message with streaming=1 at startup can never be finalized since
 	// its stream no longer exists. Mark them as cancelled so the UI shows
 	// an interrupted state instead of silently completing.
-	rows, err := DB.Query("SELECT id, content FROM chat_history WHERE streaming = 1")
-	if err != nil {
-		return fmt.Errorf("failed to query orphaned streaming messages: %w", err)
-	}
-	type orphanMsg struct {
-		id      int64
-		content string
-	}
-	var orphans []orphanMsg
-	for rows.Next() {
-		var m orphanMsg
-		if err := rows.Scan(&m.id, &m.content); err != nil {
-			rows.Close()
-			return fmt.Errorf("failed to scan orphaned streaming message: %w", err)
+	// SKIP when called from CLI subcommands (task/rag) — the server process
+	// may still be actively streaming, and these are NOT orphaned messages.
+	isServerStartup := len(runFromServer) > 0 && runFromServer[0]
+	if isServerStartup {
+		rows, err := DB.Query("SELECT id, content FROM chat_history WHERE streaming = 1")
+		if err != nil {
+			return fmt.Errorf("failed to query orphaned streaming messages: %w", err)
 		}
-		orphans = append(orphans, m)
-	}
-	rows.Close()
-
-	for _, m := range orphans {
-		var contentMap map[string]any
-		if err := json.Unmarshal([]byte(m.content), &contentMap); err != nil {
-			// Non-JSON content — wrap it
-			contentMap = map[string]any{
-				"blocks":    []any{map[string]any{"type": "text", "text": m.content}},
-				"cancelled": true,
+		type orphanMsg struct {
+			id      int64
+			content string
+		}
+		var orphans []orphanMsg
+		for rows.Next() {
+			var m orphanMsg
+			if err := rows.Scan(&m.id, &m.content); err != nil {
+				rows.Close()
+				return fmt.Errorf("failed to scan orphaned streaming message: %w", err)
 			}
-		} else {
-			contentMap["cancelled"] = true
-			// Append warning block
-			blocks, _ := contentMap["blocks"].([]any)
-			blocks = append(blocks, map[string]any{
-				"type":   "warning",
-				"text":   "Server restarted, AI response interrupted",
-				"reason": "restart",
-			})
-			contentMap["blocks"] = blocks
+			orphans = append(orphans, m)
 		}
-		updatedContent, _ := json.Marshal(contentMap)
-		if _, err := DB.Exec("UPDATE chat_history SET content = ?, streaming = 0 WHERE id = ?", string(updatedContent), m.id); err != nil {
-			slog.Error("failed to finalize orphaned streaming message", slog.Int64("id", m.id), slog.String("err", err.Error()))
+		rows.Close()
+
+		for _, m := range orphans {
+			var contentMap map[string]any
+			if err := json.Unmarshal([]byte(m.content), &contentMap); err != nil {
+				// Non-JSON content — wrap it
+				contentMap = map[string]any{
+					"blocks":    []any{map[string]any{"type": "text", "text": m.content}},
+					"cancelled": true,
+				}
+			} else {
+				contentMap["cancelled"] = true
+				// Append warning block
+				blocks, _ := contentMap["blocks"].([]any)
+				blocks = append(blocks, map[string]any{
+					"type":   "warning",
+					"text":   "Server restarted, AI response interrupted",
+					"reason": "restart",
+				})
+				contentMap["blocks"] = blocks
+			}
+			updatedContent, _ := json.Marshal(contentMap)
+			if _, err := DB.Exec("UPDATE chat_history SET content = ?, streaming = 0 WHERE id = ?", string(updatedContent), m.id); err != nil {
+				slog.Error("failed to finalize orphaned streaming message", slog.Int64("id", m.id), slog.String("err", err.Error()))
+			}
 		}
-	}
-	if len(orphans) > 0 {
-		slog.Info("cleaned up orphaned streaming messages", slog.Int("count", len(orphans)))
+		if len(orphans) > 0 {
+			slog.Info("cleaned up orphaned streaming messages", slog.Int("count", len(orphans)))
+		}
 	}
 
 	return nil

@@ -99,11 +99,9 @@ func TestLoadAgents_CommonPromptGenerated(t *testing.T) {
 	t.Cleanup(func() {
 		model.Agents = nil
 		model.AgentList = nil
-		model.ServerPort = 0
 	})
 
 	dir := t.TempDir()
-	model.ServerPort = 20000
 
 	yaml := `id: with-common
 name: With Common
@@ -126,11 +124,9 @@ func TestLoadAgents_CommonPromptOnlyNoSystemPrompt(t *testing.T) {
 	t.Cleanup(func() {
 		model.Agents = nil
 		model.AgentList = nil
-		model.ServerPort = 0
 	})
 
 	dir := t.TempDir()
-	model.ServerPort = 20000
 
 	yaml := `id: no-prompt
 name: No Prompt
@@ -171,7 +167,6 @@ func TestBuildCommonPrompt_ScheduledRemovesSection(t *testing.T) {
 	t.Cleanup(func() {
 		model.Agents = nil
 		model.AgentList = nil
-		model.ServerPort = 0
 	})
 
 	// Create temp dir with agents/ and rules.md containing SCHEDULED markers
@@ -208,7 +203,6 @@ system_prompt: You test.
 	err = os.WriteFile(filepath.Join(agentsDir, "test-agent.yaml"), []byte(yaml), 0644)
 	require.NoError(t, err)
 
-	model.ServerPort = 20000
 	err = model.LoadAgents(agentsDir)
 	require.NoError(t, err)
 

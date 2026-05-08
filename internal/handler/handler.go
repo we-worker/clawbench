@@ -190,10 +190,13 @@ func RegisterRoutes(mux *http.ServeMux) {
 	register("/api/recent-projects", middleware.Auth(ServeRecentProjects))
 	register("/api/local-file/", middleware.Auth(ServeLocalFile))
 	register("/api/agents", middleware.Auth(ServeAgents))
-	register("/api/tasks", middleware.Auth(ServeTasks))
-	register("/api/tasks/", middleware.Auth(ServeTaskByID))
 	register("/api/tts/generate", middleware.Auth(TTSGenerate))
 	register("/api/tts/stream/", middleware.Auth(TTSStream))
+	register("/api/tasks", middleware.Auth(ServeTasks))
+	register("/api/tasks/", middleware.Auth(ServeTaskByID))
+	register("/api/rag/search", middleware.Auth(ServeRAGSearch))
+	register("/api/rag/message", middleware.Auth(ServeRAGMessage))
+	register("/api/rag/session", middleware.Auth(ServeRAGSession))
 
 	// File watch SSE (auto-refresh on file changes)
 	register("/api/file/watch", middleware.Auth(FileWatchSSE))
@@ -205,11 +208,6 @@ func RegisterRoutes(mux *http.ServeMux) {
 
 	// SSH tunnel info (no auth required — port number and fingerprint are not sensitive)
 	register("/api/ssh/info", ServeSSHInfo)
-
-	// RAG history memory search (no auth required — localhost only, AI self-calls)
-	register("/api/rag/search", RAGSearch)
-	register("/api/rag/message", RAGMessage)
-	register("/api/rag/session", RAGSession)
 
 	// Terminal (interactive web terminal with PTY + WebSocket + xterm.js)
 	register("/api/terminal/ws", middleware.Auth(TerminalWebSocket))

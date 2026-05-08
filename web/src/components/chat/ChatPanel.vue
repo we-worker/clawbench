@@ -29,6 +29,7 @@
       @file-tag-click="handleFileTagClick"
       @load-more="handleLoadMore"
       @edit-task="openTaskEdit"
+      @view-history="openTaskHistory"
       @task-action="handleTaskAction"
       @send-message="handleToolSendMessage"
       @remove-pending="manager.handleRemovePending"
@@ -142,6 +143,11 @@
     @close="taskEditOpen = false"
     @saved="handleTaskEditSaved"
   />
+  <TaskExecDialog
+    :open="taskHistoryOpen"
+    :task="taskHistoryData"
+    @close="taskHistoryOpen = false"
+  />
 </template>
 
 <script setup>
@@ -154,6 +160,7 @@ import HeaderMarquee from '@/components/common/HeaderMarquee.vue'
 import SessionDrawer from '@/components/session/SessionDrawer.vue'
 import TaskDrawer from '@/components/task/TaskDrawer.vue'
 import TaskFormDialog from '@/components/task/TaskFormDialog.vue'
+import TaskExecDialog from '@/components/task/TaskExecDialog.vue'
 import ChatMetadataModal from './ChatMetadataModal.vue'
 import ChatInputBar from './ChatInputBar.vue'
 import ChatMessageList from './ChatMessageList.vue'
@@ -222,6 +229,8 @@ const { openFilePath } = useFilePathAnnotation()
 // Task edit dialog (opened from schedule-proposal card)
 const taskEditOpen = ref(false)
 const taskEditData = ref(null)
+const taskHistoryOpen = ref(false)
+const taskHistoryData = ref(null)
 
 async function openTaskEdit(taskId) {
   try {
@@ -232,6 +241,18 @@ async function openTaskEdit(taskId) {
     }
   } catch (err) {
     console.error('Failed to load task for editing:', err)
+  }
+}
+
+async function openTaskHistory(taskId) {
+  try {
+    const resp = await fetch(`/api/tasks/${taskId}`)
+    if (resp.ok) {
+      taskHistoryData.value = await resp.json()
+      taskHistoryOpen.value = true
+    }
+  } catch (err) {
+    console.error('Failed to load task for history:', err)
   }
 }
 

@@ -1,71 +1,145 @@
 package cli
 
 import (
-	"encoding/json"
-	"flag"
 	"fmt"
-	"log/slog"
+	"net/http"
 	"os"
-	"path/filepath"
-
-	"clawbench/internal/model"
-	"clawbench/internal/service"
-
-	"gopkg.in/yaml.v3"
 )
 
+// ---------- Help definitions ----------
+
+var taskSubcommands = []CmdHelp{
+	{Name: "create", Desc: "Create a new scheduled task"},
+	{Name: "update", Desc: "Update an existing task"},
+	{Name: "delete", Desc: "Delete a task"},
+	{Name: "pause", Desc: "Pause a task's cron schedule"},
+	{Name: "resume", Desc: "Resume a paused task"},
+	{Name: "trigger", Desc: "Run a task immediately"},
+	{Name: "list-agents", Desc: "List available agent IDs and descriptions"},
+}
+
+var createHelp = HelpInfo{
+	Usage:       "clawbench task create [flags]",
+	Description: "Create a new scheduled task.",
+	Flags: []FlagHelp{
+		{Name: "name", Type: "string", Desc: "Brief task name", Required: true},
+		{Name: "cron", Type: "string", Desc: "5-field cron expression (min hour day month weekday)", Required: true},
+		{Name: "agent", Type: "string", Desc: "Agent ID (run 'clawbench task list-agents' to see available)", Required: true},
+		{Name: "prompt", Type: "string", Desc: "Full prompt text for each execution", Required: true},
+		{Name: "repeat", Type: "string", Default: "unlimited", Desc: "Repeat mode: once|limited|unlimited"},
+		{Name: "max-runs", Type: "int", Default: "0", Desc: "Max runs (required when --repeat=limited)"},
+		{Name: "project", Type: "string", Desc: "Project path", Required: true},
+	},
+	Examples: []string{
+		`clawbench task create --name "Daily Review" --cron "0 9 * * *" --agent codebuddy --prompt "Review recent changes" --repeat unlimited`,
+		`clawbench task create --name "One-off cleanup" --cron "30 8 1 6 *" --agent claude --prompt "Clean up temp files" --repeat once`,
+	},
+	Footer: `Cron Expression Quick Reference:
+  0 9 * * *       Every day at 9:00
+  */30 * * * *    Every 30 minutes
+  0 9 * * 1-5     Weekdays at 9:00
+  0 0 1 * *       First day of each month
+  30 8 * * 1      Every Monday at 8:30
+
+Response format:
+  {"ok":true,"task":{"id":"task-xxx","name":"...","status":"active",...}}
+  {"ok":false,"error":"..."}`,
+}
+
+var updateHelp = HelpInfo{
+	Usage:       "clawbench task update TASK_ID [flags]",
+	Description: "Update an existing task. Only provide fields you want to change. Updating a completed task reactivates it.",
+	Positional:  "TASK_ID  (required) ID of the task to update",
+	Flags: []FlagHelp{
+		{Name: "name", Type: "string", Desc: "Task name"},
+		{Name: "cron", Type: "string", Desc: "Cron expression"},
+		{Name: "agent", Type: "string", Desc: "Agent ID"},
+		{Name: "prompt", Type: "string", Desc: "Prompt text"},
+		{Name: "repeat", Type: "string", Desc: "Repeat mode: once|limited|unlimited"},
+		{Name: "max-runs", Type: "int", Default: "-1", Desc: "Max runs"},
+		{Name: "project", Type: "string", Desc: "Project path", Required: true},
+	},
+	Examples: []string{
+		`clawbench task update task-abc123 --cron "0 10 * * 1-5"`,
+		`clawbench task update task-abc123 --prompt "Updated prompt" --repeat limited --max-runs 5`,
+	},
+}
+
+var deleteHelp = HelpInfo{
+	Usage:       "clawbench task delete TASK_ID --project PATH",
+	Description: "Delete a task. Soft-deletes — the task will no longer appear in lists.",
+	Positional:  "TASK_ID  (required) ID of the task to delete",
+	Flags: []FlagHelp{
+		{Name: "project", Type: "string", Desc: "Project path", Required: true},
+	},
+	Examples: []string{
+		`clawbench task delete task-abc123`,
+	},
+}
+
+var pauseHelp = HelpInfo{
+	Usage:       "clawbench task pause TASK_ID --project PATH",
+	Description: "Pause a task's cron schedule. The task will not execute until resumed.",
+	Positional:  "TASK_ID  (required) ID of the task to pause",
+	Flags: []FlagHelp{
+		{Name: "project", Type: "string", Desc: "Project path", Required: true},
+	},
+	Examples: []string{
+		`clawbench task pause task-abc123`,
+	},
+}
+
+var resumeHelp = HelpInfo{
+	Usage:       "clawbench task resume TASK_ID --project PATH",
+	Description: "Resume a paused task. The cron schedule is reactivated.",
+	Positional:  "TASK_ID  (required) ID of the task to resume",
+	Flags: []FlagHelp{
+		{Name: "project", Type: "string", Desc: "Project path", Required: true},
+	},
+	Examples: []string{
+		`clawbench task resume task-abc123`,
+	},
+}
+
+var triggerHelp = HelpInfo{
+	Usage:       "clawbench task trigger TASK_ID --project PATH",
+	Description: "Run a task immediately, regardless of the cron schedule. Does not affect the schedule.",
+	Positional:  "TASK_ID  (required) ID of the task to trigger",
+	Flags: []FlagHelp{
+		{Name: "project", Type: "string", Desc: "Project path", Required: true},
+	},
+	Examples: []string{
+		`clawbench task trigger task-abc123`,
+	},
+}
+
+var listAgentsHelp = HelpInfo{
+	Usage:       "clawbench task list-agents",
+	Description: "List available agent IDs and their descriptions. Use an agent ID with 'clawbench task create --agent'.",
+	Examples: []string{
+		`clawbench task list-agents`,
+	},
+}
+
+// ---------- Command dispatch ----------
+
 // RunTaskCommand dispatches "clawbench task <subcommand>" CLI invocations.
+// Task operations are routed through the server's HTTP API to avoid
+// concurrent database access from a separate process.
 func RunTaskCommand(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: clawbench task <create|update|delete|pause|resume|trigger> [options]\n")
-		return 1
+		printGroupHelp("clawbench task <subcommand> [options]", "Manage scheduled AI tasks with cron-based execution.", taskSubcommands)
+		return 0
 	}
 
-	// Initialize config and database if not already done (e.g. in tests)
-	if service.DB == nil {
-		absBinPath, _ := filepath.Abs(os.Args[0])
-		model.BinDir = filepath.Dir(absBinPath)
-
-		var cfg model.Config
-		var presence map[string]bool
-		configPath := filepath.Join(model.BinDir, "config", "config.yaml")
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			configPath = filepath.Join("config", "config.yaml")
-			if _, err := os.Stat(configPath); os.IsNotExist(err) {
-				configPath = filepath.Join(model.BinDir, "config.yaml")
-				if _, err := os.Stat(configPath); os.IsNotExist(err) {
-					configPath = "config.yaml"
-				}
-			}
-		}
-
-		data, err := os.ReadFile(configPath)
-		if err == nil {
-			var raw map[string]any
-			if err := yaml.Unmarshal(data, &raw); err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to parse config: %v\n", err)
-				return 1
-			}
-			presence = model.ParsePresenceMap(raw)
-			if err := yaml.Unmarshal(data, &cfg); err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to parse config: %v\n", err)
-				return 1
-			}
-		}
-		model.ApplyDefaults(&cfg, presence)
-		model.ConfigInstance = cfg
-
-		if err := service.InitDB(); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to initialize database: %v\n", err)
-			return 1
-		}
-
-		scheduler := service.NewScheduler()
-		if err := scheduler.LoadTasksFromDB(""); err != nil {
-			slog.Warn("failed to load existing tasks from DB", slog.String("error", err.Error()))
-		}
-		service.GlobalScheduler = scheduler
+	// Handle top-level --help
+	if args[0] == "--help" || args[0] == "-h" {
+		printGroupHelp("clawbench task <subcommand> [options]", "Manage scheduled AI tasks with cron-based execution.", taskSubcommands)
+		return 0
 	}
+
+	// Load config to determine server port and auth credentials.
+	loadConfig()
 
 	// Dispatch to subcommand
 	switch args[0] {
@@ -81,33 +155,16 @@ func RunTaskCommand(args []string) int {
 		return runResume(args[1:])
 	case "trigger":
 		return runTrigger(args[1:])
+	case "list-agents":
+		return runListAgents(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n", args[0])
-		fmt.Fprintf(os.Stderr, "Usage: clawbench task <create|update|delete|pause|resume|trigger> [options]\n")
+		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", args[0])
+		printGroupHelp("clawbench task <subcommand> [options]", "Manage scheduled AI tasks with cron-based execution.", taskSubcommands)
 		return 1
 	}
 }
 
-func outputJSON(v any) {
-	b, _ := json.Marshal(v)
-	fmt.Println(string(b))
-}
-
-func outputError(msg string) int {
-	outputJSON(map[string]any{"ok": false, "error": msg})
-	return 1
-}
-
-func outputTask(task *model.ScheduledTask) int {
-	outputJSON(map[string]any{"ok": true, "task": task})
-	return 0
-}
-
-func flagSet(name string) *flag.FlagSet {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	return fs
-}
+// ---------- Subcommands ----------
 
 func runCreate(args []string) int {
 	// Anti-recursion: scheduled executions cannot create new tasks
@@ -122,10 +179,11 @@ func runCreate(args []string) int {
 	prompt := fs.String("prompt", "", "Prompt for each execution (required)")
 	repeatMode := fs.String("repeat", "unlimited", "Repeat mode: once|limited|unlimited")
 	maxRuns := fs.Int("max-runs", 0, "Max runs (required when repeat=limited)")
-	fs.Parse(args)
+	projectPath := fs.String("project", "", "Project path")
+	parseOrHelp(fs, args, &createHelp)
 
-	if *name == "" || *cronExpr == "" || *agentID == "" || *prompt == "" {
-		return outputError("missing required fields: --name, --cron, --agent, --prompt")
+	if *name == "" || *cronExpr == "" || *agentID == "" || *prompt == "" || *projectPath == "" {
+		return outputError("missing required fields: --name, --cron, --agent, --prompt, --project")
 	}
 	if *repeatMode != "once" && *repeatMode != "limited" && *repeatMode != "unlimited" {
 		return outputError("invalid --repeat: must be once|limited|unlimited")
@@ -134,21 +192,29 @@ func runCreate(args []string) int {
 		return outputError("--max-runs required when --repeat=limited")
 	}
 
-	task := &model.ScheduledTask{
-		ProjectPath: model.ConfigInstance.WatchDir,
-		Name:        *name,
-		CronExpr:    *cronExpr,
-		AgentID:     *agentID,
-		Prompt:      *prompt,
-		RepeatMode:  *repeatMode,
-		MaxRuns:     *maxRuns,
+	body := map[string]any{
+		"name":        *name,
+		"cron_expr":   *cronExpr,
+		"agent_id":    *agentID,
+		"prompt":      *prompt,
+		"repeat_mode": *repeatMode,
+		"max_runs":    *maxRuns,
 	}
 
-	if err := service.GlobalScheduler.AddTask(task); err != nil {
+	result, status, err := httpDoWithProject(http.MethodPost, "/api/tasks", body, *projectPath)
+	if err != nil {
 		return outputError(fmt.Sprintf("failed to create task: %v", err))
 	}
+	if status != http.StatusOK {
+		errMsg, _ := result["error"].(string)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", status)
+		}
+		return outputError(fmt.Sprintf("failed to create task: %s", errMsg))
+	}
 
-	return outputTask(task)
+	fmt.Println(mustMarshal(result))
+	return 0
 }
 
 func runUpdate(args []string) int {
@@ -159,7 +225,8 @@ func runUpdate(args []string) int {
 	prompt := fs.String("prompt", "", "Prompt")
 	repeatMode := fs.String("repeat", "", "Repeat mode: once|limited|unlimited")
 	maxRuns := fs.Int("max-runs", -1, "Max runs")
-	fs.Parse(args)
+	projectPath := fs.String("project", "", "Project path")
+	parseOrHelp(fs, args, &updateHelp)
 
 	remaining := fs.Args()
 	if len(remaining) == 0 {
@@ -167,117 +234,221 @@ func runUpdate(args []string) int {
 	}
 	taskID := remaining[0]
 
-	task, err := service.GetTaskByID(taskID)
-	if err != nil {
-		return outputError(fmt.Sprintf("task not found: %v", err))
+	if *projectPath == "" {
+		return outputError("missing required flag: --project")
 	}
 
+	body := map[string]any{
+		"action": "update",
+	}
 	if *name != "" {
-		task.Name = *name
+		body["name"] = *name
 	}
 	if *cronExpr != "" {
-		task.CronExpr = *cronExpr
+		body["cron_expr"] = *cronExpr
 	}
 	if *agentID != "" {
-		task.AgentID = *agentID
+		body["agent_id"] = *agentID
 	}
 	if *prompt != "" {
-		task.Prompt = *prompt
+		body["prompt"] = *prompt
 	}
 	if *repeatMode != "" {
 		if *repeatMode != "once" && *repeatMode != "limited" && *repeatMode != "unlimited" {
 			return outputError("invalid --repeat: must be once|limited|unlimited")
 		}
-		task.RepeatMode = *repeatMode
+		body["repeat_mode"] = *repeatMode
 	}
 	if *maxRuns >= 0 {
-		task.MaxRuns = *maxRuns
+		body["max_runs"] = *maxRuns
 	}
 
-	if err := service.GlobalScheduler.UpdateTask(task); err != nil {
+	result, status, err := httpDoWithProject(http.MethodPut, "/api/tasks/"+taskID, body, *projectPath)
+	if err != nil {
 		return outputError(fmt.Sprintf("failed to update task: %v", err))
 	}
+	if status != http.StatusOK {
+		errMsg, _ := result["error"].(string)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", status)
+		}
+		return outputError(fmt.Sprintf("failed to update task: %s", errMsg))
+	}
 
-	return outputTask(task)
+	fmt.Println(mustMarshal(result))
+	return 0
 }
 
 func runDelete(args []string) int {
 	fs := flagSet("delete")
-	fs.Parse(args)
+	projectPath := fs.String("project", "", "Project path")
+	parseOrHelp(fs, args, &deleteHelp)
 
 	remaining := fs.Args()
 	if len(remaining) == 0 {
 		return outputError("task ID required")
 	}
+	if *projectPath == "" {
+		return outputError("missing required flag: --project")
+	}
 	taskID := remaining[0]
 
-	task, err := service.GetTaskByID(taskID)
+	result, status, err := httpDoWithProject(http.MethodDelete, "/api/tasks/"+taskID, nil, *projectPath)
 	if err != nil {
-		return outputError(fmt.Sprintf("task not found: %v", err))
+		return outputError(fmt.Sprintf("failed to delete task: %v", err))
+	}
+	if status != http.StatusOK {
+		errMsg, _ := result["error"].(string)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", status)
+		}
+		return outputError(fmt.Sprintf("failed to delete task: %s", errMsg))
 	}
 
-	service.GlobalScheduler.RemoveTask(taskID)
-	return outputTask(task)
+	fmt.Println(mustMarshal(result))
+	return 0
 }
 
 func runPause(args []string) int {
 	fs := flagSet("pause")
-	fs.Parse(args)
+	projectPath := fs.String("project", "", "Project path")
+	parseOrHelp(fs, args, &pauseHelp)
 
 	remaining := fs.Args()
 	if len(remaining) == 0 {
 		return outputError("task ID required")
 	}
+	if *projectPath == "" {
+		return outputError("missing required flag: --project")
+	}
 	taskID := remaining[0]
 
-	service.GlobalScheduler.PauseTask(taskID)
-
-	task, err := service.GetTaskByID(taskID)
+	body := map[string]any{"action": "pause"}
+	result, status, err := httpDoWithProject(http.MethodPut, "/api/tasks/"+taskID, body, *projectPath)
 	if err != nil {
-		return outputError(fmt.Sprintf("task not found: %v", err))
+		return outputError(fmt.Sprintf("failed to pause task: %v", err))
 	}
-	return outputTask(task)
+	if status != http.StatusOK {
+		errMsg, _ := result["error"].(string)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", status)
+		}
+		return outputError(fmt.Sprintf("failed to pause task: %s", errMsg))
+	}
+
+	fmt.Println(mustMarshal(result))
+	return 0
 }
 
 func runResume(args []string) int {
 	fs := flagSet("resume")
-	fs.Parse(args)
+	projectPath := fs.String("project", "", "Project path")
+	parseOrHelp(fs, args, &resumeHelp)
 
 	remaining := fs.Args()
 	if len(remaining) == 0 {
 		return outputError("task ID required")
 	}
+	if *projectPath == "" {
+		return outputError("missing required flag: --project")
+	}
 	taskID := remaining[0]
 
-	if err := service.GlobalScheduler.ResumeTask(taskID); err != nil {
+	body := map[string]any{"action": "resume"}
+	result, status, err := httpDoWithProject(http.MethodPut, "/api/tasks/"+taskID, body, *projectPath)
+	if err != nil {
 		return outputError(fmt.Sprintf("failed to resume task: %v", err))
 	}
-
-	task, err := service.GetTaskByID(taskID)
-	if err != nil {
-		return outputError(fmt.Sprintf("task not found: %v", err))
+	if status != http.StatusOK {
+		errMsg, _ := result["error"].(string)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", status)
+		}
+		return outputError(fmt.Sprintf("failed to resume task: %s", errMsg))
 	}
-	return outputTask(task)
+
+	fmt.Println(mustMarshal(result))
+	return 0
 }
 
 func runTrigger(args []string) int {
 	fs := flagSet("trigger")
-	fs.Parse(args)
+	projectPath := fs.String("project", "", "Project path")
+	parseOrHelp(fs, args, &triggerHelp)
 
 	remaining := fs.Args()
 	if len(remaining) == 0 {
 		return outputError("task ID required")
 	}
+	if *projectPath == "" {
+		return outputError("missing required flag: --project")
+	}
 	taskID := remaining[0]
 
-	task, err := service.GetTaskByID(taskID)
+	body := map[string]any{"action": "trigger"}
+	result, status, err := httpDoWithProject(http.MethodPut, "/api/tasks/"+taskID, body, *projectPath)
 	if err != nil {
-		return outputError(fmt.Sprintf("task not found: %v", err))
-	}
-
-	if err := service.GlobalScheduler.TriggerTask(taskID); err != nil {
 		return outputError(fmt.Sprintf("failed to trigger task: %v", err))
 	}
+	if status != http.StatusOK {
+		errMsg, _ := result["error"].(string)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", status)
+		}
+		return outputError(fmt.Sprintf("failed to trigger task: %s", errMsg))
+	}
 
-	return outputTask(task)
+	fmt.Println(mustMarshal(result))
+	return 0
+}
+
+func runListAgents(args []string) int {
+	fs := flagSet("list-agents")
+	parseOrHelp(fs, args, &listAgentsHelp)
+
+	result, status, err := httpDo(http.MethodGet, "/api/agents", nil)
+	if err != nil {
+		return outputError(fmt.Sprintf("failed to list agents: %v", err))
+	}
+	if status != http.StatusOK {
+		errMsg, _ := result["error"].(string)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", status)
+		}
+		return outputError(fmt.Sprintf("failed to list agents: %s", errMsg))
+	}
+
+	// Format as a readable table
+	agentsRaw, ok := result["agents"].([]any)
+	if !ok {
+		// Fallback: just output raw JSON
+		fmt.Println(mustMarshal(result))
+		return 0
+	}
+
+	type agentEntry struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Specialty string `json:"specialty"`
+		Backend   string `json:"backend"`
+	}
+
+	var agents []agentEntry
+	for _, a := range agentsRaw {
+		m, ok := a.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := m["id"].(string)
+		name, _ := m["name"].(string)
+		specialty, _ := m["specialty"].(string)
+		backend, _ := m["backend"].(string)
+		agents = append(agents, agentEntry{ID: id, Name: name, Specialty: specialty, Backend: backend})
+	}
+
+	outputJSON(map[string]any{
+		"ok":     true,
+		"agents": agents,
+	})
+	return 0
 }

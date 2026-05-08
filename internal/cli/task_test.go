@@ -5,28 +5,24 @@ import (
 	"testing"
 
 	"clawbench/internal/model"
-	"clawbench/internal/service"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func setupTestEnv(t *testing.T) {
-	t.Helper()
-	tmpDir := t.TempDir()
-	model.BinDir = tmpDir
-	model.ConfigInstance = model.Config{WatchDir: tmpDir}
-
-	err := service.InitDB()
-	require.NoError(t, err)
-
-	scheduler := service.NewScheduler()
-	service.GlobalScheduler = scheduler
+func TestRunTaskCommand_NoArgs(t *testing.T) {
+	// No args now prints help and returns 0
+	exitCode := RunTaskCommand([]string{})
+	assert.Equal(t, 0, exitCode)
 }
 
-func TestRunTaskCommand_NoArgs(t *testing.T) {
-	exitCode := RunTaskCommand([]string{})
-	assert.Equal(t, 1, exitCode)
+func TestRunTaskCommand_HelpFlag(t *testing.T) {
+	exitCode := RunTaskCommand([]string{"--help"})
+	assert.Equal(t, 0, exitCode)
+}
+
+func TestRunTaskCommand_ShortHelpFlag(t *testing.T) {
+	exitCode := RunTaskCommand([]string{"-h"})
+	assert.Equal(t, 0, exitCode)
 }
 
 func TestRunTaskCommand_UnknownSubcommand(t *testing.T) {
@@ -34,23 +30,7 @@ func TestRunTaskCommand_UnknownSubcommand(t *testing.T) {
 	assert.Equal(t, 1, exitCode)
 }
 
-func TestCreateTask(t *testing.T) {
-	setupTestEnv(t)
-
-	exitCode := RunTaskCommand([]string{
-		"create",
-		"--name", "Test Task",
-		"--cron", "0 9 * * *",
-		"--agent", "codebuddy",
-		"--prompt", "Summarize commits",
-		"--repeat", "unlimited",
-	})
-	assert.Equal(t, 0, exitCode)
-}
-
 func TestCreateTask_MissingFields(t *testing.T) {
-	setupTestEnv(t)
-
 	exitCode := RunTaskCommand([]string{
 		"create",
 		"--name", "Test Task",
@@ -59,8 +39,6 @@ func TestCreateTask_MissingFields(t *testing.T) {
 }
 
 func TestCreateTask_ScheduledExecution(t *testing.T) {
-	setupTestEnv(t)
-
 	os.Setenv("CLAWBENCH_SCHEDULED", "1")
 	defer os.Unsetenv("CLAWBENCH_SCHEDULED")
 
@@ -75,8 +53,6 @@ func TestCreateTask_ScheduledExecution(t *testing.T) {
 }
 
 func TestCreateTask_LimitedRepeatWithoutMaxRuns(t *testing.T) {
-	setupTestEnv(t)
-
 	exitCode := RunTaskCommand([]string{
 		"create",
 		"--name", "Test Task",
@@ -88,72 +64,65 @@ func TestCreateTask_LimitedRepeatWithoutMaxRuns(t *testing.T) {
 	assert.Equal(t, 1, exitCode)
 }
 
-func TestUpdateTask(t *testing.T) {
-	setupTestEnv(t)
+func TestCreateTask_ServerNotReachable(t *testing.T) {
+	tmpDir := t.TempDir()
+	model.BinDir = tmpDir
+	model.ConfigInstance = model.Config{
+		WatchDir: tmpDir,
+		Port:     59999,
+	}
 
 	exitCode := RunTaskCommand([]string{
 		"create",
-		"--name", "Original",
+		"--name", "Test Task",
 		"--cron", "0 9 * * *",
 		"--agent", "codebuddy",
 		"--prompt", "Test",
 	})
-	assert.Equal(t, 0, exitCode)
-
-	tasks, err := service.GetTasks(model.ConfigInstance.WatchDir)
-	require.NoError(t, err)
-	require.Len(t, tasks, 1)
-	taskID := tasks[0].ID
-
-	exitCode = RunTaskCommand([]string{
-		"update", taskID,
-		"--name", "Updated",
-	})
-	assert.Equal(t, 0, exitCode)
+	assert.Equal(t, 1, exitCode)
 }
 
-func TestDeleteTask(t *testing.T) {
-	setupTestEnv(t)
+func TestDeleteTask_NoTaskID(t *testing.T) {
+	exitCode := RunTaskCommand([]string{"delete"})
+	assert.Equal(t, 1, exitCode)
+}
 
-	RunTaskCommand([]string{
+func TestPauseTask_NoTaskID(t *testing.T) {
+	exitCode := RunTaskCommand([]string{"pause"})
+	assert.Equal(t, 1, exitCode)
+}
+
+func TestResumeTask_NoTaskID(t *testing.T) {
+	exitCode := RunTaskCommand([]string{"resume"})
+	assert.Equal(t, 1, exitCode)
+}
+
+func TestTriggerTask_NoTaskID(t *testing.T) {
+	exitCode := RunTaskCommand([]string{"trigger"})
+	assert.Equal(t, 1, exitCode)
+}
+
+func TestUpdateTask_NoTaskID(t *testing.T) {
+	exitCode := RunTaskCommand([]string{"update"})
+	assert.Equal(t, 1, exitCode)
+}
+
+func TestUpdateTask_InvalidRepeat(t *testing.T) {
+	exitCode := RunTaskCommand([]string{
+		"update", "some-id",
+		"--repeat", "invalid",
+	})
+	assert.Equal(t, 1, exitCode)
+}
+
+func TestCreateTask_InvalidRepeat(t *testing.T) {
+	exitCode := RunTaskCommand([]string{
 		"create",
-		"--name", "To Delete",
+		"--name", "Test",
 		"--cron", "0 9 * * *",
 		"--agent", "codebuddy",
 		"--prompt", "Test",
+		"--repeat", "invalid",
 	})
-
-	tasks, _ := service.GetTasks(model.ConfigInstance.WatchDir)
-	taskID := tasks[0].ID
-
-	exitCode := RunTaskCommand([]string{"delete", taskID})
-	assert.Equal(t, 0, exitCode)
-}
-
-func TestPauseResumeTask(t *testing.T) {
-	setupTestEnv(t)
-
-	RunTaskCommand([]string{
-		"create",
-		"--name", "Pausable",
-		"--cron", "0 9 * * *",
-		"--agent", "codebuddy",
-		"--prompt", "Test",
-	})
-
-	tasks, _ := service.GetTasks(model.ConfigInstance.WatchDir)
-	taskID := tasks[0].ID
-
-	exitCode := RunTaskCommand([]string{"pause", taskID})
-	assert.Equal(t, 0, exitCode)
-
-	exitCode = RunTaskCommand([]string{"resume", taskID})
-	assert.Equal(t, 0, exitCode)
-}
-
-func TestTaskNotFound(t *testing.T) {
-	setupTestEnv(t)
-
-	exitCode := RunTaskCommand([]string{"delete", "nonexistent-id"})
 	assert.Equal(t, 1, exitCode)
 }

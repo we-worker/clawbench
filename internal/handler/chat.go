@@ -746,6 +746,10 @@ func buildChatRequest(prompt, sessionID, projectPath, backendName, agentID, mode
 	}
 	if agent, ok := model.Agents[agentID]; ok {
 		systemPrompt = agent.SystemPrompt
+		// Replace {{PROJECT_PATH}} per-request with the actual project path from cookie
+		if projectPath != "" {
+			systemPrompt = strings.ReplaceAll(systemPrompt, "{{PROJECT_PATH}}", projectPath)
+		}
 		if modelOverride != "" {
 			agentModel = modelOverride
 		} else if defaultID := agent.DefaultModelID(); defaultID != "" {

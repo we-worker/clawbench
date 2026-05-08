@@ -61,6 +61,8 @@ if [ -f "package.json" ] && command -v npm >/dev/null 2>&1; then
         echo "  Installing dependencies..."
         npm install
     fi
+    # Clean stale hashed assets before rebuild (index-*.js, index-*.css, manifest-*.json)
+    find public/ -maxdepth 1 -name 'index-*.js' -o -name 'index-*.css' -o -name 'manifest-*.json' | xargs rm -f 2>/dev/null || true
     npm run build
     echo "  Frontend: public/"
 else

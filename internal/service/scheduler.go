@@ -373,6 +373,10 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 	// Rebuild system prompt without task-scheduler skill to prevent
 	// the AI from discovering scheduled task capability (anti-recursion).
 	systemPrompt := agent.SystemPrompt
+	// Replace {{PROJECT_PATH}} per-request with the actual project path for this task
+	if projectPath != "" {
+		systemPrompt = strings.ReplaceAll(systemPrompt, "{{PROJECT_PATH}}", projectPath)
+	}
 	scheduledCommon := model.BuildCommonPrompt(true)
 	normalCommon := model.BuildCommonPrompt(false)
 	if normalCommon != "" && strings.HasPrefix(systemPrompt, normalCommon) {

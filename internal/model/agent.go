@@ -45,10 +45,10 @@ func (a *Agent) DefaultModelID() string {
 }
 
 var (
-	Agents     map[string]*Agent // indexed by ID
-	AgentList  []*Agent          // ordered list for API responses
-	ServerPort int               // resolved server port for {{PORT}} replacement
-	agentsDir  string            // saved from LoadAgents for BuildCommonPrompt re-calls
+	Agents      map[string]*Agent // indexed by ID
+	AgentList   []*Agent          // ordered list for API responses
+	ClawbenchBin string           // absolute path to clawbench binary for {{CLAWBENCH_BIN}} replacement
+	agentsDir   string            // saved from LoadAgents for BuildCommonPrompt re-calls
 )
 
 // GetDefaultAgentID returns the default agent ID for new sessions.
@@ -157,9 +157,9 @@ func loadRules(agentsDir string) string {
 	}
 	content := strings.TrimSpace(string(data))
 
-	// Replace {{PORT}}
-	if ServerPort > 0 {
-		content = strings.ReplaceAll(content, "{{PORT}}", fmt.Sprintf("%d", ServerPort))
+	// Replace {{CLAWBENCH_BIN}} with absolute path to clawbench binary
+	if ClawbenchBin != "" {
+		content = strings.ReplaceAll(content, "{{CLAWBENCH_BIN}}", ClawbenchBin)
 	}
 
 	// Replace {{AVAILABLE_AGENTS}}
@@ -168,6 +168,10 @@ func loadRules(agentsDir string) string {
 		agentLines = append(agentLines, fmt.Sprintf("    - %s: %s", a.ID, a.Specialty))
 	}
 	content = strings.ReplaceAll(content, "{{AVAILABLE_AGENTS}}", strings.Join(agentLines, "\n"))
+
+	// Note: {{PROJECT_PATH}} is NOT replaced here — it is replaced per-request
+	// in buildChatRequest() and scheduler executeTask() with the actual project
+	// path from the cookie/database, not the static WatchDir.
 
 	return content
 }

@@ -44,32 +44,32 @@
       <template v-else-if="block.type === 'text' && hasScheduledTasks(bi)">
         <div v-if="getBlockHtml(bi, block)" v-html="getBlockHtml(bi, block)"></div>
         <div v-for="(sKey, sIdx) in scheduledTaskKeys(bi)" :key="sIdx" class="scheduled-task-card" :class="{ deleted: blockTasks[sKey].deleted }">
-          <div class="stask-header">
+          <div class="stask-header" @click="!blockTasks[sKey].deleted && !blockTasks[sKey].loading && blockTasks[sKey].task && $emit('edit-task', blockTasks[sKey].taskId)">
             <span v-if="blockTasks[sKey].deleted" class="stask-icon">🗑️</span>
             <span v-else class="stask-icon">⏰</span>
             <template v-if="blockTasks[sKey].deleted">{{ t('chat.contentBlocks.taskDeleted') }}</template>
-            <template v-else-if="blockTasks[sKey].loading">Loading...</template>
-            <template v-else>{{ blockTasks[sKey].task?.name || 'Scheduled Task' }}</template>
+            <template v-else-if="blockTasks[sKey].loading">{{ t('chat.contentBlocks.loading') }}</template>
+            <template v-else>{{ blockTasks[sKey].task?.name || t('chat.contentBlocks.scheduledTaskCreated') }}</template>
             <button v-if="!blockTasks[sKey].deleted && !blockTasks[sKey].loading && blockTasks[sKey].task"
-                    class="stask-edit-btn" @click.stop="$emit('edit-task', blockTasks[sKey].taskId)" title="Edit">
-              <Pencil :size="14" />
+                    class="stask-history-btn" @click.stop="$emit('view-history', blockTasks[sKey].taskId)" :title="t('task.exec.title')">
+              <History :size="14" />
             </button>
           </div>
-          <div v-if="!blockTasks[sKey].deleted && !blockTasks[sKey].loading && blockTasks[sKey].task" class="stask-body">
-            <div class="stask-row"><strong>Frequency</strong>{{ humanizeCron(blockTasks[sKey].task.cronExpr) }}</div>
-            <div class="stask-row"><strong>Executor</strong>{{ getAgentIcon(blockTasks[sKey].task.agentId) }} {{ getAgentName(blockTasks[sKey].task.agentId) }}</div>
-            <div class="stask-row"><strong>Repeat</strong>{{ repeatLabel(blockTasks[sKey].task.repeatMode, blockTasks[sKey].task.maxRuns) }}</div>
+          <div v-if="!blockTasks[sKey].deleted && !blockTasks[sKey].loading && blockTasks[sKey].task" class="stask-body" @click="$emit('edit-task', blockTasks[sKey].taskId)">
+            <div class="stask-row"><strong>{{ t('chat.contentBlocks.frequency') }}</strong>{{ humanizeCron(blockTasks[sKey].task.cronExpr) }}</div>
+            <div class="stask-row"><strong>{{ t('chat.contentBlocks.executor') }}</strong>{{ getAgentIcon(blockTasks[sKey].task.agentId) }} {{ getAgentName(blockTasks[sKey].task.agentId) }}</div>
+            <div class="stask-row"><strong>{{ t('chat.contentBlocks.repeat') }}</strong>{{ repeatLabel(blockTasks[sKey].task.repeatMode, blockTasks[sKey].task.maxRuns) }}</div>
             <div class="stask-status">
               <span class="stask-status-dot" :class="statusClass(blockTasks[sKey].task)"></span>
               {{ statusLabel(blockTasks[sKey].task) }}
             </div>
-            <div v-if="blockTasks[sKey].task.lastRunAt" class="stask-row"><strong>Last</strong>{{ formatTime(blockTasks[sKey].task.lastRunAt) }}</div>
-            <div v-if="blockTasks[sKey].task.nextRunAt" class="stask-row"><strong>Next</strong>{{ formatTime(blockTasks[sKey].task.nextRunAt) }}</div>
+            <div v-if="blockTasks[sKey].task.lastRunAt" class="stask-row"><strong>{{ t('chat.contentBlocks.lastRun') }}</strong>{{ formatTime(blockTasks[sKey].task.lastRunAt) }}</div>
+            <div v-if="blockTasks[sKey].task.nextRunAt" class="stask-row"><strong>{{ t('chat.contentBlocks.nextRun') }}</strong>{{ formatTime(blockTasks[sKey].task.nextRunAt) }}</div>
             <div class="stask-actions">
-              <button v-if="blockTasks[sKey].task.status === 'active'" class="stask-action-btn" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'pause')">Pause</button>
-              <button v-if="blockTasks[sKey].task.status === 'paused'" class="stask-action-btn" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'resume')">Resume</button>
-              <button v-if="blockTasks[sKey].task.status === 'active' || blockTasks[sKey].task.status === 'paused'" class="stask-action-btn" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'trigger')">Run Now</button>
-              <button class="stask-action-btn stask-action-danger" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'delete')">Delete</button>
+              <button v-if="blockTasks[sKey].task.status === 'active'" class="stask-action-btn" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'pause')">{{ t('chat.contentBlocks.pause') }}</button>
+              <button v-if="blockTasks[sKey].task.status === 'paused'" class="stask-action-btn" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'resume')">{{ t('chat.contentBlocks.resume') }}</button>
+              <button v-if="blockTasks[sKey].task.status === 'active' || blockTasks[sKey].task.status === 'paused'" class="stask-action-btn" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'trigger')">{{ t('chat.contentBlocks.trigger') }}</button>
+              <button class="stask-action-btn stask-action-danger" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'delete')">{{ t('chat.contentBlocks.delete') }}</button>
             </div>
           </div>
         </div>
@@ -101,7 +101,7 @@ import { ref, watch, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { handleToolAction, shouldAutoExpandTool } from '@/utils/renderToolDetail.ts'
 import { getToolIcon } from '@/utils/icons'
-import { CircleHelp, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Pencil } from 'lucide-vue-next'
+import { CircleHelp, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Pencil, History } from 'lucide-vue-next'
 
 const { t } = useI18n()
 
@@ -169,7 +169,7 @@ const props = defineProps({
   getAgentName: { type: Function, default: () => '' },
 })
 
-const emit = defineEmits(['toggle-tool', 'edit-task', 'task-action', 'send-message', 'render-flush'])
+const emit = defineEmits(['toggle-tool', 'edit-task', 'view-history', 'task-action', 'send-message', 'render-flush'])
 
 // Key helper: use msgId if available, otherwise msgIndex
 function key(bi) {
@@ -578,10 +578,10 @@ onUnmounted(() => {
 
 .scheduled-task-card {
   margin: 8px 0;
-  border: 1px solid var(--border-color, #e0e0e0);
+  border: 1px solid color-mix(in srgb, var(--accent-color, #0066cc) 30%, var(--border-color, #e0e0e0));
   border-radius: 8px;
   overflow: hidden;
-  background: var(--bg-secondary, #f5f5f5);
+  background: color-mix(in srgb, var(--accent-color, #0066cc) 6%, var(--bg-primary, #fff));
 }
 .scheduled-task-card.deleted {
   opacity: 0.6;
@@ -590,16 +590,17 @@ onUnmounted(() => {
 .stask-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: var(--bg-tertiary, #eee);
+  gap: 5px;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--accent-color, #0066cc) 10%, var(--bg-tertiary, #eee));
   font-weight: 500;
-  font-size: 0.9em;
+  font-size: 0.82em;
+  cursor: pointer;
 }
 .stask-icon {
-  font-size: 1.1em;
+  font-size: 0.95em;
 }
-.stask-edit-btn {
+.stask-history-btn {
   margin-left: auto;
   background: none;
   border: none;
@@ -608,12 +609,13 @@ onUnmounted(() => {
   padding: 2px 4px;
   border-radius: 4px;
 }
-.stask-edit-btn:hover {
+.stask-history-btn:hover {
   background: var(--bg-hover, #ddd);
 }
 .stask-body {
   padding: 8px 12px;
   font-size: 0.85em;
+  cursor: pointer;
 }
 .stask-row {
   display: flex;
@@ -653,14 +655,14 @@ onUnmounted(() => {
 }
 .stask-action-btn {
   padding: 3px 10px;
-  border: 1px solid var(--border-color, #ddd);
+  border: 1px solid color-mix(in srgb, var(--accent-color, #0066cc) 25%, var(--border-color, #ddd));
   border-radius: 4px;
-  background: var(--bg-secondary, #f5f5f5);
+  background: color-mix(in srgb, var(--accent-color, #0066cc) 6%, var(--bg-secondary, #f5f5f5));
   cursor: pointer;
   font-size: 0.85em;
 }
 .stask-action-btn:hover {
-  background: var(--bg-hover, #e0e0e0);
+  background: color-mix(in srgb, var(--accent-color, #0066cc) 12%, var(--bg-hover, #e0e0e0));
 }
 .stask-action-danger {
   color: #d32f2f;

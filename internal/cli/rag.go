@@ -1,33 +1,94 @@
 package cli
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
+	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
-	"time"
-
-	"clawbench/internal/model"
-	"clawbench/internal/rag"
-	"clawbench/internal/service"
-
-	"gopkg.in/yaml.v3"
 )
 
+// ---------- Help definitions ----------
+
+var ragSubcommands = []CmdHelp{
+	{Name: "search", Desc: "Search conversation history by semantic query"},
+	{Name: "message", Desc: "Get full message detail by ID"},
+	{Name: "session", Desc: "Get all messages in a session"},
+}
+
+var searchHelp = HelpInfo{
+	Usage:       "clawbench rag search [flags]",
+	Description: "Search conversation history by semantic query.",
+	Flags: []FlagHelp{
+		{Name: "q", Short: "q", Type: "string", Desc: "Search query text", Required: true},
+		{Name: "limit", Type: "int", Default: "config default (5)", Desc: "Number of results"},
+		{Name: "project", Type: "string", Desc: "Filter by project path"},
+		{Name: "backend", Type: "string", Desc: "Filter by backend name"},
+		{Name: "role", Type: "string", Desc: "Filter by role: user|assistant"},
+		{Name: "session-id", Type: "string", Desc: "Limit results to this session"},
+		{Name: "exclude-session-id", Type: "string", Desc: "Exclude this session from results"},
+		{Name: "from", Type: "string", Desc: "Time range start"},
+		{Name: "to", Type: "string", Desc: "Time range end"},
+	},
+	Examples: []string{
+		`clawbench rag search -q "authentication bug" --limit 3`,
+		`clawbench rag search -q "SSH tunnel" --exclude-session-id abc-123`,
+	},
+	Footer: `Response format:
+  {"results":[{"chunk_text":"...","score":0.85,"session_id":"...","message_id":42,...}],"total":3}
+
+Tips:
+  - chunk_text is a text excerpt; thinking blocks and tool calls are excluded from the index
+  - Use "clawbench rag message <message_id>" for full message content including tool_use and thinking
+  - Use "clawbench rag session <session_id>" for complete conversation flow`,
+}
+
+var messageHelp = HelpInfo{
+	Usage:       "clawbench rag message [MESSAGE_ID] [--id ID]",
+	Description: "Get full message detail by ID, including all content blocks (text, thinking, tool_use, warning, error).",
+	Flags: []FlagHelp{
+		{Name: "id", Type: "string", Desc: "Message database ID (or pass as positional arg)"},
+	},
+	Positional: "MESSAGE_ID  (optional) Message database ID",
+	Examples: []string{
+		`clawbench rag message --id 42`,
+		`clawbench rag message 42`,
+	},
+}
+
+var sessionHelp = HelpInfo{
+	Usage:       "clawbench rag session [SESSION_ID] [--id ID]",
+	Description: "Get all messages in a session — the complete conversation including user messages, AI responses with thinking and tool_use blocks.",
+	Flags: []FlagHelp{
+		{Name: "id", Type: "string", Desc: "Session ID (or pass as positional arg)"},
+	},
+	Positional: "SESSION_ID  (optional) Session ID",
+	Examples: []string{
+		`clawbench rag session --id abc-123-def`,
+		`clawbench rag session abc-123-def`,
+	},
+	Footer: `Response format:
+  {"session_id":"...","messages":[...],"total":15}`,
+}
+
+// ---------- Command dispatch ----------
+
 // RunRAGCommand dispatches "clawbench rag <subcommand>" CLI invocations.
+// RAG operations are routed through the server's HTTP API to avoid
+// concurrent database access from a separate process.
 func RunRAGCommand(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: clawbench rag <search|message|session> [options]\n")
-		return 1
+		printGroupHelp("clawbench rag <subcommand> [options]", "Search and retrieve conversation history via RAG.", ragSubcommands)
+		return 0
 	}
 
-	// Initialize config, database, and RAG if not already done
-	if err := initRAG(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize RAG: %v\n", err)
-		return 1
+	// Handle top-level --help
+	if args[0] == "--help" || args[0] == "-h" {
+		printGroupHelp("clawbench rag <subcommand> [options]", "Search and retrieve conversation history via RAG.", ragSubcommands)
+		return 0
 	}
+
+	// Load config to determine server port and auth credentials.
+	loadConfig()
 
 	// Dispatch to subcommand
 	switch args[0] {
@@ -38,60 +99,13 @@ func RunRAGCommand(args []string) int {
 	case "session":
 		return runRAGSession(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n", args[0])
-		fmt.Fprintf(os.Stderr, "Usage: clawbench rag <search|message|session> [options]\n")
+		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n\n", args[0])
+		printGroupHelp("clawbench rag <subcommand> [options]", "Search and retrieve conversation history via RAG.", ragSubcommands)
 		return 1
 	}
 }
 
-// initRAG initializes config, database, and RAG system for CLI usage.
-func initRAG() error {
-	// Skip if already initialized (e.g. in tests)
-	if service.DB != nil && rag.GlobalStore != nil {
-		return nil
-	}
-
-	absBinPath, _ := filepath.Abs(os.Args[0])
-	model.BinDir = filepath.Dir(absBinPath)
-
-	var cfg model.Config
-	var presence map[string]bool
-	configPath := filepath.Join(model.BinDir, "config", "config.yaml")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		configPath = filepath.Join("config", "config.yaml")
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			configPath = filepath.Join(model.BinDir, "config.yaml")
-			if _, err := os.Stat(configPath); os.IsNotExist(err) {
-				configPath = "config.yaml"
-			}
-		}
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err == nil {
-		var raw map[string]any
-		if err := yaml.Unmarshal(data, &raw); err != nil {
-			return fmt.Errorf("parse config: %w", err)
-		}
-		presence = model.ParsePresenceMap(raw)
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return fmt.Errorf("parse config: %w", err)
-		}
-	}
-	model.ApplyDefaults(&cfg, presence)
-	model.ConfigInstance = cfg
-
-	if err := service.InitDB(); err != nil {
-		return fmt.Errorf("init database: %w", err)
-	}
-
-	// Initialize RAG system (always init for CLI — the search command needs it)
-	if err := rag.Init(cfg.RAG); err != nil {
-		return fmt.Errorf("init RAG: %w", err)
-	}
-
-	return nil
-}
+// ---------- Subcommands ----------
 
 func runRAGSearch(args []string) int {
 	fs := flagSet("search")
@@ -104,59 +118,50 @@ func runRAGSearch(args []string) int {
 	excludeSessionID := fs.String("exclude-session-id", "", "Exclude this session from results")
 	fromTime := fs.String("from", "", "Time range start")
 	toTime := fs.String("to", "", "Time range end")
-	fs.Parse(args)
+	parseOrHelp(fs, args, &searchHelp)
 
 	if *query == "" {
 		return outputError("missing required flag: -q (search query)")
 	}
 
-	if rag.GlobalStore == nil || rag.GlobalEmbedder == nil {
-		return outputError("RAG is not enabled or not initialized")
+	body := map[string]any{
+		"q":                  *query,
+		"project":            *project,
+		"backend":            *backend,
+		"role":               *role,
+		"session_id":         *sessionID,
+		"exclude_session_id": *excludeSessionID,
+		"from":               *fromTime,
+		"to":                 *toTime,
+	}
+	if *limit > 0 {
+		body["limit"] = *limit
 	}
 
-	params := rag.SearchParams{
-		Query:            *query,
-		Limit:            *limit,
-		ProjectPath:      *project,
-		Backend:          *backend,
-		Role:             *role,
-		SessionID:        *sessionID,
-		ExcludeSessionID: *excludeSessionID,
-		FromTime:         *fromTime,
-		ToTime:           *toTime,
-	}
-
-	defaultLimit := model.ConfigInstance.RAG.SearchLimit
-	if defaultLimit <= 0 {
-		defaultLimit = 5
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	result, err := rag.RAGSearch(ctx, rag.GlobalStore, rag.GlobalEmbedder, params, defaultLimit)
+	result, status, err := httpDo(http.MethodPost, "/api/rag/search", body)
 	if err != nil {
 		return outputError(fmt.Sprintf("search failed: %v", err))
 	}
-
-	if result.Results == nil {
-		result.Results = []rag.SearchHit{}
+	if status != http.StatusOK {
+		errMsg, _ := result["error"].(string)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", status)
+		}
+		return outputError(fmt.Sprintf("search failed: %s", errMsg))
 	}
 
-	outputJSON(result)
+	fmt.Println(mustMarshal(result))
 	return 0
 }
 
 func runRAGMessage(args []string) int {
 	fs := flagSet("message")
 	idStr := fs.String("id", "", "Message database ID (required)")
-	fs.Parse(args)
+	parseOrHelp(fs, args, &messageHelp)
 
 	if *idStr == "" {
 		// Also accept positional arg
 		if fs.NArg() > 0 {
-			idStr = &fs.Args()[0]
-			// Can't take address of Args element directly, use a copy
 			v := fs.Args()[0]
 			idStr = &v
 		} else {
@@ -169,19 +174,26 @@ func runRAGMessage(args []string) int {
 		return outputError(fmt.Sprintf("invalid message ID: %v", err))
 	}
 
-	msg, err := service.GetMessageByID(id)
+	result, status, err := httpDo(http.MethodGet, "/api/rag/message?id="+strconv.FormatInt(id, 10), nil)
 	if err != nil {
 		return outputError(fmt.Sprintf("message not found: %v", err))
 	}
+	if status != http.StatusOK {
+		errMsg, _ := result["error"].(string)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", status)
+		}
+		return outputError(fmt.Sprintf("message not found: %s", errMsg))
+	}
 
-	outputJSON(msg)
+	fmt.Println(mustMarshal(result))
 	return 0
 }
 
 func runRAGSession(args []string) int {
 	fs := flagSet("session")
 	sessionID := fs.String("id", "", "Session ID (required)")
-	fs.Parse(args)
+	parseOrHelp(fs, args, &sessionHelp)
 
 	if *sessionID == "" {
 		if fs.NArg() > 0 {
@@ -192,37 +204,18 @@ func runRAGSession(args []string) int {
 		}
 	}
 
-	messages, err := service.GetMessagesBySessionID(*sessionID)
+	result, status, err := httpDo(http.MethodGet, "/api/rag/session?id="+*sessionID, nil)
 	if err != nil {
 		return outputError(fmt.Sprintf("session not found: %v", err))
 	}
-
-	if messages == nil {
-		messages = []model.ChatMessage{}
+	if status != http.StatusOK {
+		errMsg, _ := result["error"].(string)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", status)
+		}
+		return outputError(fmt.Sprintf("session not found: %s", errMsg))
 	}
 
-	outputJSON(map[string]any{
-		"session_id": *sessionID,
-		"messages":   messages,
-		"total":      len(messages),
-	})
+	fmt.Println(mustMarshal(result))
 	return 0
-}
-
-// ragCLIInit initializes RAG for CLI usage in tests.
-// It sets up config, DB, and RAG globals without reading config files.
-func ragCLIInit(cfg model.RAGConfig) error {
-	tmpDir, _ := os.MkdirTemp("", "rag-cli-test-*")
-	model.BinDir = tmpDir
-	model.ConfigInstance = model.Config{
-		WatchDir: tmpDir,
-		RAG:      cfg,
-	}
-
-	if err := service.InitDB(); err != nil {
-		return err
-	}
-
-	slog.Info("rag cli: initializing RAG for test")
-	return rag.Init(cfg)
 }

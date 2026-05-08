@@ -169,6 +169,8 @@ export default {
       resume: 'Resume',
       trigger: 'Run Now',
       delete: 'Delete',
+      lastRun: 'Last',
+      nextRun: 'Next',
       warningReasons: {
         user_cancel: 'User cancelled',
         disconnect: 'Connection lost, AI response interrupted',

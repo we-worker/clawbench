@@ -24,7 +24,7 @@ func withSavedToken(f func()) {
 	f()
 }
 
-// --- Auth ---
+// --- Auth: no password configured ---
 
 func TestAuth_NoPassword_PassThrough(t *testing.T) {
 	withSavedToken(func() {
@@ -39,12 +39,45 @@ func TestAuth_NoPassword_PassThrough(t *testing.T) {
 	})
 }
 
+// --- Auth: localhost bypass ---
+
+func TestAuth_Localhost_IPv4_BypassesAuth(t *testing.T) {
+	withSavedToken(func() {
+		model.SessionToken = "valid-token"
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+
+		middleware.Auth(okHandler).ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+}
+
+func TestAuth_Localhost_IPv6_BypassesAuth(t *testing.T) {
+	withSavedToken(func() {
+		model.SessionToken = "valid-token"
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "[::1]:12345"
+
+		middleware.Auth(okHandler).ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+}
+
+// --- Auth: remote with valid cookie ---
+
 func TestAuth_ValidCookie_PassThrough(t *testing.T) {
 	withSavedToken(func() {
 		model.SessionToken = "valid-token"
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "192.168.1.100:12345"
 		req.AddCookie(&http.Cookie{
 			Name:  model.SessionCookie,
 			Value: "valid-token",
@@ -56,12 +89,15 @@ func TestAuth_ValidCookie_PassThrough(t *testing.T) {
 	})
 }
 
+// --- Auth: remote with invalid/missing cookie ---
+
 func TestAuth_InvalidCookieValue_Returns401(t *testing.T) {
 	withSavedToken(func() {
 		model.SessionToken = "valid-token"
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "192.168.1.100:12345"
 		req.AddCookie(&http.Cookie{
 			Name:  model.SessionCookie,
 			Value: "wrong-token",
@@ -79,10 +115,31 @@ func TestAuth_MissingCookie_Returns401(t *testing.T) {
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "192.168.1.100:12345"
 
 		middleware.Auth(okHandler).ServeHTTP(rec, req)
 
 		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+}
+
+// --- Auth: localhost + bad cookie still passes (localhost wins) ---
+
+func TestAuth_LocalhostWithBadCookie_StillPasses(t *testing.T) {
+	withSavedToken(func() {
+		model.SessionToken = "valid-token"
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.AddCookie(&http.Cookie{
+			Name:  model.SessionCookie,
+			Value: "wrong-token",
+		})
+
+		middleware.Auth(okHandler).ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 }
 

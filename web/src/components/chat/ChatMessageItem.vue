@@ -26,6 +26,7 @@
         :getAgentName="getAgentName"
         @toggle-tool="$emit('toggle-tool', $event)"
         @edit-task="$emit('edit-task', $event)"
+        @view-history="$emit('view-history', $event)"
         @task-action="(id, action) => $emit('task-action', id, action)"
         @send-message="$emit('send-message', $event)"
         @render-flush="$emit('render-flush')"
@@ -113,7 +114,7 @@ const props = defineProps({
   shouldCollapse: Boolean,
 })
 
-const emit = defineEmits(['toggle-tool', 'show-metadata', 'file-tag-click', 'expand', 'collapse', 'edit-task', 'task-action', 'send-message', 'render-flush'])
+const emit = defineEmits(['toggle-tool', 'show-metadata', 'file-tag-click', 'expand', 'collapse', 'edit-task', 'view-history', 'task-action', 'send-message', 'render-flush'])
 
 const autoSpeech = inject('autoSpeech')
 const layoutRefreshKey = inject('layoutRefreshKey', ref(0))
