@@ -149,15 +149,6 @@
       <!-- Bottom dock -->
       <div v-if="isAuthenticated" class="bottom-dock-wrapper">
         <div class="bottom-dock" @click="closeAllDrawers">
-          <button
-            class="dock-nav-btn"
-            :class="{ disabled: !canGoBack }"
-            @click.stop="handleGoBack"
-            :title="t('nav.prevFile')"
-          >
-            <ChevronLeft />
-          </button>
-
           <div class="dock-center">
             <button class="dock-btn" :class="{ active: chatOpen, 'has-unread': (store.state.chatUnread || store.state.taskUnread) && !chatOpen, 'has-running': store.state.chatRunning && !chatOpen && !store.state.chatUnread && !store.state.taskUnread }" @click.stop="openDrawer('chat')" :title="t('nav.chat')">
               <MessageSquare />
@@ -175,15 +166,6 @@
               <TerminalIcon />
             </button>
           </div>
-
-          <button
-            class="dock-nav-btn"
-            :class="{ disabled: !canGoForward }"
-            @click.stop="handleGoForward"
-            :title="t('nav.nextFile')"
-          >
-            <ChevronRight />
-          </button>
         </div>
         <div class="dock-safe-area"></div>
       </div>
@@ -200,7 +182,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, provide, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, ChevronRight, MessageSquare, Folder, GitBranch, EthernetPort, Terminal as TerminalIcon } from 'lucide-vue-next'
+import { MessageSquare, Folder, GitBranch, EthernetPort, Terminal as TerminalIcon } from 'lucide-vue-next'
 import AppHeader from './components/common/AppHeader.vue'
 import FileManager from './components/file/FileManager.vue'
 import WelcomeView from './components/WelcomeView.vue'
@@ -404,18 +386,6 @@ const tocFile = computed(() => {
 
 
 const tocFabVisible = computed(() => !!tocFile.value)
-
-// File history navigation
-const canGoBack = computed(() => store.canNavigateBack())
-const canGoForward = computed(() => store.canNavigateForward())
-
-function handleGoBack() {
-    if (canGoBack.value) store.navigateToPrevFile()
-}
-
-function handleGoForward() {
-    if (canGoForward.value) store.navigateToNextFile()
-}
 
 // Close dialogs when file changes
 watch(() => currentFile.value, (f) => {
@@ -711,7 +681,7 @@ onUnmounted(() => {
 .bottom-dock {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     padding: 6px 8px;
     background: var(--bg-primary);
     border-top: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent);
@@ -727,42 +697,6 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     gap: 16px;
-}
-
-.dock-nav-btn {
-    width: 28px;
-    height: 28px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text-tertiary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.15s, color 0.15s;
-    flex-shrink: 0;
-}
-
-.dock-nav-btn:hover:not(.disabled) {
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-}
-
-.dock-nav-btn:active:not(.disabled) {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-}
-
-.dock-nav-btn.disabled {
-    opacity: 0.2;
-    cursor: default;
-    pointer-events: none;
-}
-
-.dock-nav-btn svg {
-    width: 14px;
-    height: 14px;
 }
 
 .dock-btn {

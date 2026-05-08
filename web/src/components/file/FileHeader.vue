@@ -4,6 +4,16 @@
       <span class="file-path-hint" style="cursor:pointer" @click="$emit('showDetails')" :title="file.name">{{ file.name }}</span>
     </div>
     <div class="header-actions">
+      <!-- File navigation: back/forward capsule group -->
+      <div class="nav-capsule">
+        <button class="nav-capsule-btn" :class="{ disabled: !canGoBack }" @click.stop="handleGoBack" :title="t('nav.prevFile')">
+          <ChevronLeft :size="12" />
+        </button>
+        <button class="nav-capsule-btn" :class="{ disabled: !canGoForward }" @click.stop="handleGoForward" :title="t('nav.nextFile')">
+          <ChevronRight :size="12" />
+        </button>
+      </div>
+
       <!-- TOC button (only for file types that support TOC) -->
       <button v-if="hasToc" class="file-header-btn" :class="{ active: tocOpen }" @click.stop="$emit('toggleToc')" :title="t('file.header.toc')">
         <List :size="12" />
@@ -64,10 +74,11 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { List, Search, MoreVertical, Code2, Download, Trash2, GitBranch, TextWrap, RotateCw } from 'lucide-vue-next'
+import { List, Search, MoreVertical, Code2, Download, Trash2, GitBranch, TextWrap, RotateCw, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { getFileType } from '@/utils/fileType.ts'
 import { useAppMode } from '@/composables/useAppMode.ts'
 import { useDialog } from '@/composables/useDialog.ts'
+import { store } from '@/stores/app.ts'
 
 const props = defineProps({
     file: Object,
@@ -96,6 +107,17 @@ const hasToc = computed(() => {
     if (props.file.isImage || props.file.isPdf || props.file.isAudio) return false
     return true
 })
+
+const canGoBack = computed(() => store.canNavigateBack())
+const canGoForward = computed(() => store.canNavigateForward())
+
+function handleGoBack() {
+    if (canGoBack.value) store.navigateToPrevFile()
+}
+
+function handleGoForward() {
+    if (canGoForward.value) store.navigateToNextFile()
+}
 
 const badgeLabel = computed(() => {
     if (!props.file) return ''
@@ -228,6 +250,46 @@ onBeforeUnmount(() => {
     gap: 6px;
     margin-left: auto;
     flex-shrink: 0;
+}
+
+/* Navigation capsule group */
+.nav-capsule {
+    display: flex;
+    align-items: center;
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.nav-capsule-btn {
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+}
+
+.nav-capsule-btn:first-child {
+    border-right: 1px solid var(--border-color);
+}
+
+.nav-capsule-btn:hover:not(.disabled) {
+    background: var(--bg-secondary);
+    color: var(--accent-color);
+}
+
+.nav-capsule-btn.disabled {
+    opacity: 0.25;
+    cursor: default;
+    pointer-events: none;
 }
 
 .file-header-btn {
