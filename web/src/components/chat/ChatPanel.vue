@@ -178,6 +178,7 @@ import { refreshCurrentFile } from '@/composables/useFileRefresh.ts'
 import { playNotificationSound } from '@/composables/useNotificationSound.ts'
 import { useAutoSpeech } from '@/composables/useAutoSpeech.ts'
 import { useSwipeSession } from '@/composables/useSwipeSession.ts'
+import { useDialog } from '@/composables/useDialog.ts'
 import { store } from '@/stores/app.ts'
 
 const { t } = useI18n()
@@ -221,6 +222,7 @@ const metadataModal = ref({
   indexed: false
 })
 const toast = useToast()
+const dialog = useDialog()
 const notification = useNotification()
 const autoSpeech = useAutoSpeech()
 const theme = inject('theme', ref('light'))
@@ -264,6 +266,7 @@ function handleTaskEditSaved() {
 async function handleTaskAction(taskId, action) {
   try {
     if (action === 'delete') {
+      if (!await dialog.confirm(t('task.confirmDelete'), { dangerous: true })) return
       await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
     } else {
       await fetch(`/api/tasks/${taskId}`, {

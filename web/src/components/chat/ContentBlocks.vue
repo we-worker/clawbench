@@ -54,6 +54,10 @@
                     class="stask-history-btn" @click.stop="$emit('view-history', blockTasks[sKey].taskId)" :title="t('task.exec.title')">
               <History :size="14" />
             </button>
+            <button v-if="!blockTasks[sKey].deleted && !blockTasks[sKey].loading && blockTasks[sKey].task"
+                    class="stask-delete-btn" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'delete')" :title="t('chat.contentBlocks.delete')">
+              <Trash2 :size="13" />
+            </button>
           </div>
           <div v-if="!blockTasks[sKey].deleted && !blockTasks[sKey].loading && blockTasks[sKey].task" class="stask-body" @click="$emit('edit-task', blockTasks[sKey].taskId)">
             <div class="stask-row"><strong>{{ t('chat.contentBlocks.frequency') }}</strong>{{ humanizeCron(blockTasks[sKey].task.cronExpr) }}</div>
@@ -69,7 +73,6 @@
               <button v-if="blockTasks[sKey].task.status === 'active'" class="stask-action-btn" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'pause')">{{ t('chat.contentBlocks.pause') }}</button>
               <button v-if="blockTasks[sKey].task.status === 'paused'" class="stask-action-btn" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'resume')">{{ t('chat.contentBlocks.resume') }}</button>
               <button v-if="blockTasks[sKey].task.status === 'active' || blockTasks[sKey].task.status === 'paused'" class="stask-action-btn" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'trigger')">{{ t('chat.contentBlocks.trigger') }}</button>
-              <button class="stask-action-btn stask-action-danger" @click.stop="$emit('task-action', blockTasks[sKey].taskId, 'delete')">{{ t('chat.contentBlocks.delete') }}</button>
             </div>
           </div>
         </div>
@@ -101,7 +104,7 @@ import { ref, watch, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { handleToolAction, shouldAutoExpandTool } from '@/utils/renderToolDetail.ts'
 import { getToolIcon } from '@/utils/icons'
-import { CircleHelp, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Pencil, History } from 'lucide-vue-next'
+import { CircleHelp, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Pencil, History, Trash2 } from 'lucide-vue-next'
 
 const { t } = useI18n()
 
@@ -578,98 +581,159 @@ onUnmounted(() => {
 
 .scheduled-task-card {
   margin: 8px 0;
-  border: 1px solid color-mix(in srgb, var(--accent-color, #0066cc) 30%, var(--border-color, #e0e0e0));
+  border: 1px solid color-mix(in srgb, var(--accent-color, #4a90d9) 30%, var(--border-color, #dee2e6));
   border-radius: 8px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--accent-color, #0066cc) 6%, var(--bg-primary, #fff));
+  background: color-mix(in srgb, var(--accent-color, #4a90d9) 6%, var(--bg-primary, #fff));
 }
+
 .scheduled-task-card.deleted {
-  opacity: 0.6;
-  border-style: dashed;
+  opacity: 0.5;
+  border-color: var(--border-color, #dee2e6);
+  background: var(--bg-secondary);
 }
+
+.scheduled-task-card.deleted .stask-header {
+  background: var(--bg-tertiary);
+  color: var(--text-muted, #999);
+  border-bottom-color: var(--border-color, #dee2e6);
+}
+
 .stask-header {
   display: flex;
   align-items: center;
   gap: 5px;
   padding: 4px 10px;
-  background: color-mix(in srgb, var(--accent-color, #0066cc) 10%, var(--bg-tertiary, #eee));
-  font-weight: 500;
-  font-size: 0.82em;
+  background: color-mix(in srgb, var(--accent-color, #4a90d9) 12%, transparent);
+  color: var(--accent-color, #4a90d9);
+  font-weight: 600;
+  font-size: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-color, #4a90d9) 15%, var(--border-color, #dee2e6));
   cursor: pointer;
 }
+
 .stask-icon {
-  font-size: 0.95em;
+  margin-right: 4px;
 }
+
 .stask-history-btn {
   margin-left: auto;
-  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
   border: none;
-  cursor: pointer;
-  color: var(--text-secondary, #666);
-  padding: 2px 4px;
   border-radius: 4px;
+  background: transparent;
+  color: var(--accent-color, #4a90d9);
+  cursor: pointer;
+  transition: background 0.15s;
 }
+
 .stask-history-btn:hover {
-  background: var(--bg-hover, #ddd);
+  background: color-mix(in srgb, var(--accent-color, #4a90d9) 20%, transparent);
 }
+
+.stask-history-btn svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.stask-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent-color, #4a90d9);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.stask-delete-btn:hover {
+  background: rgba(211, 47, 47, 0.1);
+  color: #d32f2f;
+}
+
+.stask-delete-btn svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.stask-delete-btn:hover svg {
+  opacity: 1;
+}
+
 .stask-body {
-  padding: 8px 12px;
-  font-size: 0.85em;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
   cursor: pointer;
 }
+
 .stask-row {
   display: flex;
   gap: 8px;
-  padding: 2px 0;
+  margin-bottom: 4px;
 }
+
 .stask-row strong {
   min-width: 70px;
-  color: var(--text-secondary, #666);
+  color: var(--text-secondary, #495057);
 }
+
 .stask-status {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 4px 0;
+  margin-bottom: 4px;
 }
+
 .stask-status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   display: inline-block;
 }
+
 .stask-status-dot.status-active {
   background: #4caf50;
 }
+
 .stask-status-dot.status-paused {
   background: #ff9800;
 }
+
 .stask-status-dot.status-completed {
   background: #9e9e9e;
 }
+
 .stask-actions {
   display: flex;
   gap: 6px;
   padding-top: 6px;
   flex-wrap: wrap;
 }
+
 .stask-action-btn {
   padding: 3px 10px;
-  border: 1px solid color-mix(in srgb, var(--accent-color, #0066cc) 25%, var(--border-color, #ddd));
+  border: 1px solid color-mix(in srgb, var(--accent-color, #4a90d9) 25%, var(--border-color, #ddd));
   border-radius: 4px;
-  background: color-mix(in srgb, var(--accent-color, #0066cc) 6%, var(--bg-secondary, #f5f5f5));
+  background: color-mix(in srgb, var(--accent-color, #4a90d9) 6%, var(--bg-secondary, #f5f5f5));
+  color: var(--text-primary);
   cursor: pointer;
   font-size: 0.85em;
 }
+
 .stask-action-btn:hover {
-  background: color-mix(in srgb, var(--accent-color, #0066cc) 12%, var(--bg-hover, #e0e0e0));
-}
-.stask-action-danger {
-  color: #d32f2f;
-  border-color: #d32f2f;
-}
-.stask-action-danger:hover {
-  background: #ffebee;
+  background: color-mix(in srgb, var(--accent-color, #4a90d9) 12%, var(--bg-hover, #e0e0e0));
 }
 </style>
 
