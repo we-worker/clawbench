@@ -87,14 +87,14 @@ jobs:
         run: go build -ldflags="-s -w" -o clawbench.exe ./cmd/server
 
       - name: Package Windows
+        shell: pwsh
         run: |
-          mkdir -p pkg-windows/clawbench
-          cp clawbench.exe pkg-windows/clawbench/
-          cp -r public pkg-windows/clawbench/public
-          cp -r config pkg-windows/clawbench/config
-          cp server.ps1 pkg-windows/clawbench/
-          cd pkg-windows && zip -r clawbench-windows-amd64.zip clawbench/
-        shell: bash
+          New-Item -ItemType Directory -Force -Path pkg-windows/clawbench
+          Copy-Item clawbench.exe pkg-windows/clawbench/
+          Copy-Item -Recurse public pkg-windows/clawbench/public
+          Copy-Item -Recurse config pkg-windows/clawbench/config
+          Copy-Item server.ps1 pkg-windows/clawbench/
+          Compress-Archive -Path pkg-windows/clawbench -DestinationPath pkg-windows/clawbench-windows-amd64.zip
 
       - uses: softprops/action-gh-release@v2
         with:
