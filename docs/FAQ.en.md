@@ -12,7 +12,7 @@ A: Seven CLI backends are supported: CodeBuddy, Claude Code, OpenCode, Gemini CL
 
 **Q: How do I add a new agent?**
 
-A: Create a YAML file in the `config/agents/` directory, defining id, name, icon, specialty, backend, model, and system_prompt. Common prompts go in `config/agent_common_prompt.md`, which is automatically injected into all agents. The `{{AVAILABLE_AGENTS}}` placeholder is automatically replaced with the list of available agents.
+A: Create a YAML file in the `config/agents/` directory, defining id, name, icon, specialty, backend, model, and system_prompt. Common rules go in `config/rules.md`, which is automatically injected into all agents' system prompts. The `{{AVAILABLE_AGENTS}}` placeholder is automatically replaced with the list of available agents.
 
 **Q: Do I need to configure an API Key?**
 

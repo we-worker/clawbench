@@ -302,6 +302,7 @@ ClawBench 支持 TTS 语音合成，自动将 AI 回复总结后朗读。支持 
 - 后端：`http://localhost:20002`
 - 前端（Vite HMR）：`http://localhost:20001`
 - 数据库：使用 `ClawBench-dev.db`，与正式版数据隔离
+- RAG 向量库：使用 `rag-dev.duckdb`，与正式版向量数据隔离
 
 ```bash
 ./dev-server.sh              # 后台启动
@@ -332,12 +333,12 @@ config/agents/
 ```
 
 - **Agent 配置化**：每个智能体通过 YAML 定义专属 system prompt、模型、后端，无需改代码
-- **共享提示词**：`config/agent_common_prompt.md` 定义所有智能体的公共行为（网络搜索、多模态、媒体处理），避免重复配置
+- **共享提示词**：`config/rules.md` 定义所有智能体的公共行为和强制规则（定时任务 CLI、RAG 搜索、媒体处理），避免重复配置
 - **模板占位符**：`{{AVAILABLE_AGENTS}}` 自动替换为可用智能体列表，方便智能体间互相调度
 - **多 Agent 调度**：不同任务匹配不同智能体，全能助手负责对话，专业 Agent 执行定时任务
 - **工具调用透传**：AI 的工具调用（文件读写、Bash 命令、代码编辑）实时可视化展示
-- **Cron 定时执行**：AI 生成 `<schedule-proposal>` 提案，确认后由 Cron 调度自动执行
-- **Cron 管控**：Claude 后端通过 `--disallowedTools` 禁用内置定时工具，统一走 ClawBench 调度
+- **Cron 定时执行**：AI 通过 `clawbench task` CLI 子命令创建定时任务，确认后由 Cron 调度自动执行，聊天消息中内嵌任务卡片
+- **Cron 管控**：定时任务执行时自动剥离 rules.md 中的定时任务段落（`<!-- SCHEDULED_BEGIN/END -->` 标记），防止 AI 递归创建任务；CLI 层通过 `CLAWBENCH_SCHEDULED=1` 环境变量提供双重保护
 - **多后端可切换**：同一平台同时支持 CodeBuddy、Claude Code、OpenCode、Gemini CLI、Codex、Qoder CLI、VeCLI 后端，会话数据隔离
 
 ### 项目结构
@@ -352,6 +353,7 @@ clawbench/
 │   │   ├── chat.go              # AI 聊天（SSE 流式推送）
 │   │   ├── agent.go             # Agent 管理
 │   │   ├── scheduler.go         # 定时任务
+│   │   ├── rag_api.go           # RAG 搜索 API
 │   │   ├── file.go              # 文件读取
 │   │   ├── file_ops.go          # 文件操作
 │   │   ├── upload.go            # 文件上传
@@ -373,6 +375,11 @@ clawbench/
 │   ├── ssh/                     # SSH 隧道服务器
 │   │   ├── server.go            # SSH 服务器（direct-tcpip 端口转发）
 │   │   └── server_test.go       # 测试
+│   ├── cli/                     # CLI 子命令（AI 智能体自服务）
+│   │   ├── task.go              # 定时任务子命令（create/update/delete/pause/resume/trigger/list-agents）
+│   │   ├── rag.go               # RAG 搜索子命令（search/message/session）
+│   │   ├── help.go              # --help 自文档化基础设施
+│   │   └── helpers.go           # 共享代码（loadConfig/apiURL/httpDo/TLS/cookie）
 │   ├── ai/                      # AI 后端抽象
 │       ├── interface.go         # AIBackend 接口
 │       ├── factory.go           # 后端工厂
@@ -392,7 +399,7 @@ clawbench/
 │       ├── ai_backend_summarizer.go # AIBackendSummarizer（CLI 后端总结）
 │       ├── minimax.go / edge.go / piper.go / kokoro.go / moss_tts_nano.go  # TTS 引擎实现
 ├── config/                      # 配置目录
-│   ├── agent_common_prompt.md   # 智能体共享提示词
+│   ├── rules.md                 # 智能体共享规则和 CLI 参考
 │   ├── agents/                  # Agent 配置
 │   │   ├── assistant.yaml       # 全能助手
 │   │   ├── codebuddy2.yaml      # Gemini（CodeBuddy 调用）
@@ -424,7 +431,7 @@ clawbench/
 
 | 层级 | 技术 |
 |------|------|
-| 后端 | Go 1.21+ (net/http + SQLite) |
+| 后端 | Go 1.25+ (net/http + SQLite) |
 | 前端 | Vue 3 + Vite + TypeScript |
 | 语法高亮 | highlight.js |
 | Markdown | marked.js |

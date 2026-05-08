@@ -26,7 +26,7 @@
 
 ## 三维度评估
 
-### 🏗️ 架构设计 (30%) — 评分: 7.5/10
+### 🏗️ 架构设计 (30%) — 评分: 7.3/10
 
 **分层清晰：** 前端 FileManager（目录浏览）→ FileViewer（内容渲染）→ CodePreview/MarkdownPreview（格式特定渲染），后端 file.go（读取）→ upload.go（写入）→ file_ops.go（操作），职责分明。
 
@@ -36,7 +36,7 @@
 - `file_ops.go` 的 Rename/Delete 操作接受客户端传入的 `BasePath`，虽经路径验证，但允许操作项目根目录下的任意子路径，缺乏目录限制
 - 符号链接绕过：项目内 symlink 可能通过路径验证但实际指向外部
 
-### ✨ 代码质量 (30%) — 评分: 7.0/10
+### ✨ 代码质量 (30%) — 评分: 6.8/10
 
 **亮点：**
 - `fileType.ts` 的文件类型检测覆盖了 50+ 种扩展名，分为 code/image/audio/video/markdown/archive/other 七类
@@ -44,25 +44,37 @@
 - `file_ops.go` 的错误响应使用了 `writeLocalizedError` + 结构化错误
 
 **关注点：**
-- `file_ops.go` 的 `ServeFileRename` 和 `ServeFileDelete` 接受 `req.BasePath` 但未验证其为合法目录
 - 上传文件名未做 sanitize（如 `../../../etc/passwd` 作为文件名）
-- `file.go` 的大文件直接 `os.ReadFile` 全量加载到内存，无流式传输
+- `stores/app.ts:198-247` 与 `fileType.ts` 存在重复的扩展名列表
+- `file_ops.go` 的 `ServeFileRename` 和 `ServeFileDelete` 接受 `req.BasePath` 但未验证其为合法目录
 
-### 🛡️ 健壮性 (40%) — 评分: 6.5/10
+### 🛡️ 健壮性 (40%) — 评分: 5.5/10
 
 **P0 级问题：**
 
-1. **`req.BasePath` 客户端可控导致任意路径操作**：Rename/Delete 操作的 `BasePath` 经 `validateAndResolvePath` 验证确保在项目内，但项目根目录下的任何文件/目录都可被重命名或删除，包括 `.clawbench/` 配置目录和 `.git/` 仓库
+1. **MarkdownPreview XSS**：`MarkdownPreview.vue:4,100` 使用 `v-html` 且 `sanitize:false`，渲染未清理的 markdown。精心构造的 .md 文件可执行任意 JS
 
-2. **符号链接绕过路径验证**：项目内的符号链接指向外部路径时，`filepath.Abs` 解析后的路径仍以 projectPath 开头，但 `os.ReadFile` 跟随 symlink 读取外部文件
+2. **符号链接绕过路径验证**：`model/path.go:10-22` `filepath.Abs` 不跟随符号链接。项目内的 symlink 可逃逸到项目外
+
+3. **客户端可控 BasePath**：`file_ops.go:24-25,134` Rename/Delete 的 `BasePath` 可覆盖 project cookie 路径，允许操作任意目录
+
+4. **上传危险扩展名不完整**：`upload.go:58-62` 未阻止 .html、.svg。上传的 HTML 从 `/api/local-file/` 提供，构成存储型 XSS
+
+5. **10MB 文件全量读入内存**：`file.go:209` `os.ReadFile` 读取最大 10MB 文件后再 JSON 编码
 
 **P1 级问题：**
 
-3. **上传文件名未做 sanitize**：用户上传的文件名可能包含 `../`、空字节、特殊字符
+6. **上传文件名 TOCTOU 竞态**：`upload.go:82-90` 非原子性的 stat-then-create
 
-4. **删除/重命名操作返回值未检查**：`os.Remove` 和 `os.Rename` 的错误被忽略的部分场景
+7. **os.RemoveAll 跟随符号链接**：`file_ops.go:172` 可能删除项目外的内容
 
-5. **大文件全量加载到内存**：`file.go` 的 `ServeFileContent` 对非图片文件直接 `os.ReadFile`，大文件可能 OOM
+8. **ServeFileEditLine 无大小检查**：`file_ops.go:100`
+
+9. **非原子文件写入**：`file_ops.go:119,234` crash 发生在 truncate 和 write 之间会丢失数据
+
+10. **重复扩展名列表**：`stores/app.ts:198-247` vs `fileType.ts`
+
+11. **上传文件名清理不完整**：`upload.go:76-80`
 
 ---
 
@@ -70,26 +82,32 @@
 
 | ID | 严重度 | 类别 | 描述 | 文件:行号 | 建议 |
 |----|--------|------|------|-----------|------|
-| R8-001 | **P0** | 🛡️ 安全 | Rename/Delete 操作的 BasePath 客户端可控，可操作项目内任意文件 | `file_ops.go` | 添加目录白名单或禁止操作 .clawbench/ 和 .git/ |
-| R8-002 | **P0** | 🛡️ 安全 | 符号链接绕过路径验证，可读取项目外文件 | `file.go`, `path.go` | 使用 `filepath.EvalSymlinks` 后再验证，或禁止 symlink |
-| R8-003 | **P1** | 🛡️ 安全 | 上传文件名未做 sanitize，可能包含路径穿越字符 | `upload.go` | 清洗文件名：移除路径分隔符、空字节，限制长度 |
-| R8-004 | **P1** | 🛡️ 健壮性 | 大文件全量加载到内存，可能 OOM | `file.go` ServeFileContent | 添加文件大小检查，超过阈值返回错误或使用 io.Copy 流式传输 |
-| R8-005 | **P1** | 🛡️ 健壮性 | 文件操作非原子性，Rename 可能导致中间状态 | `file_ops.go` | 添加错误回滚或至少记录中间状态 |
-| R8-006 | **P2** | ✨ 质量 | 上传文件类型黑名单不足，仅阻止 .exe/.bat/.cmd | `upload.go` | 扩展黑名单或改为白名单 |
-| R8-007 | **P2** | 🛡️ 安全 | CreateDir 未验证目录名是否含特殊字符 | `file_ops.go` | sanitize 目录名 |
-| R8-008 | **P2** | ✨ 质量 | CodePreview 的 highlight.js 语言检测可能不准确 | `CodePreview.vue` | 使用文件扩展名映射语言 |
-| R8-009 | **P3** | ✨ 质量 | FileManager 的触摸手势与滚动冲突 | `FileManager.vue` | 添加手势阈值区分 |
-| R8-010 | **P3** | ✨ 质量 | FileDetailsDialog 的时间格式未国际化 | `FileDetailsDialog.vue` | 使用 i18n 格式化 |
+| R8-001 | **P0** | 🛡️ 安全 | MarkdownPreview v-html sanitize:false 导致 XSS | `MarkdownPreview.vue:4,100` | 启用 DOMPurify 或设置 sanitize:true |
+| R8-002 | **P0** | 🛡️ 安全 | 符号链接绕过 validateAndResolvePath | `model/path.go:10-22` | 使用 `filepath.EvalSymlinks` 后再验证 |
+| R8-003 | **P0** | 🛡️ 安全 | Rename/Delete BasePath 客户端可控，可操作任意目录 | `file_ops.go:24-25,134` | 限制 BasePath 只能为项目根目录 |
+| R8-004 | **P0** | 🛡️ 安全 | 上传扩展名黑名单缺少 .html/.svg，构成存储型 XSS | `upload.go:58-62` | 添加 .html/.svg 到黑名单 |
+| R8-005 | **P0** | 🛡️ 健壮性 | 10MB 文件全量读入内存后 JSON 编码 | `file.go:209` | 使用 io.Copy 流式传输 |
+| R8-006 | **P1** | 🛡️ 安全 | 上传文件名 TOCTOU 竞态（stat-then-create） | `upload.go:82-90` | 使用 O_EXCL 原子创建 |
+| R8-007 | **P1** | 🛡️ 安全 | os.RemoveAll 跟随符号链接，可删除项目外内容 | `file_ops.go:172` | 使用 `filepath.EvalSymlinks` 或手动递归删除 |
+| R8-008 | **P1** | 🛡️ 健壮性 | ServeFileEditLine 无大小检查 | `file_ops.go:100` | 添加文件大小上限 |
+| R8-009 | **P1** | 🛡️ 健壮性 | 非原子文件写入，crash 时可能丢失数据 | `file_ops.go:119,234` | 写入临时文件后 rename |
+| R8-010 | **P1** | ✨ 质量 | 重复扩展名列表（stores/app.ts vs fileType.ts） | `stores/app.ts:198-247` | 统一到 fileType.ts |
+| R8-011 | **P1** | 🛡️ 安全 | 上传文件名清理不完整 | `upload.go:76-80` | 完整 sanitize：移除 /\\、空字节、限制长度 |
+| R8-012 | **P2** | 🛡️ 泄漏 | scrollPositions Map 无界增长 | `FileViewer.vue:161` | 添加 LRU 或上限 |
+| R8-013 | **P2** | 🛡️ 安全 | filepath.Walk 跟随符号链接 | `file.go:109` | 不跟随 symlink 或检查 |
+| R8-014 | **P2** | ✨ 质量 | IsTextFile 每次调用分配 slice | `model/file.go:12-65` | 预分配或缓存结果 |
+| R8-015 | **P2** | ✨ 质量 | Copy 不保留文件权限 | `file_ops.go:382-397` | 使用 `io.Copy` + `os.Chmod` |
+| R8-016 | **P2** | 🛡️ 健壮性 | fixLocalImagePaths 正则脆弱 | `MarkdownPreview.vue:77-93` | 改用 DOM 解析 |
 
 ---
 
 ## 改进建议 (Top 3)
 
-1. **修复路径操作安全边界 (R8-001+R8-002)**: (1) 文件操作应禁止操作 `.clawbench/` 和 `.git/` 目录下的文件（除非是显式的 git 操作）；(2) 使用 `filepath.EvalSymlinks` 解析符号链接后再做路径验证，防止 symlink 绕过。预期收益：消除任意文件删除/重命名和路径穿越风险。
+1. **修复路径安全 (R8-001+R8-002+R8-003)**: (1) MarkdownPreview 启用 DOMPurify（`sanitize: true`），阻止 XSS；(2) `validateAndResolvePath` 添加 `filepath.EvalSymlinks` 解析符号链接后再做前缀检查；(3) `file_ops.go` 的 BasePath 限制为项目根目录，禁止客户端覆盖。预期收益：消除 XSS、路径穿越和任意文件操作三个最严重的安全风险。
 
-2. **上传文件名 sanitize + 类型限制 (R8-003+R8-006)**: 清洗上传文件名（移除 `/\`、空字节、特殊字符，限制长度），扩展文件类型限制为白名单模式（只允许已知安全的文件类型）。预期收益：防止上传恶意文件。
+2. **上传安全 (R8-004+R8-006+R8-011)**: (1) 扩展名黑名单添加 .html/.svg；（2）使用 `O_EXCL` 原子创建避免 TOCTOU 竞态；（3）完整 sanitize 文件名——移除 `/\\`、空字节、特殊字符，限制长度。预期收益：消除存储型 XSS 和文件上传攻击面。
 
-3. **大文件流式传输 (R8-004)**: 添加文件大小检查（如 10MB），超过阈值时使用 `io.Copy` 流式传输而非全量加载，或直接返回文件 URL 让前端通过 `<a>` 标签下载。预期收益：防止大文件 OOM。
+3. **大文件处理 (R8-005+R8-008)**: `ServeFileContent` 对大文件使用 `io.Copy` 流式传输而非全量加载；`ServeFileEditLine` 添加文件大小上限检查。预期收益：防止大文件 OOM。
 
 ---
 
@@ -99,4 +117,3 @@
 - **fileType.ts 的全面文件类型检测**：50+ 种扩展名，7 种分类
 - **FileManager 的触摸友好设计**：长按选择、滑动删除、双击打开
 - **上传大小和数量限制**：MaxBytesReader + max_files 配置
-- **文件详情弹窗**：显示大小、权限、修改时间，方便调试

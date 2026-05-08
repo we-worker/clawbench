@@ -48,21 +48,22 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 
 ### Backend (Go)
 
-**Entry point:** `cmd/server/main.go` — loads config, initializes SQLite, starts HTTP server, SSH tunnel server (if enabled), scheduler, and ProxyRegistry.
+**Entry point:** `cmd/server/main.go` — loads config, initializes SQLite, starts HTTP server, SSH tunnel server (if enabled), scheduler, and ProxyRegistry. Startup order: port → LoadAgents → scheduler init (LoadTasksFromDB runs after LoadAgents to ensure agent_id resolution succeeds).
 
 **Layered structure:**
-- `internal/handler/` — HTTP handlers (routes registered in `handler.go`). SSE streaming in `chat_stream.go`, scheduled task CRUD in `scheduler.go`, port forwarding API in `proxy_api.go`, SSH info in `ssh_info.go`, session CRUD in `chat_session.go`.
+- `internal/handler/` — HTTP handlers (routes registered in `handler.go`). SSE streaming in `chat_stream.go`, scheduled task CRUD in `scheduler.go`, port forwarding API in `proxy_api.go`, SSH info in `ssh_info.go`, session CRUD in `chat_session.go`, RAG search API in `rag_api.go`. All `/api/` routes use `middleware.Auth` (with `isLocalhost()` bypass for CLI access).
 - `internal/service/` — Business logic: `chat.go` (history/persistence), `scheduler.go` (cron-based AI task execution via `robfig/cron/v3`), `database.go` (SQLite), `proxy.go` (ProxyRegistry: port forwarding with health checks, auto-detection, TLS probing), `session_runtime.go` (active session tracking, stream channels, cancel functions with reason tracking).
 - `internal/ai/` — AI backend abstraction. `AIBackend` interface (`interface.go`) with `ExecuteStream()`. `CLIBackend` (`cli_backend.go`) is the shared base that shells out to CLI tools; each backend (claude/codebuddy/opencode/gemini/codex/qoder/vecli) provides CLI args and a `LineParser` for its JSON output format. Stream parsers are in `*__stream.go` files. `AutoResumeBackend` (`auto_resume.go`) wraps claude, codebuddy, and qoder backends — detects ExitPlanMode tool_use and automatically resumes with "继续". `CodexBackend` (`codex.go`) provides full Codex CLI integration with resume support. `VeCLIBackend` (`vecli.go`) wraps CLIBackend to add post-stream session-summary parsing — VeCLI outputs plain text (not JSON Lines), so metadata (token counts, duration, model) is extracted from a `--session-summary` JSON file after process exit. `NewBackend()` factory in `factory.go`. Qoder backend (`qoder.go`) reuses the shared `StreamParser` since its `--output-format stream-json` produces the same NDJSON format as Claude/Codebuddy.
 - `internal/model/` — Data models, config structs, path validation, structured error types (`errors.go`: `NotFound`, `Forbidden`, `Internal`, etc.), scheduled task model, proxy/SSH config models.
-- `internal/middleware/` — Auth, request logging, panic recovery, request ID.
+- `internal/cli/` — CLI subcommands for AI agent self-service. `task.go` (create/update/delete/pause/resume/trigger/list-agents), `rag.go` (search/message/session), `help.go` (HelpInfo/FlagHelp infrastructure for `--help` self-documentation), `helpers.go` (shared code: loadConfig/apiURL/httpDo, TLS self-signed cert support, cookie-based project path injection). AI agents call these via Bash instead of HTTP endpoints.
+- `internal/middleware/` — Auth (with `isLocalhost()` bypass for CLI access), request logging, panic recovery, request ID.
 - `internal/speech/` — TTS abstraction (`SpeechProvider` interface). Implementations: MiniMax (cloud), Edge TTS (cloud, free), Piper (local offline), Kokoro (local ONNX-based). `summarizer.go` provides TTS summarization via multiple AI backends (mmx-cli, claude, codebuddy, gemini, opencode, codex, qoder, vecli, ollama) for long-text compression before speech. `ollama_summarizer.go` calls Ollama HTTP API (`/api/chat`, stream:false) — the first direct HTTP client in the Go backend (all others shell out to CLI tools).
 - `internal/ssh/` — SSH tunnel server (`server.go`). Supports direct-tcpip channels (-L port forwarding), password auth, ECDSA host key generation/persistence. Integrates with ProxyRegistry for port validation.
 - `internal/rag/` — RAG history memory system. DuckDB vector store (`store.go`), text chunker (`chunker.go`), Ollama embedding client (`embedding.go`), indexer worker (`indexer.go`), search (`search.go`), cleanup worker (`cleanup.go`), entry point (`rag.go`). When `rag.enabled`, indexes chat messages after finalization and provides semantic search API. Cleanup worker runs regardless of RAG enablement to purge soft-deleted data past retention.
 - `internal/terminal/` — Interactive web terminal. `manager.go` (session lifecycle, single-session-per-project, zombie client kicking), `session.go` (PTY I/O pump, idle timeout, ring buffer replay, resize handling), `buffer.go` (RingBuffer: configurable line count/size/memory cap, line-split replay), `shell.go` + `shell_posix.go` / `shell_windows.go` (shell detection: $SHELL→/bin/sh on POSIX, pwsh→powershell→cmd on Windows; process group kill via SIGTERM→3s→SIGKILL), `protocol.go` (WebSocket JSON message types). Handler in `internal/handler/terminal.go` (WebSocket upgrade, status/close/config endpoints).
 - `internal/platform/` — Platform-specific adaptations (Windows paths).
 
-**Agent system:** YAML files in `config/agents/` define agents with id, backend, model, system_prompt, and optional `command` (custom CLI path). `config/rules.md` is always fully injected into every agent's system prompt at startup by `model.LoadAgents()` → `BuildCommonPrompt()`. It contains mandatory rules and CLI references (scheduled tasks, RAG search, etc.). Placeholders `{{AVAILABLE_AGENTS}}` and `{{PORT}}` are replaced at load time. The `<!-- SCHEDULED_BEGIN/END -->` markers in rules.md wrap the scheduled tasks section, which is stripped by `BuildCommonPrompt(true)` during scheduled executions (anti-recursion).
+**Agent system:** YAML files in `config/agents/` define agents with id, backend, model, system_prompt, and optional `command` (custom CLI path). `config/rules.md` is always fully injected into every agent's system prompt at startup by `model.LoadAgents()` → `BuildCommonPrompt()`. It contains mandatory rules and CLI references (scheduled tasks, RAG search, etc.). Placeholders `{{AVAILABLE_AGENTS}}`, `{{PORT}}`, and `{{PROJECT_PATH}}` are replaced dynamically — `{{PROJECT_PATH}}` is replaced per-request using the project path from the cookie (not statically at startup). The `<!-- SCHEDULED_BEGIN/END -->` markers in rules.md wrap the scheduled tasks section, which is stripped by `BuildCommonPrompt(true)` during scheduled executions (anti-recursion). The skill system (`config/skills/`, `/api/skills` endpoints) has been removed — `rules.md` is now the single source of truth for all mandatory rules.
 
 **Data flow for chat:**
 1. Frontend sends POST to `/api/ai/chat`
@@ -75,8 +76,9 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 **Scheduled task system:**
 1. Frontend sends POST to `/api/tasks` with cron expression, agent ID, prompt, repeat mode (once/limited/unlimited)
 2. `service.Scheduler` registers cron job via `robfig/cron/v3`
-3. On trigger, scheduler calls the agent's `AIBackend.ExecuteStream()` and persists results as chat messages with `scheduledTask` metadata
+3. On trigger, scheduler calls the agent's `AIBackend.ExecuteStream()` and persists results as chat messages with `scheduledTask` metadata. `CLAWBENCH_SCHEDULED=1` env var is injected for anti-recursion protection.
 4. Frontend manages tasks via `/api/tasks` CRUD endpoints
+5. AI agents can also manage tasks via `clawbench task` CLI subcommands (create/update/delete/pause/resume/trigger), which is the preferred method for AI-driven task creation. The old `<schedule-proposal>` passive tag detection system has been removed.
 
 **SSH tunnel / port forwarding:**
 1. SSH server listens on `port+1` (or configured port)
@@ -87,8 +89,9 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 1. When `rag.enabled: true`, chat messages are indexed into DuckDB vector store after finalization
 2. `chat_history.indexed` column tracks indexing state; indexer polls every 10s for unindexed messages
 3. Text blocks are extracted (excluding thinking/tool_use), chunked with 512-token sliding window, embedded via Ollama BGE-M3
-4. AI agents can search history via `GET /api/rag/search` (no auth, localhost only); RAG search rules and CLI reference are in `config/rules.md`
+4. AI agents search history via `clawbench rag` CLI subcommands (search/message/session), which call the backend RAG API endpoints (`/api/rag/search`, `/api/rag/message`, `/api/rag/session`). RAG search rules and CLI reference are in `config/rules.md`
 5. Frontend browses forwarded ports via `PortForwardBrowser` component
+6. Dev mode uses separate `rag-dev.duckdb` to avoid production DB conflict
 
 **Interactive terminal:**
 1. Frontend opens WebSocket to `GET /api/terminal/ws?cwd=<dir>`
@@ -127,7 +130,7 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 - `ChatMetadataModal.vue` — Token usage / model info modal.
 - `useChatSession.ts` — Session CRUD, history loading, agent resolution, message count polling.
 - `useChatStream.ts` — SSE connection, event parsing into message blocks, reconnection logic (3 attempts then fallback to polling), stream timeout handling.
-- `useChatRender.ts` — Markdown rendering, block parsing (text/thinking/tool_use/schedule-proposal), content coalescing.
+- `useChatRender.ts` — Markdown rendering, block parsing (text/thinking/tool_use/blockTasks), content coalescing. Scheduled task cards (`blockTasks`) replace the old `schedule-proposal` tag system.
 - `useAutoSpeech.ts` — Auto-read toggle (module-level singleton ref), TTS playback via backend `/api/tts/generate`.
 - `useMarkdownRenderer.ts` — Markdown rendering with highlight.js, KaTeX math, Mermaid diagrams.
 - `useFileUpload.ts` — File upload handling with size/count limits from config.
@@ -228,11 +231,11 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 | Dev | `dev.port`, `dev.frontend_port`, `dev.host` |
 | Logging | `log_dir`, `log_max_days`, `default_agent` |
 
-Dev mode uses separate port (20002) and database (`ClawBench-dev.db`).
+Dev mode uses separate port (20002), database (`ClawBench-dev.db`), and RAG database (`rag-dev.duckdb`).
 
 ## Testing
 
 - Go tests use `testify/assert`. Test files colocated with source (`*_test.go`).
 - Frontend tests use Vitest + `@vue/test-utils`. Located in `web/src/components/__tests__/`.
 - Many handler tests need a running test server — see `testutil_test.go` in handler package.
-- Key test packages: `ai/` (stream parsers, auto-resume, factory), `handler/` (auth, chat, files, git, proxy, scheduler, SSH info, TTS), `service/` (chat, proxy, scheduler, stream, uuid, soft-delete, cleanup), `speech/` (minimax, piper, kokoro, moss_tts_nano, ollama), `ssh/` (server), `rag/` (chunker, store, cleanup), `terminal/` (ring buffer, session/manager), `handler/` (terminal handler auth + cwd validation).
+- Key test packages: `ai/` (stream parsers, auto-resume, factory), `handler/` (auth, chat, files, git, proxy, scheduler, SSH info, TTS, terminal handler auth + cwd validation), `service/` (chat, proxy, scheduler, stream, uuid, soft-delete, cleanup, database), `speech/` (minimax, piper, kokoro, moss_tts_nano, ollama), `ssh/` (server), `rag/` (chunker, store, cleanup), `terminal/` (ring buffer, session/manager), `cli/` (task subcommands, rag subcommands, help infrastructure), `middleware/` (auth with localhost bypass).

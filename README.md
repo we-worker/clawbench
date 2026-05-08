@@ -44,9 +44,9 @@
 |------------|---------|------------|----------|
 | ![智能体选择](docs/screenshots/agent-selector.png) | ![AI 对话](docs/screenshots/chat-panel.png) | ![结构化提问](docs/screenshots/ask-question.png) | ![会话管理](docs/screenshots/session-manager.png) |
 
-| 定时任务 | 创建任务 | 对话创建任务 |
-|----------|----------|--------------|
-| ![定时任务](docs/screenshots/scheduled-tasks.png) | ![创建任务](docs/screenshots/task-create.png) | ![对话创建任务](docs/screenshots/schedule-proposal.png) |
+| 定时任务 | 创建任务 | 任务卡片 |
+|----------|----------|----------|
+| ![定时任务](docs/screenshots/scheduled-tasks.png) | ![创建任务](docs/screenshots/task-create.png) | ![任务卡片](docs/screenshots/schedule-proposal.png) |
 
 ### Git 集成
 
@@ -186,7 +186,7 @@ cp config/agents/claude.yaml.example config/agents/my-claude.yaml
 - **流式响应**：SSE 实时推送，思维过程、工具调用全程可见
 - **多 Agent 支持**：全能助手、编码专家、勤杂工等，YAML 配置即插即用
 - **AI 后端切换**：CodeBuddy、Claude Code、OpenCode、Gemini CLI、Codex、Qoder CLI、VeCLI，会话级隔离
-- **定时任务**：AI 提案后自动创建 Cron 调度，定时执行
+- **定时任务**：AI 通过 CLI 子命令创建 Cron 调度，定时自动执行；聊天消息中可内嵌任务卡片
 - **多会话管理**：创建、切换、删除独立会话，滑动切换
 - **图片上传**：支持上传图片与 AI 对话（多模态）
 - **断连保护**：消息立即落库，网络断开不丢失，60 秒超时自动重连（3 次后降级轮询）

@@ -98,6 +98,7 @@ rag:
 | 数据 | 位置 | 说明 |
 |------|------|------|
 | 向量索引 | `<二进制目录>/.clawbench/rag.duckdb` | DuckDB 数据库，含嵌入向量和分块文本 |
+| 向量索引（开发模式） | `<二进制目录>/.clawbench/rag-dev.duckdb` | 开发模式独立 DuckDB，避免与正式版冲突 |
 | 聊天记录 | `<二进制目录>/.clawbench/ClawBench.db` | SQLite 数据库，`indexed` 列标记索引状态 |
 
 > **卸载清理**：删除 `.clawbench/` 目录即可完全移除所有 RAG 数据。
@@ -108,7 +109,7 @@ rag:
 
 1. **初始化 DuckDB** — 创建/打开 `rag.duckdb`，检查嵌入维度（若维度不匹配会自动重建表）
 2. **初始化嵌入客户端** — 连接 Ollama，验证 `bge-m3` 模型可用
-3. **注入 RAG 技能** — AI 智能体的系统提示词中加入 RAG 搜索能力说明
+3. **注入 RAG 规则** — AI 智能体的系统提示词（`rules.md`）中加入 RAG 搜索规则和 CLI 参考
 4. **启动索引器** — 后台轮询，将未索引的历史消息逐步入库
 5. **启动清理器** — 始终运行，定期清理超期软删除数据（无论 RAG 是否启用）
 
@@ -135,7 +136,30 @@ rag:
 
 ## 搜索 API
 
-AI 智能体通过 RAG Search API 搜索历史对话：
+AI 智能体通过 `clawbench rag` CLI 子命令搜索历史对话（推荐），也可直接调用 HTTP API：
+
+### CLI 子命令（推荐）
+
+```bash
+# 向量搜索
+clawbench rag search --project /path/to/project --query "SSH隧道保活" --limit 5 --exclude-session-id abc-123
+
+# 消息详情
+clawbench rag message --project /path/to/project --id 42
+
+# 会话全量
+clawbench rag session --project /path/to/project --session-id abc-123
+
+# 查看帮助
+clawbench rag --help
+clawbench rag search --help
+```
+
+**CLI 优势**：自动处理认证（localhost 旁路）、TLS 自签名证书、项目路径注入，无需手动传递 cookie 或 token。
+
+### HTTP API
+
+也可直接调用 HTTP 端点（所有端点需要认证，localhost 自动旁路）：
 
 ### 向量搜索
 

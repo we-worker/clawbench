@@ -98,6 +98,7 @@ rag:
 | Data | Location | Description |
 |------|----------|-------------|
 | Vector index | `<binary_dir>/.clawbench/rag.duckdb` | DuckDB database with embeddings and chunked text |
+| Vector index (dev mode) | `<binary_dir>/.clawbench/rag-dev.duckdb` | Separate DuckDB for dev mode, avoids conflict with production |
 | Chat records | `<binary_dir>/.clawbench/ClawBench.db` | SQLite database; `indexed` column tracks indexing status |
 
 > **Clean uninstall**: Delete the `.clawbench/` directory to remove all RAG data completely.
@@ -108,7 +109,7 @@ When RAG is enabled, the initialization order at startup:
 
 1. **Initialize DuckDB** — Create/open `rag.duckdb`; check embedding dimension (auto-rebuilds table if dimension mismatch)
 2. **Initialize embedding client** — Connect to Ollama, verify `bge-m3` model availability
-3. **Inject RAG skill** — Add RAG search capability description to AI agent system prompts
+3. **Inject RAG rules** — Add RAG search rules and CLI reference to AI agent system prompts (`rules.md`)
 4. **Start indexer** — Background polling, gradually indexing historical messages
 5. **Start cleanup worker** — Always runs, periodically purges expired soft-deleted data (regardless of RAG enablement)
 
@@ -135,7 +136,30 @@ Poll every 10s → Fetch batch_size unindexed messages → Process each:
 
 ## Search API
 
-AI agents search historical conversations via the RAG Search API:
+AI agents search historical conversations via `clawbench rag` CLI subcommands (recommended), or by calling the HTTP API directly:
+
+### CLI Subcommands (Recommended)
+
+```bash
+# Vector search
+clawbench rag search --project /path/to/project --query "SSH tunnel keepalive" --limit 5 --exclude-session-id abc-123
+
+# Message detail
+clawbench rag message --project /path/to/project --id 42
+
+# Full session
+clawbench rag session --project /path/to/project --session-id abc-123
+
+# View help
+clawbench rag --help
+clawbench rag search --help
+```
+
+**CLI advantages**: Automatically handles authentication (localhost bypass), TLS self-signed certificates, and project path injection — no need to manually pass cookies or tokens.
+
+### HTTP API
+
+You can also call the HTTP endpoints directly (all endpoints require authentication; localhost auto-bypasses):
 
 ### Vector Search
 

@@ -1,23 +1,22 @@
 # R10: 认证流程 Review
 
-> 日期: 2026-05-24
-> 审查范围: 密码 → 中间件 → Session Cookie → Android自动登录
+> 日期: 2026-05-09
+> 审查范围: 登录 → 密码哈希 → Cookie → 中间件鉴权 → 本地绕过
 
 ## 审查范围
 
-### 前端
-- `web/src/components/LoginView.vue` (1-155) — 登录页
-- `web/src/App.vue` (1-748) — 认证门 + Android 自动登录
-- `web/src/composables/useAppMode.ts` (1-39) — App 模式检测
-
 ### 后端
-- `internal/handler/auth.go` (1-57) — 登录 & 认证检查
-- `internal/middleware/auth.go` (1-37) — 认证中间件
-- `internal/middleware/logger.go` (1-44) — 请求日志
-- `internal/middleware/recover.go` (1-26) — Panic 恢复
-- `internal/middleware/request_id.go` (1-32) — 请求 ID
-- `cmd/server/main.go` (1-494) — 密码处理
-- `internal/model/config.go` (1-102) — 配置结构
+- `internal/middleware/auth.go` (1-50) — 认证中间件
+- `internal/middleware/request_id.go` (1-20) — 请求 ID
+- `internal/middleware/recover.go` (1-30) — Panic 恢复
+- `internal/middleware/logger.go` (1-70) — 请求日志
+- `internal/handler/auth.go` (1-60) — 登录 Handler
+- `internal/model/config.go` (1-105) — 配置模型
+- `cmd/server/main.go` (1-494) — 启动编排
+
+### 前端
+- `web/src/views/LoginView.vue` (1-150) — 登录界面
+- `web/src/App.vue` (1-700) — 全局认证编排
 
 ---
 
@@ -25,43 +24,48 @@
 
 ### 🏗️ 架构设计 (30%) — 评分: 7.5/10
 
-**中间件链设计教科书级正确：** `RecoverPanic → WithRequestID → RequestLogger → WithLocalizer → [Auth] → Handler`，panic 最外层、日志在 auth 之前（便于审计登录失败）、localizer 在 auth 之前（认证错误可 i18n）。
+**中间件链设计教科书级正确：**
+- `RecoverPanic → RequestID → Logger → Localizer → Auth → Handler`，顺序严格：恢复在最外层保证不漏 panic，RequestID 在 Logger 前保证日志可追踪，Auth 在 Handler 前保证所有业务逻辑受保护
+- 三态认证门控设计精巧：`middleware.Auth` 返回三种状态——`null`（未设置密码，放行）、`true`（Cookie 有效，放行）、`false`（Cookie 无效，401），覆盖了零配置和有密码两种部署模式
 
-**零配置安全默认：** 无密码时自动生成 UUID 密码并持久化到 `.clawbench/auto-password`（0600 权限），避免裸奔部署。
-
-**前端认证门三态清晰：** `isAuthenticated === null`（加载中）→ `false`（登录页）→ `true`（主界面）。
+**零配置安全默认值出色：**
+- 密码为空时自动生成 UUID → 持久化到 `.clawbench/auto-password`（0600 权限）
+- Cookie 属性完整：`HttpOnly` + `SameSite=Lax` + `Path=/api` + `MaxAge`
+- `ParsePresenceMap` 解决 Go bool 零值陷阱（`proxy.enabled` 和 `ssh.enabled` 默认应为 `true`，但 Go 零值为 `false`）
 
 **关键缺陷：**
-- 全局单一 `model.SessionToken`，所有用户共享同一个 token，不支持多用户/多会话
-- 认证状态全部在内存，重启后 token 不变（哈希确定性），但无法吊销已发出的 cookie
-- 无 CSRF 保护，仅依赖 `SameSite: Lax`
+- **全局单 Token**：`model.SessionToken` 是包级变量，所有客户端共享同一 token，不支持多会话和单独吊销
+- **无 CSRF 保护**：全局 POST 端点（`/api/ai/chat`、`/api/tasks`）无 CSRF token 或 `SameSite=Strict`，仅依赖 `SameSite=Lax` 限制了部分跨站 POST
 
-### ✨ 代码质量 (30%) — 评分: 7.5/10
+### ✨ 代码质量 (30%) — 评分: 7.3/10
 
 **亮点：**
-- `LoginView.vue` 简洁（155行），单一职责，错误分类清晰
-- `useAppMode.ts` 的 `window !== window.top` 检查防止 iframe 误判
-- Cookie 属性设置正确：`HttpOnly: true`, `SameSite: LaxMode`, `Path: "/"`, `MaxAge: 7天`
+- `LoginView.vue` 简洁（150行），移动端适配良好
+- Cookie 属性设置正确完整（HttpOnly + Lax + Path + MaxAge）
+- `ParsePresenceMap` 使用 `encoding/json.Decoder` 精确检测字段是否存在，避免零值歧义
 
 **关注点：**
-- `auth.go:36` 的 `json.NewDecoder(r.Body).Decode(&body)` 忽略了返回错误
-- `request_id.go:13` 的 `time.Now().UnixNano()` 作为 request ID 可预测
-- `main.go:379` 的自动密码直接 `fmt.Printf` 到 stdout
+- `auth.go:55` JSON decode 错误被忽略（`json.NewDecoder(r.Body).Decode(&req)` 返回值未检查），畸形请求体时 `req.Password` 为空字符串，可能导致意外行为
+- `request_id.go:13` 使用 `time.Now().UnixNano()` 生成请求 ID，时间戳可预测，不利于安全追踪
+- `LoginView.vue:74-76` 直接访问 `window.AndroidNative` 而非通过统一封装，与 `useAppMode` 的桥接模式不一致
 
-### 🛡️ 健壮性 (40%) — 评分: 6.0/10
+### 🛡️ 健壮性 (40%) — 评分: 5.5/10
 
 **P0 级问题：**
 
-1. **密码哈希使用 SHA-256 + 硬编码盐**：`sha256(password + "clawbench-salt")` — 静态盐对所有实例相同，SHA-256 不是密码哈希函数（应使用 bcrypt/argon2），同一密码永远产生同一 token
-
-2. **全局共享 session token**：一旦 cookie 泄露，无法单独吊销；知道密码 = 知道所有人的 session token
+1. **SHA-256 + 硬编码盐值密码哈希**：`auth.go:37` 和 `main.go:398` 使用 `sha256.Sum256([]byte(password + "clawbench-salt"))` 做密码哈希。SHA-256 是快速哈希，硬编码盐值等同于无盐，GPU 暴力破解成本极低
+2. **时序攻击**：`auth.go:39` 和 `middleware/auth.go:38` 使用 `==` 比较 token，非恒定时间比较，攻击者可通过响应时间差异逐字节推断 token
+3. **自动密码输出到 stdout**：`main.go:394` `fmt.Printf("Auto-generated password: %s\n", password)` 将密码打印到标准输出，可被子进程读取（`/proc/self/fd/1`）或 journalctl 记录
+4. **Android 自动登录明文密码**：`App.vue:579-587` 和 `LoginView.vue:74-76` 通过 `AndroidNative.getPassword()` 获取明文密码并在网络请求中传输
 
 **P1 级问题：**
 
-3. **无登录速率限制**：`ServeLogin` 无 brute-force 保护，攻击者可无限尝试密码
-4. **无 CSRF 保护**：所有 POST 端点仅依赖 cookie + SameSite Lax，无 CSRF token
-5. **Android 自动登录密码明文传输**：`getPassword()` 返回明文密码，可通过 JS Bridge 被窃取
-6. **自动密码明文输出到 stdout**：进程输出被重定向时可能泄露
+5. **无登录速率限制**：`auth.go:34-55` 无任何速率限制，暴力破解成本仅受网络延迟限制
+6. **无 CSRF 保护**：全局 POST 端点仅依赖 `SameSite=Lax`，不阻止同站 GET 请求发起的攻击
+7. **Cookie 缺少 Secure 标志**：`auth.go:40-47` 设置 Cookie 时未指定 `Secure=true`，HTTP 连接下 Cookie 可被中间人窃取
+8. **Localhost 认证绕过不感知代理**：`middleware/auth.go:13-19` 使用 `r.RemoteAddr` 判断 localhost，但反向代理场景下 `RemoteAddr` 是代理地址，可能导致非 localhost 来源绕过认证
+9. **请求 ID 可预测**：`request_id.go:13` 使用纳秒时间戳，攻击者可推断其他请求的 ID
+10. **全局共享 Session Token**：`model/config.go:121` 所有客户端共享同一 token，无法单会话吊销，一个泄露全部失效
 
 ---
 
@@ -69,35 +73,39 @@
 
 | ID | 严重度 | 类别 | 描述 | 文件:行号 | 建议 |
 |----|--------|------|------|-----------|------|
-| R10-001 | **P0** | 🛡️ 安全 | 密码哈希使用 SHA-256 + 硬编码盐，极易被彩虹表攻破 | `main.go:383` | 使用 bcrypt 或 argon2 |
-| R10-002 | **P0** | 🛡️ 安全 | 全局共享 session token，不支持多会话和单独吊销 | `model/config.go` SessionToken | 改为独立随机 token + session store |
-| R10-003 | **P1** | 🛡️ 安全 | 无登录速率限制，可暴力破解 | `auth.go:34-55` | 添加 IP 级 rate limiter |
-| R10-004 | **P1** | 🛡️ 安全 | 无 CSRF 保护，仅依赖 SameSite Lax | 全局 POST 端点 | 添加 CSRF token 或升级 SameSite 到 Strict |
-| R10-005 | **P1** | 🛡️ 安全 | Android 自动登录密码明文传输 | `App.vue:577-578` | 实现 Native 侧自动登录接口 |
-| R10-006 | **P1** | 🛡️ 安全 | 自动密码明文输出到 stdout | `main.go:379` | 仅在 `--fg` 模式输出，或脱敏 |
-| R10-007 | **P2** | 🛡️ 安全 | Cookie 未设置 Secure flag（TLS 场景） | `auth.go:43` | TLS 启用时自动设置 Secure: true |
-| R10-008 | **P2** | 🛡️ 健壮性 | `rand.Read` 返回值未检查 | `defaults.go:67` | 检查 error |
-| R10-009 | **P2** | ✨ 质量 | 自动密码写入 slog 未脱敏 | `main.go:373-379` | 只打印前 4 位 + `***` |
-| R10-010 | **P2** | 🛡️ 安全 | 字符串比较非 constant-time（时序攻击） | `middleware/auth.go:18` | 风险极低但可使用 `crypto/subtle.ConstantTimeCompare` |
-| R10-011 | **P3** | ✨ 质量 | request ID 使用 UnixNano，可预测 | `request_id.go:13` | 改用 UUID v4 |
-| R10-012 | **P3** | ✨ 质量 | 登录成功后密码在 JS 内存中持续存在 | `LoginView.vue:47-49` | 功能需求但应文档化风险 |
+| R10-001 | **P0** | 🛡️ 安全 | SHA-256 + 硬编码盐值密码哈希，GPU 暴力破解成本极低 | `auth.go:37`, `main.go:398` | 替换为 `bcrypt.GenerateFromPassword`，cost ≥ 12 |
+| R10-002 | **P0** | 🛡️ 安全 | 时序攻击：token 比较使用 `==`，非恒定时间 | `auth.go:39`, `middleware/auth.go:38` | 使用 `subtle.ConstantTimeCompare` |
+| R10-003 | **P0** | 🛡️ 安全 | 自动密码打印到 stdout，可被子进程/journal 捕获 | `main.go:394` | 改为写入 stderr 或仅写入 `.clawbench/auto-password` 文件 |
+| R10-004 | **P0** | 🛡️ 安全 | Android 自动登录发送明文密码，可被同源 JS 窃取 | `App.vue:579-587`, `LoginView.vue:74-76` | 实现 `AndroidNative.autoLogin(url)` 接口，消除密码传递 |
+| R10-005 | **P1** | 🛡️ 安全 | 无登录速率限制，暴力破解成本极低 | `auth.go:34-55` | 添加 IP 级 rate limiter（如 5 次/分钟） |
+| R10-006 | **P1** | 🛡️ 安全 | 无 CSRF 保护，仅依赖 `SameSite=Lax` | 全局 POST 端点 | 添加 CSRF token 或升级 `SameSite=Strict` |
+| R10-007 | **P1** | 🛡️ 安全 | Cookie 缺少 Secure 标志，HTTP 下可被窃取 | `auth.go:40-47` | 在 TLS 模式下设置 `Secure=true` |
+| R10-008 | **P1** | 🛡️ 安全 | Localhost 认证绕过不感知反向代理 | `middleware/auth.go:13-19` | 使用 `X-Forwarded-For` 或 `X-Real-IP` header |
+| R10-009 | **P1** | 🛡️ 安全 | 请求 ID 使用纳秒时间戳，可预测 | `request_id.go:13` | 使用 `crypto/rand` 生成随机 ID |
+| R10-010 | **P1** | 🛡️ 安全 | 全局共享 Session Token，不支持多会话和单独吊销 | `model/config.go:121` | 改为 per-session token + token 存储 |
+| R10-011 | **P2** | 🛡️ 安全 | `.clawbench/` 目录以 0755 权限创建 | `defaults.go:70` | 改为 0750 或 0700 |
+| R10-012 | **P2** | 🛡️ 安全 | 明文密码在内存中存活进程整个生命周期 | `main.go`, `config.go` | 使用后尽快清零（`memset`/`runtime.KeepAlive`） |
+| R10-013 | **P2** | 🛡️ 安全 | 日志中的 RemoteAddr 不感知代理 | `logger.go:55` | 使用 `X-Real-IP` 或 `X-Forwarded-For` |
+| R10-014 | **P2** | 🏗️ 架构 | Auth 中间件仅包装 `HandlerFunc`，不支持 `http.Handler` | `middleware/auth.go:24` | 提供两个签名或使用适配器 |
+| R10-015 | **P3** | ✨ 质量 | Panic 恢复硬编码英文错误信息 | `recover.go:21` | 使用 i18n 或从配置读取 |
+| R10-016 | **P3** | ✨ 质量 | 登录响应缺少 Content-Type header | `auth.go:49` | 显式设置 `Content-Type: application/json` |
 
 ---
 
 ## 改进建议 (Top 3)
 
-1. **密码存储与 Session 机制重构 (R10-001+R10-002)**: 将 `SHA-256(salt+password)` 替换为 `bcrypt` 哈希。Session token 改为 `crypto/rand` 生成的独立随机值（与密码哈希解耦），支持多会话和单会话吊销。这是最直接的安全收益。预期收益：消除密码破解和 token 无法吊销的风险。
+1. **替换 SHA-256 + 硬编码盐为 bcrypt (R10-001)**: 当前密码哈希使用 `sha256.Sum256([]byte(password + "clawbench-salt"))`，SHA-256 是快速哈希 + 硬编码盐值等同于无盐，现代 GPU 可达数十亿次/秒。建议替换为 `bcrypt.GenerateFromPassword([]byte(password), 12)`，bcrypt 自带盐值 + 可调 cost，暴力破解成本提升 5-6 个数量级。需注意 bcrypt 迁移策略：兼容期同时支持旧 SHA-256 验证，验证成功后自动 rehash 为 bcrypt。预期收益：消除密码破解风险，这是最高安全影响的修复。
 
-2. **添加登录速率限制 + CSRF token (R10-003+R10-004)**: 登录接口加 IP 级 rate limiter（5 次/分钟）。对所有 state-changing POST 端点添加 CSRF token 机制（或升级 `SameSite` 到 `Strict`）。预期收益：防止暴力破解和 CSRF 攻击。
+2. **使用 subtle.ConstantTimeCompare 进行所有 Token 比较 (R10-002)**: 当前 `auth.go:39` 和 `middleware/auth.go:38` 使用 `==` 比较 token，非恒定时间比较允许时序攻击——攻击者通过响应时间差异逐字节推断 token。建议所有认证相关的字符串比较使用 `subtle.ConstantTimeCompare`，将 token 统一为固定长度（如 hex 编码）。预期收益：消除时序攻击向量。
 
-3. **加固 Android 自动登录 (R10-005)**: 实现 `AndroidNative.autoLogin(url)` 接口，原生层直接发起 HTTP 认证请求返回 session cookie，不暴露密码到 JS 层。预期收益：消除 Bridge 密码泄露风险。
+3. **添加登录速率限制 + CSRF 保护 (R10-005+R10-006)**: 当前无登录速率限制，暴力破解成本仅受网络延迟限制；全局 POST 端点无 CSRF 保护。建议：(1) 添加 IP 级 rate limiter（5 次/分钟，指数退避封锁）；(2) 添加 CSRF double-submit cookie 或升级 `SameSite=Strict`。预期收益：防止暴力破解和跨站请求伪造。
 
 ---
 
 ## 亮点
 
-- **零配置安全默认**：自动生成 UUID 密码 + 0600 权限 + 启动提示
-- **中间件链教科书级正确**：RecoverPanic → RequestID → Logger → Localizer → Auth
-- **Cookie 属性完善**：HttpOnly + SameSite Lax + Path=/ + MaxAge 7天
-- **iframe 误判防护**：useAppMode 的 window.top 检查
-- **ParsePresenceMap**：优雅解决 Go bool 零值陷阱
+- **零配置安全默认值**：自动 UUID 密码 + 0600 文件权限，无需用户干预即可获得基本安全
+- **中间件链教科书级正确**：`RecoverPanic → RequestID → Logger → Localizer → Auth → Handler` 顺序严格
+- **Cookie 属性完整**：`HttpOnly` + `SameSite=Lax` + `Path=/api` + `MaxAge`，覆盖主流攻击向量
+- **ParsePresenceMap**：教科书级解决 Go bool 零值陷阱，`proxy.enabled` 和 `ssh.enabled` 正确默认为 `true`
+- **iframe 误判防护**：`window === window.top` 检测确保 Bridge 仅在顶层窗口可用

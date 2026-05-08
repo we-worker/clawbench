@@ -43,9 +43,9 @@ Core Advantage: Native passthrough of AI capabilities (tool calls, extended thin
 |-----------------|-----------------|---------------------|-----------------|
 | ![Agent Selection](docs/screenshots/agent-selector.png) | ![AI Conversation](docs/screenshots/chat-panel.png) | ![Structured Question](docs/screenshots/ask-question.png) | ![Session Manager](docs/screenshots/session-manager.png) |
 
-| Scheduled Tasks | Create Task | Schedule Proposal |
-|-----------------|-------------|-------------------|
-| ![Scheduled Tasks](docs/screenshots/scheduled-tasks.png) | ![Create Task](docs/screenshots/task-create.png) | ![Schedule Proposal](docs/screenshots/schedule-proposal.png) |
+| Scheduled Tasks | Create Task | Task Card |
+|-----------------|-------------|-----------|
+| ![Scheduled Tasks](docs/screenshots/scheduled-tasks.png) | ![Create Task](docs/screenshots/task-create.png) | ![Task Card](docs/screenshots/schedule-proposal.png) |
 
 ### Git Integration
 
@@ -185,7 +185,7 @@ Once deployed, access `http://server-ip:20000` from your phone app or mobile bro
 - **Streaming Response**: Real-time SSE push, thinking process and tool calls fully visible
 - **Multi-Agent Support**: General assistant, coding expert, handyman, etc. — YAML config, plug-and-play
 - **AI Backend Switching**: CodeBuddy, Claude Code, OpenCode, Gemini CLI, Codex, Qoder CLI, VeCLI — session-level isolation
-- **Scheduled Tasks**: Auto-create Cron schedule from AI proposals, execute on schedule
+- **Scheduled Tasks**: AI creates Cron schedules via CLI subcommands, executes automatically; task cards embedded in chat messages
 - **Multi-Session Management**: Create, switch, delete independent sessions, swipe to switch
 - **Image Upload**: Upload images for AI conversation (multimodal)
 - **Disconnect Protection**: Messages persist immediately, no data loss on disconnect, 60s timeout auto-reconnect (3 attempts then fallback to polling)

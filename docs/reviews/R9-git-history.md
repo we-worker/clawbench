@@ -44,19 +44,29 @@
 - `GitCommitMeta.vue:55` 的 `formatDate` 硬编码 `zh-CN` locale，与 i18n 体系不一致
 - `GitBreadcrumb.vue:24` 的 `v-html="FILE_OPEN_ICON_SVG"` 使用预定义常量，虽安全但违反最佳实践
 
-### 🛡️ 健壮性 (40%) — 评分: 7.5/10
+### 🛡️ 健壮性 (40%) — 评分: 7.0/10
 
 **P0 级问题：**
 
-1. **SHA 参数未验证格式**：`ServeGitCommitFiles` 中 `sha` 参数未验证格式。用户可传入 `--all` 或其他 flag-like 值。虽然 `exec.Command` 数组传参不会导致 shell 注入，但 git 会将 `--all` 解释为 flag，可能泄露全部 commit 信息
+1. **SHA 参数未验证格式**：`git.go:281` 中 `sha` 参数未验证格式。用户可传入 `--all` 或其他 flag-like 值。虽然 `exec.Command` 数组传参不会导致 shell 注入，但 git 会将 `--all` 解释为 flag，可能泄露全部 commit 信息
 
 **P1 级问题：**
 
-2. **文件历史无分页**：`ServeGitHistory` 对某文件的全部 commit 历史无限制，数千条 commit 全量加载到内存
+2. **文件历史无分页**：`git.go:142,212` 对某文件的全部 commit 历史无限制，数千条 commit 全量加载到内存
 
-3. **大 diff 无大小限制**：`gitDiff` 对超大文件的 diff 全量加载，可能 OOM
+3. **大 diff 无大小限制**：`git.go:212` 对超大文件的 diff 全量加载，可能 OOM
 
-4. **搜索全量加载**：`onSearch` 循环加载全部 commit 到内存，大仓库可能加载数万条
+4. **搜索全量加载**：`GitHistoryDrawer.vue:342-353` 的 `onSearch` 循环加载全部 commit 到内存，大仓库可能加载数万条
+
+**P2 级问题：**
+
+5. **`shaToBranchNames` 反向遍历无上限**：`gitGraph.ts:536-554`
+
+6. **`formatDate` 硬编码 zh-CN locale**：`GitCommitMeta.vue:55`
+
+7. **`v-html` 使用预定义 SVG 常量**：`GitBreadcrumb.vue:24`
+
+8. **`skip` 参数 Sscanf 错误未检查**：`git.go:129`
 
 ---
 
@@ -70,14 +80,14 @@
 | R9-004 | **P1** | 🛡️ 健壮性 | 搜索全量加载全部 commit 到内存 | `GitHistoryDrawer.vue:342-353` | 改为后端搜索 `git log --grep` |
 | R9-005 | **P2** | 🛡️ 健壮性 | `shaToBranchNames` 反向遍历无上限保护 | `gitGraph.ts:536-554` | 添加 visited 上限 |
 | R9-006 | **P2** | ✨ 质量 | `formatDate` 硬编码 `zh-CN` locale | `GitCommitMeta.vue:55` | 使用 i18n locale |
-| R9-007 | **P3** | ✨ 质量 | `v-html` 使用预定义 SVG 常量 | `GitBreadcrumb.vue:24` | 改用组件 |
-| R9-008 | **P3** | ✨ 质量 | `skip` 参数 Sscanf 错误未显式检查 | `git.go:129` | 检查 n 和 err |
+| R9-007 | **P2** | ✨ 质量 | `v-html` 使用预定义 SVG 常量 | `GitBreadcrumb.vue:24` | 改用组件 |
+| R9-008 | **P2** | ✨ 质量 | `skip` 参数 Sscanf 错误未显式检查 | `git.go:129` | 检查 n 和 err |
 
 ---
 
 ## 改进建议 (Top 3)
 
-1. **验证 SHA 参数格式 (R9-001)**: 在所有接受 SHA 的 handler 中添加正则校验 `^[0-9a-f]{4,40}$`，拒绝含 `--` 或非 hex 字符的输入。这是最直接的安全收益。预期收益：消除 git flag 注入风险。
+1. **验证 SHA 参数格式 (R9-001)**: 在所有接受 SHA 的 handler 中添加正则校验 `^[0-9a-f]{4,40}$`，拒绝含 `--` 或非 hex 字符的输入。这是最直接的安全收益，一行代码修复消除 git flag 注入风险。
 
 2. **文件历史分页 + diff 大小限制 (R9-002+R9-003)**: `ServeGitHistory` 加 `-N` 限制返回条数（如 50），前端按需加载更多。`gitDiff` 添加 `--stat` 预检，diff 超过阈值时截断并返回 warning。预期收益：防止大仓库 OOM。
 
@@ -89,6 +99,6 @@
 
 - **命令注入防护三层防线**：`exec.Command` 数组传参 + `--` 分隔符 + `validateAndResolvePath`
 - **diff XSS 双层防护**：`escapeHtml` + `highlightLine` fallback
-- **图算法质量高**：lane 压缩算法、octopus merge 处理、lazy-load lane 稳定性
+- **图算法质量高**：lane 压缩算法（区间着色）、octopus merge 处理、lazy-load lane 稳定性
 - **parseGitStatusPorcelain**：正确处理 XY 双状态和 rename 箭头
 - **persistedShaToLane**：分页加载时保持已有 lane 映射，避免视觉抖动

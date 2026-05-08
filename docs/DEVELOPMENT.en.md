@@ -302,6 +302,7 @@ Use `./dev-server.sh` to start an independent development environment:
 - Backend: `http://localhost:20002`
 - Frontend (Vite HMR): `http://localhost:20001`
 - Database: Uses `ClawBench-dev.db`, isolated from production data
+- RAG vector store: Uses `rag-dev.duckdb`, isolated from production vector data
 
 ```bash
 ./dev-server.sh              # Start in background
@@ -332,12 +333,12 @@ config/agents/
 ```
 
 - **Configurable Agents**: Each agent is defined via YAML with dedicated system prompt, model, and backend — no code changes needed
-- **Shared Prompt**: `config/agent_common_prompt.md` defines common behaviors for all agents (web search, multimodal, media processing), avoiding duplicate configuration
+- **Shared Rules**: `config/rules.md` defines common behaviors and mandatory rules for all agents (scheduled task CLI, RAG search, media handling), avoiding duplicate configuration
 - **Template Placeholder**: `{{AVAILABLE_AGENTS}}` is auto-replaced with the available agent list, facilitating inter-agent dispatching
 - **Multi-Agent Dispatching**: Different tasks match different agents; the all-round assistant handles conversations while specialized agents execute scheduled tasks
 - **Transparent Tool Calls**: AI tool calls (file read/write, Bash commands, code editing) are visualized in real time
-- **Cron Scheduled Execution**: AI generates `<schedule-proposal>` proposals; after confirmation, Cron scheduler executes them automatically
-- **Cron Governance**: Claude backend disables built-in scheduling tools via `--disallowedTools`, routing all scheduling through ClawBench
+- **Cron Scheduled Execution**: AI creates scheduled tasks via `clawbench task` CLI subcommands; after confirmation, Cron scheduler executes them automatically. Task cards are embedded in chat messages
+- **Cron Governance**: During scheduled execution, the Scheduled Tasks section in rules.md is automatically stripped (`<!-- SCHEDULED_BEGIN/END -->` markers), preventing AI from recursively creating tasks; CLI layer provides dual-layer protection via `CLAWBENCH_SCHEDULED=1` env var
 - **Multi-Backend Switching**: The same platform simultaneously supports CodeBuddy, Claude Code, OpenCode, Gemini CLI, Codex, Qoder CLI, and VeCLI backends with isolated session data
 
 ### Project Structure
@@ -352,6 +353,7 @@ clawbench/
 │   │   ├── chat.go              # AI chat (SSE streaming)
 │   │   ├── agent.go             # Agent management
 │   │   ├── scheduler.go         # Scheduled tasks
+│   │   ├── rag_api.go           # RAG search API
 │   │   ├── file.go              # File reading
 │   │   ├── file_ops.go          # File operations
 │   │   ├── upload.go            # File upload
@@ -373,6 +375,11 @@ clawbench/
 │   ├── ssh/                     # SSH tunnel server
 │   │   ├── server.go            # SSH server (direct-tcpip port forwarding)
 │   │   └── server_test.go       # Tests
+│   ├── cli/                     # CLI subcommands (AI agent self-service)
+│   │   ├── task.go              # Scheduled task subcommands (create/update/delete/pause/resume/trigger/list-agents)
+│   │   ├── rag.go               # RAG search subcommands (search/message/session)
+│   │   ├── help.go              # --help self-documentation infrastructure
+│   │   └── helpers.go           # Shared code (loadConfig/apiURL/httpDo/TLS/cookie)
 │   ├── ai/                      # AI backend abstraction
 │       ├── interface.go         # AIBackend interface
 │       ├── factory.go           # Backend factory
@@ -392,7 +399,7 @@ clawbench/
 │       ├── ai_backend_summarizer.go # AIBackendSummarizer (CLI backend summarization)
 │       ├── minimax.go / edge.go / piper.go / kokoro.go / moss_tts_nano.go  # TTS engine implementations
 ├── config/                      # Configuration files
-│   ├── agent_common_prompt.md   # Agent shared prompt
+│   ├── rules.md                 # Agent shared rules and CLI reference
 │   ├── agents/                  # Agent configurations
 │   │   ├── assistant.yaml       # All-round assistant
 │   │   ├── codebuddy2.yaml      # Gemini (via CodeBuddy)
@@ -424,7 +431,7 @@ clawbench/
 
 | Layer | Technology |
 |-------|------------|
-| Backend | Go 1.21+ (net/http + SQLite) |
+| Backend | Go 1.25+ (net/http + SQLite) |
 | Frontend | Vue 3 + Vite + TypeScript |
 | Syntax Highlighting | highlight.js |
 | Markdown | marked.js |

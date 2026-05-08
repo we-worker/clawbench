@@ -12,7 +12,7 @@ A: 支持 CodeBuddy、Claude Code、OpenCode、Gemini CLI、Codex、Qoder CLI、
 
 **Q: 如何添加新的智能体？**
 
-A: 在 `config/agents/` 目录下创建 YAML 文件，定义 id、name、icon、specialty、backend、model 和 system_prompt 即可。公共提示词放在 `config/agent_common_prompt.md`，会自动注入到所有智能体。`{{AVAILABLE_AGENTS}}` 占位符会自动替换为可用智能体列表。
+A: 在 `config/agents/` 目录下创建 YAML 文件，定义 id、name、icon、specialty、backend、model 和 system_prompt 即可。公共规则放在 `config/rules.md`，会自动注入到所有智能体的系统提示词中。`{{AVAILABLE_AGENTS}}` 占位符会自动替换为可用智能体列表。
 
 **Q: 是否需要配置 API Key？**
 
