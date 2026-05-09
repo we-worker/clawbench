@@ -53,49 +53,45 @@
         <div class="toolbar-scroll">
           <!-- Group: Modifiers -->
           <div class="key-group">
-            <button v-if="!gestures.enabled.value" class="toolbar-btn" @click="terminalKeys.sendEscape(); focusTerminal()" title="Esc">Esc</button>
-            <button v-if="!gestures.enabled.value" class="toolbar-btn" @click="terminalKeys.sendTab(); focusTerminal()" title="Tab">Tab</button>
-            <button class="toolbar-btn modifier" :class="{ active: terminalKeys.activeModifiers.value.ctrl !== 'inactive', locked: terminalKeys.activeModifiers.value.ctrl === 'locked' }" @click="handleModifier('ctrl')" @contextmenu.prevent title="Ctrl">Ctl</button>
-            <button class="toolbar-btn modifier" :class="{ active: terminalKeys.activeModifiers.value.alt !== 'inactive', locked: terminalKeys.activeModifiers.value.alt === 'locked' }" @click="handleModifier('alt')" @contextmenu.prevent title="Alt">Alt</button>
-            <button class="toolbar-btn modifier" :class="{ active: terminalKeys.activeModifiers.value.shift !== 'inactive', locked: terminalKeys.activeModifiers.value.shift === 'locked' }" @click="handleModifier('shift')" @contextmenu.prevent title="Shift">⇧</button>
-            <button class="toolbar-btn shortcut" @click="terminalKeys.sendCtrlC(); focusTerminal()" title="Ctrl+C">C-C</button>
-            <button class="toolbar-btn shortcut" @click="terminalKeys.sendCtrlZ(); focusTerminal()" title="Ctrl+Z">C-Z</button>
+            <button v-if="!gestures.enabled.value" class="toolbar-btn btn-modifier" @click="terminalKeys.sendEscape(); focusTerminal()" title="Esc">Esc</button>
+            <button v-if="!gestures.enabled.value" class="toolbar-btn btn-modifier" @click="terminalKeys.sendTab(); focusTerminal()" title="Tab">Tab</button>
+            <button class="toolbar-btn btn-modifier modifier" :class="{ active: terminalKeys.activeModifiers.value.ctrl !== 'inactive', locked: terminalKeys.activeModifiers.value.ctrl === 'locked' }" @click="handleModifier('ctrl')" @contextmenu.prevent title="Ctrl">Ctl</button>
+            <button class="toolbar-btn btn-modifier modifier" :class="{ active: terminalKeys.activeModifiers.value.alt !== 'inactive', locked: terminalKeys.activeModifiers.value.alt === 'locked' }" @click="handleModifier('alt')" @contextmenu.prevent title="Alt">Alt</button>
+            <button class="toolbar-btn btn-modifier modifier" :class="{ active: terminalKeys.activeModifiers.value.shift !== 'inactive', locked: terminalKeys.activeModifiers.value.shift === 'locked' }" @click="handleModifier('shift')" @contextmenu.prevent title="Shift"><ShiftIcon :size="14" /></button>
+            <button class="toolbar-btn btn-modifier shortcut" @click="terminalKeys.sendCtrlC(); focusTerminal()" title="Ctrl+C">⌃C</button>
+            <button class="toolbar-btn btn-modifier shortcut" @click="terminalKeys.sendCtrlZ(); focusTerminal()" title="Ctrl+Z">⌃Z</button>
           </div>
-          <div class="key-divider"></div>
           <!-- Group: Navigation -->
           <div class="key-group">
-            <button class="toolbar-btn" @click="terminalKeys.sendHome(); focusTerminal()" title="Home">Home</button>
-            <button class="toolbar-btn" @click="terminalKeys.sendEnd(); focusTerminal()" title="End">End</button>
-            <button v-if="!gestures.enabled.value" class="toolbar-btn" @click="terminalKeys.sendPageUp(); focusTerminal()" title="Page Up">PgUp</button>
-            <button v-if="!gestures.enabled.value" class="toolbar-btn" @click="terminalKeys.sendPageDown(); focusTerminal()" title="Page Down">PgDn</button>
+            <button class="toolbar-btn btn-nav" @click="terminalKeys.sendHome(); focusTerminal()" title="Home">Home</button>
+            <button class="toolbar-btn btn-nav" @click="terminalKeys.sendEnd(); focusTerminal()" title="End">End</button>
+            <button v-if="!gestures.enabled.value" class="toolbar-btn btn-nav" @click="terminalKeys.sendPageUp(); focusTerminal()" title="Page Up">PgUp</button>
+            <button v-if="!gestures.enabled.value" class="toolbar-btn btn-nav" @click="terminalKeys.sendPageDown(); focusTerminal()" title="Page Down">PgDn</button>
           </div>
-          <div class="key-divider"></div>
           <!-- Group: Arrow keys -->
-          <div class="key-group">
-            <button v-if="!gestures.enabled.value" class="toolbar-btn" @click="terminalKeys.sendArrowUp(); focusTerminal()" title="↑">↑</button>
-            <button v-if="!gestures.enabled.value" class="toolbar-btn" @click="terminalKeys.sendArrowDown(); focusTerminal()" title="↓">↓</button>
-            <button v-if="!gestures.enabled.value" class="toolbar-btn" @click="terminalKeys.sendArrowLeft(); focusTerminal()" title="←">←</button>
-            <button v-if="!gestures.enabled.value" class="toolbar-btn" @click="terminalKeys.sendArrowRight(); focusTerminal()" title="→">→</button>
+          <div v-show="!gestures.enabled.value" class="key-group">
+            <button class="toolbar-btn btn-arrow" @click="terminalKeys.sendArrowUp(); focusTerminal()" title="↑">↑</button>
+            <button class="toolbar-btn btn-arrow" @click="terminalKeys.sendArrowDown(); focusTerminal()" title="↓">↓</button>
+            <button class="toolbar-btn btn-arrow" @click="terminalKeys.sendArrowLeft(); focusTerminal()" title="←">←</button>
+            <button class="toolbar-btn btn-arrow" @click="terminalKeys.sendArrowRight(); focusTerminal()" title="→">→</button>
           </div>
-          <div class="key-divider"></div>
           <!-- Group: Symbols -->
           <div class="key-group">
-            <button class="toolbar-btn" @click="session.sendInput('/'); focusTerminal()">/</button>
-            <button class="toolbar-btn" @click="session.sendInput('-'); focusTerminal()">-</button>
-            <button class="toolbar-btn" @click="session.sendInput('|'); focusTerminal()">|</button>
-            <button class="toolbar-btn" @click="session.sendInput('_'); focusTerminal()">_</button>
-            <button class="toolbar-btn" @click="session.sendInput('~'); focusTerminal()">~</button>
+            <button class="toolbar-btn btn-symbol" @click="session.sendInput('/'); focusTerminal()">/</button>
+            <button class="toolbar-btn btn-symbol" @click="session.sendInput('-'); focusTerminal()">-</button>
+            <button class="toolbar-btn btn-symbol" @click="session.sendInput('|'); focusTerminal()">|</button>
+            <button class="toolbar-btn btn-symbol" @click="session.sendInput('_'); focusTerminal()">_</button>
+            <button class="toolbar-btn btn-symbol" @click="session.sendInput('~'); focusTerminal()">~</button>
           </div>
-          <div class="key-divider"></div>
           <!-- Group: Actions -->
           <div class="key-group">
-            <button ref="cmdBtnRef" class="toolbar-btn" @click="showCommands = !showCommands" :title="t('terminal.quickCommands')">
+            <button ref="cmdBtnRef" class="toolbar-btn btn-action" @click="showCommands = !showCommands" :title="t('terminal.quickCommands')">
               <ZapIcon :size="14" />
             </button>
-            <button class="toolbar-btn" @click="handleCopyOutput" :title="t('terminal.copyOutput')">
+            <button class="toolbar-btn btn-action" @click="handleCopyOutput" :title="t('terminal.copyOutput')">
               <CopyIcon :size="14" />
             </button>
-            <button class="toolbar-btn" @click="handleRebuild" :title="t('terminal.rebuildSession')">
+            <button class="toolbar-btn btn-action" @click="handleRebuild" :title="t('terminal.rebuildSession')">
               <RefreshCwIcon :size="14" />
             </button>
           </div>
@@ -140,7 +136,7 @@ import { useQuickCommands } from '@/composables/useQuickCommands'
 import { store } from '@/stores/app'
 import { resolveTerminalCwd, shouldPromptForTerminalReopen } from './terminalCwd'
 
-import { Terminal as TerminalIcon, Copy as CopyIcon, Zap as ZapIcon, Hand as HandIcon, RefreshCw as RefreshCwIcon } from 'lucide-vue-next'
+import { Terminal as TerminalIcon, Copy as CopyIcon, Zap as ZapIcon, Hand as HandIcon, RefreshCw as RefreshCwIcon, ArrowUpFromLine as ShiftIcon } from 'lucide-vue-next'
 
 const props = defineProps<{
   open: boolean
@@ -800,45 +796,54 @@ function openEditDialog() {
 .toolbar-scroll {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   flex: 1;
   min-width: 0;
-  /* Hide scrollbar for cleaner look */
-  scrollbar-width: none;
+  /* Thin visible scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
 }
 .toolbar-scroll::-webkit-scrollbar {
-  display: none;
+  height: 3px;
+}
+.toolbar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.toolbar-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
 }
 
 .key-group {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 0;
 }
 
-.key-divider {
-  width: 1px;
-  height: 20px;
-  background: var(--border-color);
-  margin: 0 4px;
-  flex-shrink: 0;
-  opacity: 0.6;
+/* Collapse borders between adjacent buttons inside a group */
+.key-group .toolbar-btn + .toolbar-btn {
+  margin-left: -1px;
+}
+
+/* Add spacing between groups */
+.key-group + .key-group {
+  margin-left: 4px;
 }
 
 .toolbar-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 32px;
-  height: 32px;
-  padding: 0 6px;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 5px;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--bg-key);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
   flex-shrink: 0;
   user-select: none;
@@ -869,7 +874,7 @@ function openEditDialog() {
 .toolbar-btn.shortcut {
   background: var(--bg-tertiary);
   font-weight: 600;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .toolbar-btn.shortcut:active {
@@ -885,6 +890,11 @@ function openEditDialog() {
 .toolbar-btn.danger:hover {
   opacity: 1;
   background: var(--bg-tertiary);
+}
+
+/* Gesture toggle keeps round shape */
+.toolbar-btn.gesture-toggle {
+  border-radius: 6px;
 }
 
 /* Mobile: adjust toolbar for soft keyboard */
@@ -905,6 +915,52 @@ function openEditDialog() {
   .toolbar-btn:active {
     background: var(--bg-key-active);
   }
+}
+
+/* Button group colors — after all .toolbar-btn rules to win cascade */
+.toolbar-btn.btn-modifier {
+  background: var(--bg-tertiary);
+  border-color: var(--bg-tertiary);
+}
+
+.toolbar-btn.btn-nav {
+  background: color-mix(in srgb, var(--accent-color) 18%, var(--bg-key));
+  border-color: color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+}
+
+.toolbar-btn.btn-arrow {
+  background: color-mix(in srgb, var(--color-green) 18%, var(--bg-key));
+  border-color: color-mix(in srgb, var(--color-green) 40%, var(--border-color));
+}
+
+.toolbar-btn.btn-symbol {
+  background: color-mix(in srgb, var(--color-yellow) 18%, var(--bg-key));
+  border-color: color-mix(in srgb, var(--color-yellow) 40%, var(--border-color));
+}
+
+.toolbar-btn.btn-action {
+  background: color-mix(in srgb, var(--color-purple) 18%, var(--bg-key));
+  border-color: color-mix(in srgb, var(--color-purple) 40%, var(--border-color));
+}
+
+[data-theme="dark"] .toolbar-btn.btn-nav {
+  background: color-mix(in srgb, var(--accent-color) 22%, var(--bg-key));
+  border-color: color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+}
+
+[data-theme="dark"] .toolbar-btn.btn-arrow {
+  background: color-mix(in srgb, var(--color-green) 18%, var(--bg-key));
+  border-color: color-mix(in srgb, var(--color-green) 35%, var(--border-color));
+}
+
+[data-theme="dark"] .toolbar-btn.btn-symbol {
+  background: color-mix(in srgb, var(--color-yellow) 18%, var(--bg-key));
+  border-color: color-mix(in srgb, var(--color-yellow) 35%, var(--border-color));
+}
+
+[data-theme="dark"] .toolbar-btn.btn-action {
+  background: color-mix(in srgb, var(--color-purple) 18%, var(--bg-key));
+  border-color: color-mix(in srgb, var(--color-purple) 35%, var(--border-color));
 }
 </style>
 
