@@ -18,26 +18,28 @@
           @end="onDragEnd"
         >
           <template #item="{ element: cmd }">
-            <div class="qc-row" :class="{ 'qc-hidden': cmd.hidden }">
-              <span class="drag-handle">≡</span>
-              <span class="qc-label">
-                <ZapIcon v-if="cmd.auto_execute" :size="12" class="qc-badge-auto" />
-                <EyeOffIcon v-if="cmd.hidden" :size="12" class="qc-badge-dim" />
-                {{ cmd.label }}
-              </span>
-              <span class="qc-cmd" :title="cmd.command">{{ cmd.command }}</span>
-              <button class="qc-action" @click="editCommand(cmd)" :title="t('terminal.editCommand')">
-                <PencilIcon :size="14" />
-              </button>
-              <button class="qc-action danger" @click="toggleDeleteConfirm(cmd.id)" :title="t('terminal.deleteCommand')">
-                <Trash2Icon :size="14" />
-              </button>
-            </div>
-            <!-- Inline delete confirmation -->
-            <div v-if="deleteConfirmId === cmd.id" class="qc-delete-confirm">
-              <span>{{ t('terminal.deleteConfirm') }}</span>
-              <button class="qc-confirm-btn delete" @click="doDelete(cmd.id)">{{ t('common.confirm') }}</button>
-              <button class="qc-confirm-btn cancel" @click="deleteConfirmId = null">{{ t('common.cancel') }}</button>
+            <div class="qc-item-wrapper">
+              <div class="qc-row" :class="{ 'qc-hidden': cmd.hidden }">
+                <span class="drag-handle">≡</span>
+                <span class="qc-label">
+                  <ZapIcon v-if="cmd.auto_execute" :size="12" class="qc-badge-auto" />
+                  <EyeOffIcon v-if="cmd.hidden" :size="12" class="qc-badge-dim" />
+                  {{ cmd.label }}
+                </span>
+                <span class="qc-cmd" :title="cmd.command">{{ cmd.command }}</span>
+                <button class="qc-action" @click="editCommand(cmd)" :title="t('terminal.editCommand')">
+                  <PencilIcon :size="14" />
+                </button>
+                <button class="qc-action danger" @click="toggleDeleteConfirm(cmd.id)" :title="t('terminal.deleteCommand')">
+                  <Trash2Icon :size="14" />
+                </button>
+              </div>
+              <!-- Inline delete confirmation -->
+              <div v-if="deleteConfirmId === cmd.id" class="qc-delete-confirm">
+                <span>{{ t('terminal.deleteConfirm') }}</span>
+                <button class="qc-confirm-btn delete" @click="doDelete(cmd.id)">{{ t('common.confirm') }}</button>
+                <button class="qc-confirm-btn cancel" @click="deleteConfirmId = null">{{ t('common.cancel') }}</button>
+              </div>
             </div>
           </template>
         </draggable>
@@ -228,19 +230,22 @@ async function onDragEnd() {
   padding: 4px 0;
 }
 
+.qc-item-wrapper {
+  border-bottom: 1px solid var(--border-color, #e5e5e5);
+}
+
+.qc-item-wrapper:last-child {
+  border-bottom: none;
+}
+
 .qc-row {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border-color, #e5e5e5);
   font-size: 13px;
   color: var(--text-primary);
   transition: background 0.12s;
-}
-
-.qc-row:last-child {
-  border-bottom: none;
 }
 
 .qc-row.qc-hidden {
