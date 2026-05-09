@@ -89,13 +89,34 @@ func AIChatStream(w http.ResponseWriter, r *http.Request) {
 					if input == nil {
 						input = map[string]any{}
 					}
-					data, _ := json.Marshal(map[string]any{
+					payload := map[string]any{
 						"name":  event.Tool.Name,
 						"id":    event.Tool.ID,
 						"input": input,
 						"done":  event.Tool.Done,
-					})
+					}
+					if event.Tool.Output != "" {
+						payload["output"] = event.Tool.Output
+					}
+					if event.Tool.Status != "" {
+						payload["status"] = event.Tool.Status
+					}
+					data, _ := json.Marshal(payload)
 					fmt.Fprintf(w, "event: tool_use\ndata: %s\n\n", data)
+				}
+			case "tool_result":
+				if event.Tool != nil {
+					payload := map[string]any{
+						"id": event.Tool.ID,
+					}
+					if event.Tool.Output != "" {
+						payload["output"] = event.Tool.Output
+					}
+					if event.Tool.Status != "" {
+						payload["status"] = event.Tool.Status
+					}
+					data, _ := json.Marshal(payload)
+					fmt.Fprintf(w, "event: tool_result\ndata: %s\n\n", data)
 				}
 			case "metadata":
 				data, _ := json.Marshal(event.Meta)

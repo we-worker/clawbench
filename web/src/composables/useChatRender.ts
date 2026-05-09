@@ -211,6 +211,11 @@ export function useChatRender(options) {
             // DB-loaded blocks from finished sessions: if done is missing or false,
             // the session ended without receiving the tool result — mark as incomplete
             if (b.done === undefined || b.done === false) b.done = true
+            // Backward compat: old Codex format had output in input.output
+            if (!b.output && b.input && b.input.output) {
+              b.output = b.input.output
+              delete b.input.output
+            }
           }
           return b
         })
@@ -231,11 +236,15 @@ export function useChatRender(options) {
                 prev.input = b.input
                 prev.done = b.done
                 prev.name = b.name || prev.name
+                if (b.output) prev.output = b.output
+                if (b.status) prev.status = b.status
                 continue
               }
               // Both have data or both empty — merge: prefer done=true
               if (b.done) prev.done = true
               if (!currEmpty) prev.input = b.input
+              if (b.output) prev.output = b.output
+              if (b.status) prev.status = b.status
               continue
             }
             toolIndex.set(b.id, result.length)

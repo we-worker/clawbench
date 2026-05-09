@@ -65,18 +65,39 @@ func AccumulateBlock(blocks *[]model.ContentBlock, event StreamEvent) {
 				if (*blocks)[i].Type == "tool_use" && (*blocks)[i].ID == event.Tool.ID {
 					(*blocks)[i].Input = input
 					(*blocks)[i].Done = event.Tool.Done
+					if event.Tool.Output != "" {
+						(*blocks)[i].Output = event.Tool.Output
+					}
+					if event.Tool.Status != "" {
+						(*blocks)[i].Status = event.Tool.Status
+					}
 					found = true
 					break
 				}
 			}
 			if !found {
 				*blocks = append(*blocks, model.ContentBlock{
-					Type:  "tool_use",
-					Name:  event.Tool.Name,
-					ID:    event.Tool.ID,
-					Input: input,
-					Done:  event.Tool.Done,
+					Type:   "tool_use",
+					Name:   event.Tool.Name,
+					ID:     event.Tool.ID,
+					Input:  input,
+					Done:   event.Tool.Done,
+					Output: event.Tool.Output,
+					Status: event.Tool.Status,
 				})
+			}
+		}
+	case "tool_result":
+		// tool_result events update the Output/Status of an existing tool_use block.
+		// This handles backends (Gemini, Claude/Codebuddy stream_event) that send
+		// tool results as a separate event after the tool_use event.
+		if event.Tool != nil {
+			for i := len(*blocks) - 1; i >= 0; i-- {
+				if (*blocks)[i].Type == "tool_use" && (*blocks)[i].ID == event.Tool.ID {
+					(*blocks)[i].Output = event.Tool.Output
+					(*blocks)[i].Status = event.Tool.Status
+					break
+				}
 			}
 		}
 	case "warning":

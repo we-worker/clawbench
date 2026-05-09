@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"fmt"
 
 	"clawbench/internal/model"
 )
@@ -68,12 +69,12 @@ const (
 
 // StreamEvent represents a single event in the streaming output
 type StreamEvent struct {
-	Type       string          // "content", "thinking", "metadata", "done", "error", "tool_use", "raw_output", "resume_split", "queue_consume", "queue_update", "queue_done", "session_capture"
+	Type       string          // "content", "thinking", "metadata", "done", "error", "tool_use", "tool_result", "raw_output", "resume_split", "queue_consume", "queue_update", "queue_done", "session_capture"
 	Content    string          // Incremental text (Type=content, Type=thinking) or captured session ID (Type=session_capture)
 	Reason     string          // Structured reason code for i18n (e.g. "disconnect", "timeout", "parse_error")
 	Meta       *Metadata       // Metadata (Type=metadata)
 	Error      string          // Error message (Type=error)
-	Tool       *ToolCall       // Tool call info (Type=tool_use)
+	Tool       *ToolCall       // Tool call info (Type=tool_use, Type=tool_result)
 	RawOutput  string          // Raw stdout lines from AI backend (Type=raw_output)
 	QueueEvent *QueueEventData // Queue data (Type=queue_consume, Type=queue_update)
 }
@@ -88,7 +89,22 @@ type ToolCall struct {
 	Name   string // Canonical tool name (e.g., "Read", "Bash", "Edit")
 	ID     string // Tool call ID
 	Input  string // Tool input (JSON string with canonical field names, accumulated incrementally)
+	Output string // Tool execution output text (populated when available)
+	Status string // Tool execution status: "success", "error", "" (unknown)
 	Done   bool   // Whether the tool call input is complete
+}
+
+// maxToolOutputBytes limits tool output stored per tool call to prevent
+// unbounded DB growth from tools like Bash or Read with large output.
+const maxToolOutputBytes = 51200 // 50KB
+
+// truncateToolOutput truncates tool output exceeding maxToolOutputBytes
+// and appends a truncation marker.
+func truncateToolOutput(output string) string {
+	if len(output) <= maxToolOutputBytes {
+		return output
+	}
+	return output[:maxToolOutputBytes] + fmt.Sprintf("\n[truncated: original %d bytes]", len(output))
 }
 
 // QueueEventData carries data for queue_consume and queue_update SSE events.

@@ -111,9 +111,24 @@ func TestGeminiStream_ParseLine_ToolResult(t *testing.T) {
 	line := `{"type":"tool_result","timestamp":"2026-04-25T10:00:03.000Z","tool_id":"call_123","status":"success","output":"file content here"}`
 	events := parseGeminiLine(line)
 
-	// Tool results are informational — no stream event emitted
-	if len(events) != 0 {
-		t.Fatalf("expected 0 events for tool_result, got %d", len(events))
+	// Tool results now emit a tool_result stream event
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event for tool_result, got %d", len(events))
+	}
+	if events[0].Type != "tool_result" {
+		t.Errorf("expected event type 'tool_result', got %q", events[0].Type)
+	}
+	if events[0].Tool == nil {
+		t.Fatal("expected Tool to be non-nil")
+	}
+	if events[0].Tool.ID != "call_123" {
+		t.Errorf("expected tool ID 'call_123', got %q", events[0].Tool.ID)
+	}
+	if events[0].Tool.Output != "file content here" {
+		t.Errorf("expected output 'file content here', got %q", events[0].Tool.Output)
+	}
+	if events[0].Tool.Status != "success" {
+		t.Errorf("expected status 'success', got %q", events[0].Tool.Status)
 	}
 }
 
@@ -271,9 +286,9 @@ func TestGeminiStream_FullFlow(t *testing.T) {
 		events = append(events, ev)
 	}
 
-	// Expected: content("I'll read"), content(" that file for you."), tool_use, content("The file..."), metadata, done
-	if len(events) != 6 {
-		t.Fatalf("expected 6 events, got %d", len(events))
+	// Expected: content, content, tool_use, tool_result, content, metadata, done
+	if len(events) != 7 {
+		t.Fatalf("expected 7 events, got %d", len(events))
 	}
 
 	// Event 0: content
@@ -291,20 +306,27 @@ func TestGeminiStream_FullFlow(t *testing.T) {
 	if events[2].Tool.Name != "Read" {
 		t.Errorf("event 2: expected normalized tool 'Read', got %q", events[2].Tool.Name)
 	}
-	// Event 3: content
-	if events[3].Type != "content" || events[3].Content != "The file contains a simple main package." {
-		t.Errorf("event 3: unexpected, got type=%s content=%q", events[3].Type, events[3].Content)
+	// Event 3: tool_result
+	if events[3].Type != "tool_result" {
+		t.Errorf("event 3: expected tool_result, got %s", events[3].Type)
 	}
-	// Event 4: metadata
-	if events[4].Type != "metadata" {
-		t.Errorf("event 4: expected metadata, got %s", events[4].Type)
+	if events[3].Tool.ID != "call_001" {
+		t.Errorf("event 3: expected tool ID 'call_001', got %q", events[3].Tool.ID)
 	}
-	if events[4].Meta.SessionID != "ses_full_flow" {
-		t.Errorf("event 4: expected sessionID 'ses_full_flow', got %q", events[4].Meta.SessionID)
+	// Event 4: content
+	if events[4].Type != "content" || events[4].Content != "The file contains a simple main package." {
+		t.Errorf("event 4: unexpected, got type=%s content=%q", events[4].Type, events[4].Content)
 	}
-	// Event 5: done
-	if events[5].Type != "done" {
-		t.Errorf("event 5: expected done, got %s", events[5].Type)
+	// Event 5: metadata
+	if events[5].Type != "metadata" {
+		t.Errorf("event 5: expected metadata, got %s", events[5].Type)
+	}
+	if events[5].Meta.SessionID != "ses_full_flow" {
+		t.Errorf("event 5: expected sessionID 'ses_full_flow', got %q", events[5].Meta.SessionID)
+	}
+	// Event 6: done
+	if events[6].Type != "done" {
+		t.Errorf("event 6: expected done, got %s", events[6].Type)
 	}
 }
 

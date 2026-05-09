@@ -117,8 +117,14 @@ func (p *GeminiStreamParser) ParseLine(line string, ch chan<- StreamEvent) {
 		}}
 
 	case "tool_result":
-		// Tool results are informational — no event needed
-		// The tool_use event already has the tool call details
+		// Emit tool_result event so the frontend can display tool output
+		if msg.ToolID != "" {
+			ch <- StreamEvent{Type: "tool_result", Tool: &ToolCall{
+				ID:     msg.ToolID,
+				Output: truncateToolOutput(msg.ToolOutput),
+				Status: msg.Status, // "success" or "error"
+			}}
+		}
 
 	case "error":
 		// Emit as warning for severity="warning", error for "error"

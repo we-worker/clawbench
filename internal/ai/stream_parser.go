@@ -23,6 +23,8 @@ type ClaudeContentBlock struct {
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
+	Content   string          `json:"content,omitempty"` // tool_result blocks: output content (non-streaming format)
+	IsError   bool            `json:"is_error,omitempty"` // tool_result blocks: whether the tool execution failed
 }
 
 // ClaudeStreamMessageBody represents the message body within a Claude stream message
@@ -99,7 +101,10 @@ type StreamContentBlock struct {
 	Signature string          `json:"signature,omitempty"`
 	Name      string          `json:"name,omitempty"`
 	ID        string          `json:"id,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"` // tool_use input (some CLIs include it in content_block_start)
+	Input     json.RawMessage `json:"input,omitempty"`              // tool_use input (some CLIs include it in content_block_start)
+	ToolUseID string          `json:"tool_use_id,omitempty"`        // tool_result blocks: references the tool_use ID this result belongs to
+	Content   string          `json:"content,omitempty"`            // tool_result blocks: output content (non-streaming format)
+	IsError   bool            `json:"is_error,omitempty"`           // tool_result blocks: whether the tool execution failed
 }
 
 // StreamDelta represents a content_block_delta payload
@@ -120,6 +125,16 @@ const (
 	scannerMax     = 1024 * 1024 // 1MB max scanner buffer
 	streamChanSize = 64          // channel buffer size
 )
+
+// toolResultAccum tracks an in-progress tool_result content block.
+// When Claude/Codebuddy CLI emits tool_result blocks via stream_event,
+// text_delta events within those blocks must be accumulated here
+// (not emitted as content) and finalized on content_block_stop.
+type toolResultAccum struct {
+	ToolUseID string // the tool_use ID this result belongs to
+	Output    strings.Builder
+	IsError   bool
+}
 
 // StreamParser tracks state across stream lines to avoid duplicate content.
 // It implements the LineParser interface and is used by both Claude and Codebuddy backends.
@@ -146,6 +161,11 @@ type StreamParser struct {
 	// content_block_stop closes the correct tool, even when events arrive
 	// out of the expected sequential order.
 	activeTools map[int]*ToolCall
+	// activeToolResults tracks in-progress tool_result content blocks keyed
+	// by content block index. When tool_result content_block_start is received,
+	// subsequent text_delta events for that index are accumulated into the
+	// tool result output instead of being emitted as content events.
+	activeToolResults map[int]*toolResultAccum
 }
 
 // GetCapturedSessionID returns empty string for Claude/Codebuddy/Gemini backends
@@ -180,6 +200,22 @@ func (p *StreamParser) ParseLine(line string, ch chan<- StreamEvent) {
 						ID:    block.ID,
 						Input: inputStr,
 						Done:  true,
+					}}
+				} else if block.Type == "tool_result" {
+					// Tool result in assistant verbose format — emit tool_result event
+					toolUseID := block.ID
+					status := "success"
+					if block.IsError {
+						status = "error"
+					}
+					output := block.Content
+					if output == "" && block.Text != "" {
+						output = block.Text
+					}
+					ch <- StreamEvent{Type: "tool_result", Tool: &ToolCall{
+						ID:     toolUseID,
+						Output: truncateToolOutput(output),
+						Status: status,
 					}}
 				} else if block.Type == "thinking" && block.Thinking != "" && !p.receivedPartialThinking {
 					ch <- StreamEvent{Type: "thinking", Content: block.Thinking}
@@ -271,6 +307,18 @@ func (p *StreamParser) ParseLine(line string, ch chan<- StreamEvent) {
 			}
 			switch msg.Event.Delta.Type {
 			case "text_delta":
+				// Check if this text_delta belongs to an active tool_result block.
+				// If so, accumulate the text into the tool result output instead of
+				// emitting it as a content event — this prevents tool output from
+				// leaking into the assistant's text response.
+				if p.activeToolResults != nil {
+					if accum, ok := p.activeToolResults[msg.Event.Index]; ok {
+						if msg.Event.Delta.Text != "" {
+							accum.Output.WriteString(msg.Event.Delta.Text)
+						}
+						return
+					}
+				}
 				if msg.Event.Delta.Text != "" {
 					p.receivedPartial = true
 					ch <- StreamEvent{Type: "content", Content: msg.Event.Delta.Text}
@@ -292,48 +340,85 @@ func (p *StreamParser) ParseLine(line string, ch chan<- StreamEvent) {
 				}
 			}
 		case "content_block_start":
-			if msg.Event.ContentBlock != nil && msg.Event.ContentBlock.Type == "tool_use" {
-				p.receivedPartialToolUse = true
-				tool := &ToolCall{
-					Name: msg.Event.ContentBlock.Name,
-					ID:   msg.Event.ContentBlock.ID,
+			if msg.Event.ContentBlock != nil {
+				if msg.Event.ContentBlock.Type == "tool_use" {
+					p.receivedPartialToolUse = true
+					tool := &ToolCall{
+						Name: msg.Event.ContentBlock.Name,
+						ID:   msg.Event.ContentBlock.ID,
+					}
+					// Capture input from content_block_start if provided.
+					// Some CLIs (e.g., Claude CLI with certain models) include the
+					// full tool input in the content_block_start event instead of
+					// sending separate input_json_delta events.
+					// Skip empty input "{}" — it's a placeholder; the real input
+					// will arrive via input_json_delta events. Setting it would
+					// cause JSON corruption when deltas are appended.
+					if len(msg.Event.ContentBlock.Input) > 0 &&
+						string(msg.Event.ContentBlock.Input) != "{}" {
+						tool.Input = string(msg.Event.ContentBlock.Input)
+					}
+					// Track by content block index so that interleaved events from
+					// parallel sub-agents can be correctly routed to their tool.
+					if p.activeTools == nil {
+						p.activeTools = make(map[int]*ToolCall)
+					}
+					// If there's already a tool at this index that hasn't received
+					// content_block_stop (e.g., CLI reused the same index for a
+					// replacement tool without emitting stop), auto-close it first.
+					if existing, ok := p.activeTools[msg.Event.Index]; ok {
+						slog.Debug("stream: auto-closing tool at reused index", "index", msg.Event.Index, "tool_id", existing.ID, "tool_name", existing.Name)
+						closed := *existing // copy before mutating
+						closed.Done = true
+						ch <- StreamEvent{Type: "tool_use", Tool: &closed}
+					}
+					p.activeTools[msg.Event.Index] = tool
+					// Send a copy to the channel so that later mutations (Input accumulation,
+					// Done=true) don't affect events already queued for SSE consumption.
+					startCopy := *tool
+					ch <- StreamEvent{Type: "tool_use", Tool: &startCopy}
+				} else if msg.Event.ContentBlock.Type == "tool_result" {
+					// Track tool_result block to suppress text_delta leak.
+					// When a tool_result content_block_start is received, subsequent
+					// text_delta events for this index should be accumulated as tool
+					// output rather than emitted as content events.
+					if p.activeToolResults == nil {
+						p.activeToolResults = make(map[int]*toolResultAccum)
+					}
+					accum := &toolResultAccum{
+						IsError: msg.Event.ContentBlock.IsError,
+					}
+					// The tool_use_id field links this result back to the original tool_use call.
+					// Fall back to the ID field if tool_use_id is not present.
+					toolUseID := msg.Event.ContentBlock.ToolUseID
+					if toolUseID == "" {
+						toolUseID = msg.Event.ContentBlock.ID
+					}
+					accum.ToolUseID = toolUseID
+					// Some CLIs may include the full output in content_block_start
+					if msg.Event.ContentBlock.Content != "" {
+						accum.Output.WriteString(msg.Event.ContentBlock.Content)
+					}
+					p.activeToolResults[msg.Event.Index] = accum
 				}
-				// Capture input from content_block_start if provided.
-				// Some CLIs (e.g., Claude CLI with certain models) include the
-				// full tool input in the content_block_start event instead of
-				// sending separate input_json_delta events.
-				// Skip empty input "{}" — it's a placeholder; the real input
-				// will arrive via input_json_delta events. Setting it would
-				// cause JSON corruption when deltas are appended.
-				if len(msg.Event.ContentBlock.Input) > 0 &&
-					string(msg.Event.ContentBlock.Input) != "{}" {
-					tool.Input = string(msg.Event.ContentBlock.Input)
-				}
-				// Track by content block index so that interleaved events from
-				// parallel sub-agents can be correctly routed to their tool.
-				if p.activeTools == nil {
-					p.activeTools = make(map[int]*ToolCall)
-				}
-				// If there's already a tool at this index that hasn't received
-				// content_block_stop (e.g., CLI reused the same index for a
-				// replacement tool without emitting stop), auto-close it first.
-				if existing, ok := p.activeTools[msg.Event.Index]; ok {
-					slog.Debug("stream: auto-closing tool at reused index", "index", msg.Event.Index, "tool_id", existing.ID, "tool_name", existing.Name)
-					closed := *existing // copy before mutating
-					closed.Done = true
-					ch <- StreamEvent{Type: "tool_use", Tool: &closed}
-				}
-				p.activeTools[msg.Event.Index] = tool
-				// Send a copy to the channel so that later mutations (Input accumulation,
-				// Done=true) don't affect events already queued for SSE consumption.
-				startCopy := *tool
-				ch <- StreamEvent{Type: "tool_use", Tool: &startCopy}
 			}
 		case "content_block_stop":
-			// Use the index field to identify which content block is stopping,
-			// rather than assuming the last started block. When AI models invoke
-			// multiple tools via parallel sub-agents, content_block_stop events
-			// may arrive out of the sequential start order.
+			// Check if this is a tool_result block being finalized
+			if p.activeToolResults != nil {
+				if accum, ok := p.activeToolResults[msg.Event.Index]; ok {
+					status := "success"
+					if accum.IsError {
+						status = "error"
+					}
+					ch <- StreamEvent{Type: "tool_result", Tool: &ToolCall{
+						ID:     accum.ToolUseID,
+						Output: truncateToolOutput(accum.Output.String()),
+						Status: status,
+					}}
+					delete(p.activeToolResults, msg.Event.Index)
+				}
+			}
+			// Check if this is a tool_use block being finalized
 			if tool, ok := p.activeTools[msg.Event.Index]; ok {
 				closed := *tool // copy before mutating
 				closed.Done = true

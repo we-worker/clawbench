@@ -285,6 +285,8 @@ export function useChatStream(options: UseChatStreamOptions) {
         if (existing) {
           existing.input = data.input || existing.input
           existing.done = true
+          if (data.output !== undefined) existing.output = data.output
+          if (data.status !== undefined) existing.status = data.status
         }
         // Clear timeout if set
         const timer = toolUseTimeouts.get(data.id)
@@ -307,9 +309,11 @@ export function useChatStream(options: UseChatStreamOptions) {
           if (data.input && Object.keys(data.input).length > 0) {
             existing.input = data.input
           }
+          if (data.output !== undefined) existing.output = data.output
+          if (data.status !== undefined) existing.status = data.status
         } else {
           // New tool call — start timeout as safety net
-          const newBlock = { type: 'tool_use', name: data.name, id: data.id, input: data.input || {}, done: false }
+          const newBlock = { type: 'tool_use', name: data.name, id: data.id, input: data.input || {}, done: false, output: data.output || '', status: data.status || '' }
           blocks.push(newBlock)
           const timer = setTimeout(() => {
             if (!newBlock.done) {
@@ -321,6 +325,20 @@ export function useChatStream(options: UseChatStreamOptions) {
           }, TOOL_USE_TIMEOUT_MS)
           toolUseTimeouts.set(data.id, timer)
         }
+      }
+      onScrollBottom()
+    })
+
+    eventSource.addEventListener('tool_result', (e) => {
+      resetStreamTimeout()
+      const data = JSON.parse(e.data)
+      if (!guard()) return
+      const blocks = messages.value[lastIndex].blocks
+      // Find the matching tool_use block and update output/status
+      const existing = blocks.find(b => b.type === 'tool_use' && b.id === data.id)
+      if (existing) {
+        if (data.output !== undefined) existing.output = data.output
+        if (data.status !== undefined) existing.status = data.status
       }
       onScrollBottom()
     })

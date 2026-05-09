@@ -12,18 +12,31 @@
       </div>
       <!-- Tool use block -->
       <template v-else-if="block.type === 'tool_use'">
-        <div class="chat-tool-call" :class="{ done: block.done, incomplete: block.done && !hasToolResult(block) }" :data-category="getToolIcon(block.name).category" @click.stop="$emit('toggle-tool', key(bi))">
+        <div class="chat-tool-call" :class="{ done: block.done, incomplete: block.done && !hasToolResult(block), 'tool-error': block.status === 'error' }" :data-category="getToolIcon(block.name).category" @click.stop="$emit('toggle-tool', key(bi))">
           <component :is="getToolIcon(block.name).icon" :size="12" class="tool-icon" />
           <span class="tool-name">{{ block.name }}</span>
           <span v-if="toolCallSummary(block)" class="tool-summary">{{ toolCallSummary(block) }}</span>
           <!-- Loading: spinner -->
           <span v-if="!block.done" class="tool-spinner"></span>
+          <!-- Done with error: red X -->
+          <XCircle v-else-if="block.status === 'error'" :size="14" color="#ef4444" class="tool-error-icon" />
           <!-- Done with result: green check -->
           <CheckCircle2 v-else-if="hasToolResult(block)" :size="14" color="#22c55e" class="tool-check" />
           <!-- Done without result: yellow warning -->
           <AlertCircle v-else :size="14" color="#f59e0b" class="tool-warn" />
         </div>
-        <div v-if="expandedTools[key(bi)] || shouldAutoExpand(block)" class="tool-detail" :data-tool-name="block.name" @click="handleToolDetailClick" v-html="formatToolInput(block.input, block.name)"></div>
+        <div v-if="expandedTools[key(bi)] || shouldAutoExpand(block)" class="tool-detail" :data-tool-name="block.name" @click="handleToolDetailClick">
+          <div v-html="formatToolInput(block.input, block.name)"></div>
+          <!-- Tool output section -->
+          <div v-if="block.output" class="tool-output-section">
+            <div class="tool-output-header">
+              <span class="tool-output-label">output</span>
+              <span v-if="block.status === 'error'" class="tool-output-status tool-output-error">error</span>
+              <span v-else class="tool-output-status tool-output-success">ok</span>
+            </div>
+            <div class="tool-output-body" v-html="formatToolOutput(block.output, block.name)"></div>
+          </div>
+        </div>
       </template>
       <!-- Error block -->
       <div v-else-if="block.type === 'error'" class="chat-error-card">
@@ -99,9 +112,9 @@
 <script setup>
 import { ref, watch, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { handleToolAction, shouldAutoExpandTool } from '@/utils/renderToolDetail.ts'
+import { handleToolAction, shouldAutoExpandTool, formatToolOutput } from '@/utils/renderToolDetail.ts'
 import { getToolIcon } from '@/utils/icons'
-import { CircleHelp, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, Pencil, History, Trash2 } from 'lucide-vue-next'
+import { CircleHelp, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, XCircle, Pencil, History, Trash2 } from 'lucide-vue-next'
 
 const { t } = useI18n()
 
@@ -141,8 +154,15 @@ function getWarningText(block) {
 function hasToolResult(block) {
   if (!block.done) return false
   if (!block.name) return false
-  if (block.input === null || block.input === undefined) return false
-  return true
+  // New: explicit output from tool_result event
+  if (block.output !== undefined && block.output !== '') return true
+  // Legacy: blocks without output field (old DB records) — treat as having result
+  if (block.output === undefined) {
+    if (block.input === null || block.input === undefined) return false
+    return true
+  }
+  // Explicit empty output means the tool ran but produced nothing
+  return false
 }
 
 function shouldAutoExpand(block) {
@@ -543,6 +563,15 @@ onUnmounted(() => {
   --tool-accent: #f59e0b;
 }
 
+.chat-tool-call.tool-error {
+  --tool-accent: #ef4444;
+}
+
+.chat-tool-call .tool-error-icon {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .tool-detail {
   margin: 2px 0 4px 0;
   padding: 6px 8px;
@@ -736,6 +765,84 @@ onUnmounted(() => {
 :root[data-theme="dark"] .content-blocks .chat-tool-call[data-category="task"]   { --tool-accent: #fbbf24; }
 :root[data-theme="dark"] .content-blocks .chat-tool-call[data-category="agent"]  { --tool-accent: #f472b6; }
 :root[data-theme="dark"] .content-blocks .chat-tool-call[data-category="skill"]  { --tool-accent: #22d3ee; }
+:root[data-theme="dark"] .content-blocks .chat-tool-call.tool-error              { --tool-accent: #f87171; }
+
+/* Tool output section */
+.content-blocks .tool-detail .tool-output-section {
+  margin-top: 6px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 6px;
+}
+
+.content-blocks .tool-detail .tool-output-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.content-blocks .tool-detail .tool-output-label {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+  font-weight: 600;
+}
+
+:root[data-theme="dark"] .content-blocks .tool-detail .tool-output-label {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+}
+
+.content-blocks .tool-detail .tool-output-status {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.content-blocks .tool-detail .tool-output-success {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+}
+
+:root[data-theme="dark"] .content-blocks .tool-detail .tool-output-success {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+}
+
+.content-blocks .tool-detail .tool-output-error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+:root[data-theme="dark"] .content-blocks .tool-detail .tool-output-error {
+  background: rgba(248, 113, 113, 0.15);
+  color: #fca5a5;
+}
+
+.content-blocks .tool-detail .tool-output-body {
+  max-height: 200px;
+  overflow-y: auto;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.content-blocks .tool-detail .tool-output-body pre {
+  margin: 0;
+  font-family: 'SF Mono', 'Fira Code', Menlo, Monaco, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.content-blocks .tool-detail .tool-output-default pre {
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
 
 .content-blocks .tool-detail .tool-file-header {
   position: relative;

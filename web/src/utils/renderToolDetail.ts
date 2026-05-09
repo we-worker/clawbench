@@ -510,6 +510,22 @@ export function formatToolInput(input: any, toolName?: string): string {
   return renderJsonFallback(input)
 }
 
+// ── Tool result output formatting ──
+
+/**
+ * Format tool execution output for display in the expanded tool detail area.
+ * Renders output text with appropriate styling based on tool type.
+ */
+export function formatToolOutput(output: string, toolName?: string): string {
+  if (!output) return ''
+  // For Bash tool: render as terminal output
+  if (toolName?.toLowerCase() === 'bash') {
+    return `<div class="bash-output-body"><pre>${escapeHtml(output)}</pre></div>`
+  }
+  // Default: render as preformatted text
+  return `<div class="tool-output-default"><pre>${escapeHtml(output)}</pre></div>`
+}
+
 // ── Tool registrations ──
 
 registerToolRenderer('Edit', renderEditDiff)

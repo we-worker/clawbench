@@ -178,8 +178,12 @@ func TestCodexStream_CommandExecutionFailed(t *testing.T) {
 	if !strings.Contains(events[0].Tool.Input, "exit 1") {
 		t.Errorf("expected command in input, got %q", events[0].Tool.Input)
 	}
-	if !strings.Contains(events[0].Tool.Input, `"command"`) || !strings.Contains(events[0].Tool.Input, "error: something went wrong") {
-		t.Errorf("expected canonical JSON input with output, got %q", events[0].Tool.Input)
+	// Output is now in Tool.Output, not in Tool.Input
+	if !strings.Contains(events[0].Tool.Output, "error: something went wrong") {
+		t.Errorf("expected output in Tool.Output, got %q", events[0].Tool.Output)
+	}
+	if events[0].Tool.Status != "error" {
+		t.Errorf("expected status 'error' for non-zero exit code, got %q", events[0].Tool.Status)
 	}
 }
 
@@ -841,7 +845,7 @@ func TestCodexResumeOutput_ResumeWithCommandExecution(t *testing.T) {
 		t.Error("expected tool_use to have an ID for deduplication")
 	}
 
-	// Verify input is valid JSON with command and output fields
+	// Verify input is valid JSON with command field
 	var toolInput map[string]any
 	if err := json.Unmarshal([]byte(completedTools[0].Tool.Input), &toolInput); err != nil {
 		t.Fatalf("expected tool input to be valid JSON, got %q: %v", completedTools[0].Tool.Input, err)
@@ -849,8 +853,9 @@ func TestCodexResumeOutput_ResumeWithCommandExecution(t *testing.T) {
 	if cmd, _ := toolInput["command"].(string); !strings.Contains(cmd, "bash") {
 		t.Errorf("expected JSON command field to contain 'bash', got %q", cmd)
 	}
-	if output, _ := toolInput["output"].(string); !strings.Contains(output, "file1.txt") {
-		t.Errorf("expected JSON output field to contain 'file1.txt', got %q", output)
+	// Output is now in Tool.Output, not in Tool.Input
+	if !strings.Contains(completedTools[0].Tool.Output, "file1.txt") {
+		t.Errorf("expected Tool.Output to contain 'file1.txt', got %q", completedTools[0].Tool.Output)
 	}
 }
 
@@ -977,8 +982,9 @@ func TestCodexResumeOutput_ExecBlockFlushedAtEOF(t *testing.T) {
 	if cmd, _ := toolInput["command"].(string); !strings.Contains(cmd, "echo hi") {
 		t.Errorf("expected JSON command to contain 'echo hi', got %q", cmd)
 	}
-	if output, _ := toolInput["output"].(string); !strings.Contains(output, "hi") {
-		t.Errorf("expected JSON output to contain 'hi', got %q", output)
+	// Output is now in Tool.Output, not in Tool.Input
+	if !strings.Contains(completedTools[0].Tool.Output, "hi") {
+		t.Errorf("expected Tool.Output to contain 'hi', got %q", completedTools[0].Tool.Output)
 	}
 }
 

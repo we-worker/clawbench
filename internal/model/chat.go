@@ -42,11 +42,13 @@ type QueuedMessage struct {
 // ContentBlock represents a typed block within an assistant message's content.
 // Stored as JSON in the chat_history.content column.
 type ContentBlock struct {
-	Type   string         `json:"type"`            // "thinking", "tool_use", "text", "warning", "error"
-	Text   string         `json:"text,omitempty"`  // thinking, text, or warning/error content
+	Type   string         `json:"type"`             // "thinking", "tool_use", "text", "warning", "error"
+	Text   string         `json:"text,omitempty"`   // thinking, text, or warning/error content
 	Reason string         `json:"reason,omitempty"` // structured reason code for i18n (e.g. "disconnect", "timeout", "parse_error")
-	Name   string         `json:"name,omitempty"`  // tool name (tool_use)
-	ID     string         `json:"id,omitempty"`    // tool call ID (tool_use)
-	Input  map[string]any `json:"input"` // tool input (tool_use) — no omitempty: must serialize {} so frontend distinguishes "no data" from "empty input"
-	Done   bool           `json:"done"`            // tool_use input complete (tool_use) — no omitempty: done=false must round-trip through DB
+	Name   string         `json:"name,omitempty"`   // tool name (tool_use)
+	ID     string         `json:"id,omitempty"`     // tool call ID (tool_use)
+	Input  map[string]any `json:"input"`            // tool input (tool_use) — no omitempty: must serialize {} so frontend distinguishes "no data" from "empty input"
+	Output string         `json:"output,omitempty"` // tool execution output text (tool_use)
+	Status string         `json:"status,omitempty"` // tool execution status: "success", "error" (tool_use)
+	Done   bool           `json:"done"`             // tool_use input complete (tool_use) — no omitempty: done=false must round-trip through DB
 }

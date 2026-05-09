@@ -118,11 +118,21 @@ func (p *OpenCodeStreamParser) ParseLine(line string, ch chan<- StreamEvent) {
 			inputStr = normalizeOpenCodeInput(part.Tool, part.State.Input)
 		}
 		done := part.State != nil && part.State.Status == "completed"
+		output := ""
+		status := ""
+		if part.State != nil {
+			output = truncateToolOutput(part.State.Output)
+			if done && part.State.Output != "" {
+				status = "success"
+			}
+		}
 		ch <- StreamEvent{Type: "tool_use", Tool: &ToolCall{
-			Name:  normalizeOpenCodeToolName(part.Tool),
-			ID:    part.CallID,
-			Input: inputStr,
-			Done:  done,
+			Name:   normalizeOpenCodeToolName(part.Tool),
+			ID:     part.CallID,
+			Input:  inputStr,
+			Done:   done,
+			Output: output,
+			Status: status,
 		}}
 
 	case "step_finish":
