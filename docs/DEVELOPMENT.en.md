@@ -221,15 +221,6 @@ chat:
   initial_messages: 20
   page_size: 20
   collapsed_height: 150
-  quick_send:                   # Quick send presets (when input is empty, click send button to show menu)
-    "▶️ Continue": "继续"         # Key: menu display label (can include emoji), Value: actual text sent
-    "👌 OK": "OK"
-    "🔨 Build": "帮我编译当前项目，优先使用项目中已有的脚本。"
-    "🔄 Restart Debug": "帮我重启当前项目的调试版本服务，优先使用项目中已经有的脚本。"
-    "🚀 Restart Server": "帮我重启当前项目的发布版本服务，优先使用项目中已经有的脚本。"
-    "📦 Commit": "提交"
-    "👀 View Changes": "工作区改了什么"
-    "🗑️ Discard Changes": "放弃工作区修改"
 ```
 
 ### AI Backend Configuration
@@ -351,6 +342,7 @@ clawbench/
 │   │   ├── handler.go           # Route registration
 │   │   ├── auth.go              # Authentication
 │   │   ├── chat.go              # AI chat (SSE streaming)
+│   │   ├── chat_quick_send.go   # Quick send CRUD
 │   │   ├── agent.go             # Agent management
 │   │   ├── scheduler.go         # Scheduled tasks
 │   │   ├── rag_api.go           # RAG search API
@@ -360,6 +352,7 @@ clawbench/
 │   │   ├── git.go               # Git operations
 │   │   ├── project.go           # Project management
 │   │   ├── ssh_info.go          # SSH tunnel info API
+│   │   ├── terminal.go          # Terminal + quick commands CRUD
 │   │   └── static.go            # Static files
 │   ├── middleware/              # Middleware (auth/log/recovery/request ID)
 │   ├── platform/                # Platform adaptation (Windows paths, etc.)
@@ -412,8 +405,8 @@ clawbench/
 │   │   └── handyman.yaml        # Handyman
 ├── web/                         # Vue 3 frontend source
 │   └── src/
-│       ├── components/          # 41 Vue components
-│       ├── composables/         # 13 composable functions
+│       ├── components/          # Vue components
+│       ├── composables/         # Composable functions (useQuickSend, useQuickCommands, useChatStream, etc.)
 │       ├── stores/              # State management
 │       └── utils/               # Utility functions
 ├── config/config.example.yaml   # Config template

@@ -66,6 +66,12 @@
 |-------------|
 | ![端口转发](docs/screenshots/port-forwarding.png) |
 
+### Web 终端
+
+| 交互式终端 | 虚拟按键栏 | 快捷指令 | 按键编辑 |
+|-----------|-----------|---------|---------|
+| ![交互式终端](docs/screenshots/terminal.png) | ![虚拟按键栏](docs/screenshots/terminal-gestures-off.png) | ![快捷指令](docs/screenshots/terminal-quick-commands.png) | ![按键编辑](docs/screenshots/terminal-quick-commands-edit.png) |
+
 ---
 
 ## 技术架构
@@ -186,7 +192,7 @@ cp config/agents/claude.yaml.example config/agents/my-claude.yaml
 - **流式响应**：SSE 实时推送，思维过程、工具调用全程可见
 - **多 Agent 支持**：全能助手、编码专家、勤杂工等，YAML 配置即插即用
 - **AI 后端切换**：CodeBuddy、Claude Code、OpenCode、Gemini CLI、Codex、Qoder CLI、VeCLI，会话级隔离
-- **定时任务**：AI 通过 CLI 子命令创建 Cron 调度，定时自动执行；聊天消息中可内嵌任务卡片
+- **定时任务**：AI 通过 CLI 子命令创建 Cron 调度，定时自动执行；聊天消息中可内嵌任务卡片；频率预设（每小时/每天/每周/每月）+ 自定义 Cron 表达式
 - **多会话管理**：创建、切换、删除独立会话，滑动切换
 - **图片上传**：支持上传图片与 AI 对话（多模态）
 - **断连保护**：消息立即落库，网络断开不丢失，60 秒超时自动重连（3 次后降级轮询）
@@ -194,10 +200,10 @@ cp config/agents/claude.yaml.example config/agents/my-claude.yaml
 - **消息队列**：AI 忙碌时消息排队，依次发送
 
 ### 🤖 AI 对话
-- **工具调用可视化**：名称、参数、结果实时展示
+- **工具调用可视化**：名称、参数、执行结果实时展示，成功/失败状态一目了然
 - **深度思考**：复杂任务自动触发 extended thinking，推理过程实时可见
 - **文件路径跳转**：AI 回复中的文件路径可点击跳转
-- **快捷发送**：预设常用指令（继续、编译、提交等），一键发送
+- **快捷发送**：预设常用指令（继续、编译、提交等），支持拖拽排序，一键发送
 - **引用提问**：选中代码或文本，直接向 AI 提问，自动附带上下文
 - **未读徽章**：聊天面板图标显示未读消息数
 
@@ -222,6 +228,12 @@ cp config/agents/claude.yaml.example config/agents/my-claude.yaml
 ### 🔀 SSH 隧道端口转发
 - **远程开发**：在 Android App 上直接访问服务器本地端口
 - **全协议透明**：HTTP、HTTPS、WebSocket、SSE、gRPC，无需 URL 重写
+
+### 💻 Web 终端
+- **交互式终端**：基于 PTY + WebSocket + xterm.js，浏览器内直接操作服务器终端
+- **虚拟按键栏**：按类型分组的颜色编码按键（修饰键、快捷键、导航键、方向键、符号键、操作键），修饰键支持三态切换
+- **触摸手势**：Termius 风格手势（滑动→方向键、长按重复、双击→Tab、捏合缩放），手势关闭时支持触摸滚动
+- **快捷命令**：CRUD 管理常用命令，支持拖拽排序、隐藏、自动执行（每次连接自动运行）
 
 ### 🌐 国际化
 - 中文 / 英文双语界面，自动检测系统语言

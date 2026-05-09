@@ -65,6 +65,12 @@ Core Advantage: Native passthrough of AI capabilities (tool calls, extended thin
 |----------------|
 | ![Port Forwarding](docs/screenshots/port-forwarding.png) |
 
+### Web Terminal
+
+| Interactive Terminal | Virtual Key Toolbar | Quick Commands | Command Editor |
+|---------------------|---------------------|----------------|----------------|
+| ![Interactive Terminal](docs/screenshots/terminal.png) | ![Virtual Key Toolbar](docs/screenshots/terminal-gestures-off.png) | ![Quick Commands](docs/screenshots/terminal-quick-commands.png) | ![Command Editor](docs/screenshots/terminal-quick-commands-edit.png) |
+
 ---
 
 ## Technical Architecture
@@ -185,7 +191,7 @@ Once deployed, access `http://server-ip:20000` from your phone app or mobile bro
 - **Streaming Response**: Real-time SSE push, thinking process and tool calls fully visible
 - **Multi-Agent Support**: General assistant, coding expert, handyman, etc. — YAML config, plug-and-play
 - **AI Backend Switching**: CodeBuddy, Claude Code, OpenCode, Gemini CLI, Codex, Qoder CLI, VeCLI — session-level isolation
-- **Scheduled Tasks**: AI creates Cron schedules via CLI subcommands, executes automatically; task cards embedded in chat messages
+- **Scheduled Tasks**: AI creates Cron schedules via CLI subcommands, executes automatically; task cards embedded in chat messages; frequency presets (hourly/daily/weekly/monthly) + custom cron expressions
 - **Multi-Session Management**: Create, switch, delete independent sessions, swipe to switch
 - **Image Upload**: Upload images for AI conversation (multimodal)
 - **Disconnect Protection**: Messages persist immediately, no data loss on disconnect, 60s timeout auto-reconnect (3 attempts then fallback to polling)
@@ -193,10 +199,10 @@ Once deployed, access `http://server-ip:20000` from your phone app or mobile bro
 - **Message Queue**: Messages queue when AI is busy, sent sequentially
 
 ### 🤖 AI Conversation
-- **Tool Call Visualization**: Name, parameters, results displayed in real time
+- **Tool Call Visualization**: Name, parameters, execution results displayed in real time with success/error status
 - **Extended Thinking**: Complex tasks auto-trigger extended thinking, reasoning visible in real time
 - **File Path Navigation**: Clickable file paths in AI responses
-- **Quick Send**: Preset common commands (continue, build, commit, etc.), one-click send
+- **Quick Send**: Preset common commands (continue, build, commit, etc.) with drag reorder, one-click send
 - **Quote & Ask**: Select code or text, ask AI directly, auto-attaches context
 - **Unread Badge**: Chat panel icon shows unread message count
 
@@ -221,6 +227,12 @@ Once deployed, access `http://server-ip:20000` from your phone app or mobile bro
 ### 🔀 SSH Tunnel Port Forwarding
 - **Remote Development**: Access server local ports directly from Android App
 - **Protocol Transparent**: HTTP, HTTPS, WebSocket, SSE, gRPC — no URL rewriting needed
+
+### 💻 Web Terminal
+- **Interactive Terminal**: PTY + WebSocket + xterm.js, operate server terminal directly in browser
+- **Virtual Key Toolbar**: Color-coded key groups (modifiers, shortcuts, navigation, arrows, symbols, actions), three-state modifier toggle
+- **Touch Gestures**: Termius-style gestures (swipe→arrow keys, hold-to-repeat, double-tap→Tab, pinch-to-zoom), touch scroll when gestures disabled
+- **Quick Commands**: CRUD management of common commands with drag reorder, hidden flag, auto-execute (auto-run on every connect/reconnect)
 
 ### 🌐 Internationalization
 - Chinese / English bilingual UI, auto-detect system language

@@ -192,6 +192,7 @@ export default {
       justNow: 'just now',
       fromNow: 'from now',
       ago: 'ago',
+      close: 'Close',
       warningReasons: {
         user_cancel: 'User cancelled',
         disconnect: 'Connection lost, AI response interrupted',

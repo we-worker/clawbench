@@ -12,7 +12,7 @@
       </div>
       <!-- Tool use block -->
       <template v-else-if="block.type === 'tool_use'">
-        <div class="chat-tool-call" :class="{ done: block.done, 'tool-error': block.status === 'error' }" :data-category="getToolIcon(block.name).category" @click.stop="$emit('toggle-tool', key(bi))">
+        <div class="chat-tool-call" :class="{ done: block.done, 'tool-error': block.status === 'error' }" :data-category="getToolIcon(block.name).category" @click.stop="handleToolClick(block, key(bi))">
           <component :is="getToolIcon(block.name).icon" :size="12" class="tool-icon" />
           <span class="tool-name">{{ block.name }}</span>
           <span v-if="toolCallSummary(block)" class="tool-summary">{{ toolCallSummary(block) }}</span>
@@ -23,17 +23,9 @@
           <!-- Done (success or unknown): green check -->
           <CheckCircle2 v-else :size="14" color="#22c55e" class="tool-check" />
         </div>
-        <div v-if="expandedTools[key(bi)] || shouldAutoExpand(block)" class="tool-detail" :data-tool-name="block.name" @click="handleToolDetailClick">
+        <!-- Inline detail only for AskUserQuestion (interactive, must stay in message flow) -->
+        <div v-if="shouldAutoExpand(block) && expandedTools[key(bi)]" class="tool-detail" :data-tool-name="block.name" @click="handleToolDetailClick">
           <div v-html="formatToolInput(block.input, block.name)"></div>
-          <!-- Tool output section -->
-          <div v-if="block.output" class="tool-output-section">
-            <div class="tool-output-header">
-              <span class="tool-output-label">output</span>
-              <span v-if="block.status === 'error'" class="tool-output-status tool-output-error">error</span>
-              <span v-else class="tool-output-status tool-output-success">ok</span>
-            </div>
-            <div class="tool-output-body" v-html="formatToolOutput(block.output, block.name)"></div>
-          </div>
         </div>
       </template>
       <!-- Error block -->
@@ -110,7 +102,7 @@
 <script setup>
 import { ref, watch, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { handleToolAction, shouldAutoExpandTool, formatToolOutput } from '@/utils/renderToolDetail.ts'
+import { handleToolAction, shouldAutoExpandTool } from '@/utils/renderToolDetail.ts'
 import { getToolIcon } from '@/utils/icons'
 import { CircleHelp, ChevronDown, CheckCircle2, AlertCircle, AlertTriangle, XCircle, Pencil, History, Trash2 } from 'lucide-vue-next'
 
@@ -153,6 +145,23 @@ function shouldAutoExpand(block) {
   return shouldAutoExpandTool(block.name || '')
 }
 
+/** Handle tool call bar click: open overlay for regular tools, toggle inline for AskUserQuestion. */
+function handleToolClick(block, blockKey) {
+  // AskUserQuestion stays inline — toggle expand state
+  if (shouldAutoExpand(block)) {
+    emit('toggle-tool', blockKey)
+    return
+  }
+  // All other tools: open the overlay with block data
+  emit('show-tool-detail', {
+    name: block.name,
+    input: block.input,
+    output: block.output,
+    status: block.status,
+    done: block.done,
+  })
+}
+
 const props = defineProps({
   blocks: { type: Array, default: () => [] },
   msgId: { type: [String, Number], default: '' },
@@ -173,7 +182,7 @@ const props = defineProps({
   getAgentName: { type: Function, default: () => '' },
 })
 
-const emit = defineEmits(['toggle-tool', 'edit-task', 'view-history', 'task-action', 'send-message', 'render-flush'])
+const emit = defineEmits(['toggle-tool', 'show-tool-detail', 'edit-task', 'view-history', 'task-action', 'send-message', 'render-flush'])
 
 // Key helper: use msgId if available, otherwise msgIndex
 function key(bi) {
@@ -552,6 +561,7 @@ onUnmounted(() => {
   margin-left: auto;
 }
 
+/* Inline tool detail — only used by AskUserQuestion (other tools use ToolDetailOverlay) */
 .tool-detail {
   margin: 2px 0 4px 0;
   padding: 6px 8px;

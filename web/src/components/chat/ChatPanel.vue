@@ -25,6 +25,7 @@
       @touchstart="swipeSession.onTouchStart"
       @touchend="swipeSession.onTouchEnd"
       @toggle-tool="render.toggleToolDetail"
+      @show-tool-detail="handleShowToolDetail"
       @show-metadata="showMetadata"
       @file-tag-click="handleFileTagClick"
       @load-more="handleLoadMore"
@@ -115,6 +116,20 @@
     @close="metadataModal.show = false"
   />
 
+  <!-- Tool Detail Overlay -->
+  <ToolDetailOverlay
+    :show="toolDetailOverlay.show"
+    :toolName="toolDetailOverlay.name"
+    :toolSummary="toolDetailOverlay.summary"
+    :toolInputHtml="toolDetailOverlay.inputHtml"
+    :toolOutputHtml="toolDetailOverlay.outputHtml"
+    :toolStatus="toolDetailOverlay.status"
+    :toolDone="toolDetailOverlay.done"
+    @close="toolDetailOverlay.show = false"
+    @file-open="handleFileOpenInOverlay"
+    @send-message="handleToolSendMessage"
+  />
+
   <!-- Session Drawer -->
   <SessionDrawer
     ref="sessionDrawerRef"
@@ -161,9 +176,11 @@ import TaskDrawer from '@/components/task/TaskDrawer.vue'
 import TaskFormDialog from '@/components/task/TaskFormDialog.vue'
 import TaskExecDialog from '@/components/task/TaskExecDialog.vue'
 import ChatMetadataModal from './ChatMetadataModal.vue'
+import ToolDetailOverlay from './ToolDetailOverlay.vue'
 import ChatInputBar from './ChatInputBar.vue'
 import ChatMessageList from './ChatMessageList.vue'
 import { useChatRender } from '@/composables/useChatRender.ts'
+import { formatToolOutput } from '@/utils/renderToolDetail.ts'
 import { useChatStream } from '@/composables/useChatStream.ts'
 import { useChatSession } from '@/composables/useChatSession.ts'
 import { useSessionIdentity } from '@/composables/useSessionIdentity.ts'
@@ -219,6 +236,15 @@ const metadataModal = ref({
   messageId: null,
   sessionId: '',
   indexed: false
+})
+const toolDetailOverlay = ref({
+  show: false,
+  name: '',
+  summary: '',
+  inputHtml: '',
+  outputHtml: '',
+  status: '',
+  done: true,
 })
 const toast = useToast()
 const dialog = useDialog()
@@ -604,6 +630,24 @@ function showMetadata(msg) {
     metadataModal.value.sessionId = msg.sessionId || ''
     metadataModal.value.indexed = !!msg.indexed
     metadataModal.value.show = true
+}
+
+function handleShowToolDetail(block) {
+  const { formatToolInput } = render
+  toolDetailOverlay.value = {
+    show: true,
+    name: block.name || '',
+    summary: render.toolCallSummary(block),
+    inputHtml: formatToolInput(block.input, block.name),
+    outputHtml: block.output ? formatToolOutput(block.output, block.name) : '',
+    status: block.status || '',
+    done: !!block.done,
+  }
+}
+
+function handleFileOpenInOverlay(filePath) {
+  toolDetailOverlay.value.show = false
+  openFilePath(filePath)
 }
 
 // Start global polling when component mounts

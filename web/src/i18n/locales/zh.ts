@@ -192,6 +192,7 @@ export default {
       justNow: '刚刚',
       fromNow: '后',
       ago: '前',
+      close: '关闭',
       warningReasons: {
         user_cancel: '用户已中断',
         disconnect: '连接已断开，AI 响应中断',

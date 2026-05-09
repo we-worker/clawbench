@@ -221,15 +221,6 @@ chat:
   initial_messages: 20
   page_size: 20
   collapsed_height: 150
-  quick_send:                   # 快捷发送预设（输入框为空时，点击发送按钮弹出菜单选择）
-    "▶️ 继续": "继续"             # Key: 菜单显示标签（可带 emoji），Value: 实际发送的文本
-    "👌 OK": "OK"
-    "🔨 编译": "帮我编译当前项目，优先使用项目中已有的脚本。"
-    "🔄 重启调试": "帮我重启当前项目的调试版本服务，优先使用项目中已经有的脚本。"
-    "🚀 重启服务": "帮我重启当前项目的发布版本服务，优先使用项目中已经有的脚本。"
-    "📦 提交": "提交"
-    "👀 浏览变更": "工作区改了什么"
-    "🗑️ 丢弃变更": "放弃工作区修改"
 ```
 
 ### AI 后端配置
@@ -351,6 +342,7 @@ clawbench/
 │   │   ├── handler.go           # 路由注册
 │   │   ├── auth.go              # 认证
 │   │   ├── chat.go              # AI 聊天（SSE 流式推送）
+│   │   ├── chat_quick_send.go   # 快捷发送 CRUD
 │   │   ├── agent.go             # Agent 管理
 │   │   ├── scheduler.go         # 定时任务
 │   │   ├── rag_api.go           # RAG 搜索 API
@@ -360,6 +352,7 @@ clawbench/
 │   │   ├── git.go               # Git 操作
 │   │   ├── project.go           # 项目管理
 │   │   ├── ssh_info.go          # SSH 隧道信息接口
+│   │   ├── terminal.go          # 终端 + 快捷命令 CRUD
 │   │   └── static.go            # 静态文件
 │   ├── middleware/              # 中间件（认证/日志/恢复/请求ID）
 │   ├── platform/                # 平台适配（Windows 路径等）
@@ -413,8 +406,8 @@ clawbench/
 │   └── config.example.yaml      # 配置模板
 ├── web/                         # Vue 3 前端源码
 │   └── src/
-│       ├── components/          # 41 个 Vue 组件
-│       ├── composables/         # 13 个组合式函数
+│       ├── components/          # Vue 组件
+│       ├── composables/         # 组合式函数（useQuickSend、useQuickCommands、useChatStream 等）
 │       ├── stores/              # 状态管理
 │       └── utils/               # 工具函数
 ├── build.sh                     # 编译脚本 (Linux/macOS)

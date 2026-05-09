@@ -47,6 +47,7 @@
       :agents="agents"
       :shouldCollapse="isCollapsed(i, msg)"
       @toggle-tool="$emit('toggle-tool', $event)"
+      @show-tool-detail="$emit('show-tool-detail', $event)"
       @show-metadata="$emit('show-metadata', $event)"
       @file-tag-click="$emit('file-tag-click', $event)"
       @edit-task="$emit('edit-task', $event)"
@@ -98,7 +99,7 @@ const props = defineProps({
   pendingMessages: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['toggle-tool', 'show-metadata', 'file-tag-click', 'file-open', 'load-more', 'edit-task', 'view-history', 'task-action', 'send-message', 'remove-pending', 'render-flush'])
+const emit = defineEmits(['toggle-tool', 'show-tool-detail', 'show-metadata', 'file-tag-click', 'file-open', 'load-more', 'edit-task', 'view-history', 'task-action', 'send-message', 'remove-pending', 'render-flush'])
 
 const messagesRef = ref(null)
 const { handleDblClick } = useDoubleClickCopy()
