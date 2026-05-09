@@ -17,7 +17,7 @@
       </div>
 
       <!-- Terminal viewport -->
-      <div ref="terminalContainer" class="terminal-container" @click.self="focusTerminal">
+      <div ref="terminalContainer" class="terminal-container" :class="{ 'gesture-mode': gestures.enabled.value }" @click.self="focusTerminal">
         <!-- Rebuild overlay -->
         <div v-if="rebuilding" class="terminal-rebuild-overlay">
           <span class="terminal-rebuild-spinner"></span>
@@ -321,7 +321,7 @@ function initTerminal() {
     cursorBlink: true,
     convertEol: true,
     scrollback: 5000,
-    selectionStyle: 'line',
+    selectionStyle: 'plain',
     rightClickSelectsWord: true,
   })
 
@@ -665,6 +665,14 @@ function openEditDialog() {
   overflow: hidden;
   position: relative;
   background: #1e1e2e;
+}
+
+/* Gesture mode: disable pointer events on xterm's internal elements so that
+   touch/mouse events target the container div instead. This prevents xterm's
+   built-in selection and gesture service from handling touches. Our capture-
+   phase touch listeners on the container still work normally. */
+.terminal-container.gesture-mode :deep(.xterm-screen) {
+  pointer-events: none;
 }
 
 /* Hide xterm.js scrollbar — mobile terminal uses gestures/swipe for navigation,
