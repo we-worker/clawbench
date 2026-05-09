@@ -74,6 +74,7 @@
         :formatToolInput="chatRender.formatToolInput"
         :toolCallSummary="chatRender.toolCallSummary"
         @toggle-tool="toggleTool"
+        @show-tool-detail="handleShowToolDetail"
       />
       <!-- Execution metadata bar -->
       <div v-if="selectedExec.metadata" class="exec-detail-meta">
@@ -95,6 +96,18 @@
       <button class="btn btn-secondary" @click="handleClose">{{ t('common.close') }}</button>
     </template>
   </ModalDialog>
+
+  <!-- Tool Detail Overlay (for viewing tool input/output in execution history) -->
+  <ToolDetailOverlay
+    :show="toolDetailOverlay.show"
+    :toolName="toolDetailOverlay.name"
+    :toolSummary="toolDetailOverlay.summary"
+    :toolInputHtml="toolDetailOverlay.inputHtml"
+    :toolOutputHtml="toolDetailOverlay.outputHtml"
+    :toolStatus="toolDetailOverlay.status"
+    :toolDone="toolDetailOverlay.done"
+    @close="toolDetailOverlay.show = false"
+  />
 </template>
 
 <script setup>
@@ -103,7 +116,9 @@ import { useI18n } from 'vue-i18n'
 import { Clock, ChevronLeft, ChevronRight, Square } from 'lucide-vue-next'
 import ModalDialog from '@/components/common/ModalDialog.vue'
 import ContentBlocks from '@/components/chat/ContentBlocks.vue'
+import ToolDetailOverlay from '@/components/chat/ToolDetailOverlay.vue'
 import { useChatRender } from '@/composables/useChatRender.ts'
+import { formatToolOutput } from '@/utils/renderToolDetail.ts'
 import { useToast } from '@/composables/useToast.ts'
 import { useDialog } from '@/composables/useDialog.ts'
 import { formatDuration } from '@/utils/format.ts'
@@ -141,6 +156,29 @@ const toast = useToast()
 
 function toggleTool(key) {
   expandedTools.value = { ...expandedTools.value, [key]: !expandedTools.value[key] }
+}
+
+const toolDetailOverlay = ref({
+  show: false,
+  name: '',
+  summary: '',
+  inputHtml: '',
+  outputHtml: '',
+  status: '',
+  done: true,
+})
+
+function handleShowToolDetail(block) {
+  const { formatToolInput } = chatRender
+  toolDetailOverlay.value = {
+    show: true,
+    name: block.name || '',
+    summary: chatRender.toolCallSummary(block),
+    inputHtml: formatToolInput(block.input, block.name),
+    outputHtml: block.output ? formatToolOutput(block.output, block.name) : '',
+    status: block.status || '',
+    done: !!block.done,
+  }
 }
 
 function formatAbsoluteTime(createdAt) {
