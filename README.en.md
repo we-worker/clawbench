@@ -59,17 +59,11 @@ Core Advantage: Native passthrough of AI capabilities (tool calls, extended thin
 |-------------|-------------|-------------|------------|
 | ![Image Viewer](docs/screenshots/image-viewer.png) | ![Video Player](docs/screenshots/video-player.png) | ![Audio Player](docs/screenshots/audio-player.png) | ![PDF Preview](docs/screenshots/pdf-preview.png) |
 
-### SSH Tunnel Port Forwarding
+### SSH Tunnel & Web Terminal
 
-| Port Forwarding |
-|----------------|
-| ![Port Forwarding](docs/screenshots/port-forwarding.png) |
-
-### Web Terminal
-
-| Interactive Terminal | Virtual Key Toolbar | Quick Commands | Command Editor |
-|---------------------|---------------------|----------------|----------------|
-| ![Interactive Terminal](docs/screenshots/terminal.png) | ![Virtual Key Toolbar](docs/screenshots/terminal-gestures-off.png) | ![Quick Commands](docs/screenshots/terminal-quick-commands.png) | ![Command Editor](docs/screenshots/terminal-quick-commands-edit.png) |
+| Port Forwarding | Interactive Terminal |
+|----------------|---------------------|
+| ![Port Forwarding](docs/screenshots/port-forwarding.png) | ![Interactive Terminal](docs/screenshots/terminal.png) |
 
 ---
 

@@ -60,17 +60,11 @@
 |----------|----------|----------|----------|
 | ![图片查看](docs/screenshots/image-viewer.png) | ![视频播放](docs/screenshots/video-player.png) | ![音频播放](docs/screenshots/audio-player.png) | ![PDF 预览](docs/screenshots/pdf-preview.png) |
 
-### SSH 隧道端口转发
+### SSH 隧道与 Web 终端
 
-| 端口转发管理 |
-|-------------|
-| ![端口转发](docs/screenshots/port-forwarding.png) |
-
-### Web 终端
-
-| 交互式终端 | 虚拟按键栏 | 快捷指令 | 按键编辑 |
-|-----------|-----------|---------|---------|
-| ![交互式终端](docs/screenshots/terminal.png) | ![虚拟按键栏](docs/screenshots/terminal-gestures-off.png) | ![快捷指令](docs/screenshots/terminal-quick-commands.png) | ![按键编辑](docs/screenshots/terminal-quick-commands-edit.png) |
+| 端口转发 | 交互式终端 |
+|---------|-----------|
+| ![端口转发](docs/screenshots/port-forwarding.png) | ![交互式终端](docs/screenshots/terminal.png) |
 
 ---
 
