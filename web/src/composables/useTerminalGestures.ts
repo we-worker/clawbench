@@ -114,9 +114,18 @@ export function useTerminalGestures(
     }
   }
 
+  function preventNativeTouch(e: TouchEvent) {
+    if (e.cancelable) {
+      e.preventDefault()
+    }
+  }
+
   function onTouchStart(e: TouchEvent) {
     if (e.touches.length === 2) {
-      // Pinch gesture start
+      // Pinch gesture start. Prevent browser pinch/selection only once a
+      // terminal gesture is clear; stationary single-finger long press is left
+      // untouched so xterm/browser text selection can still start normally.
+      preventNativeTouch(e)
       initialPinchDistance = getTouchDistance(e.touches[0], e.touches[1])
       lastPinchDistance = initialPinchDistance
       accumulatedPinchDelta = 0
@@ -138,6 +147,7 @@ export function useTerminalGestures(
   function onTouchMove(e: TouchEvent) {
     // Pinch zoom
     if (e.touches.length === 2 && initialPinchDistance > 0) {
+      preventNativeTouch(e)
       const currentDistance = getTouchDistance(e.touches[0], e.touches[1])
       const delta = currentDistance - lastPinchDistance
       accumulatedPinchDelta += delta
@@ -158,6 +168,14 @@ export function useTerminalGestures(
     const dx = touch.clientX - touchStartX
     const dy = touch.clientY - touchStartY
     const dir = detectDirection(dx, dy)
+
+    if (dir || currentDirection) {
+      // Once the movement is clearly a terminal gesture, suppress native
+      // selection/scroll for the remainder of the gesture. Before the
+      // threshold is crossed, do not prevent default so long-press selection
+      // can start normally.
+      preventNativeTouch(e)
+    }
 
     if (dir && dir !== currentDirection) {
       // Direction changed or first detection — send once and start repeat
@@ -185,7 +203,10 @@ export function useTerminalGestures(
 
     // If direction was already handled in touchmove (hold-to-repeat),
     // skip the legacy swipe-on-touchend logic
-    if (wasDirection) return
+    if (wasDirection) {
+      preventNativeTouch(e)
+      return
+    }
 
     const touch = e.changedTouches[0]
     const dx = touch.clientX - touchStartX
@@ -193,6 +214,7 @@ export function useTerminalGestures(
     const dir = detectDirection(dx, dy)
     if (dir) {
       // It's a swipe — send the arrow key
+      preventNativeTouch(e)
       sendArrow(dir)
     } else if (Math.abs(dx) <= TAP_THRESHOLD && Math.abs(dy) <= TAP_THRESHOLD) {
       // It's a tap (no significant movement) — check for double-tap
@@ -203,6 +225,7 @@ export function useTerminalGestures(
         && Math.abs(tapDx) < TAP_THRESHOLD * 2
         && Math.abs(tapDy) < TAP_THRESHOLD * 2
       if (isDoubleTap) {
+        preventNativeTouch(e)
         callbacks.sendTab()
         callbacks.onGestureHint?.('⇥')
         lastTapTime = 0 // reset to avoid triple-tap
@@ -219,9 +242,9 @@ export function useTerminalGestures(
     const el = elementRef.value
     if (!el) return
 
-    el.addEventListener('touchstart', onTouchStart, { passive: true })
-    el.addEventListener('touchmove', onTouchMove, { passive: true })
-    el.addEventListener('touchend', onTouchEnd, { passive: true })
+    el.addEventListener('touchstart', onTouchStart, { passive: false })
+    el.addEventListener('touchmove', onTouchMove, { passive: false })
+    el.addEventListener('touchend', onTouchEnd, { passive: false })
     listenersAttached = true
   }
 
@@ -237,14 +260,14 @@ export function useTerminalGestures(
     listenersAttached = false
   }
 
-  // Apply gesture state: attach when enabled, detach when disabled
-  // so that xterm.js native touch selection works when gestures are off
+  // Apply gesture state: attach when enabled, detach when disabled.
+  // Keep touch-action permissive enough for long-press/native selection; the
+  // handlers call preventDefault only after recognizing a terminal gesture.
   function applyState() {
     const el = elementRef.value
     if (enabled.value) {
       attachListeners()
-      // Disable native scroll — gestures handle vertical via arrow keys
-      if (el) el.style.touchAction = 'none'
+      if (el) el.style.touchAction = 'manipulation'
     } else {
       detachListeners()
       // Enable native scroll — vertical drag scrolls the terminal
@@ -265,15 +288,14 @@ export function useTerminalGestures(
 
   // Called by TerminalPanel on mount
   function attach() {
-    if (enabled.value) {
-      attachListeners()
-    }
-    // When disabled, don't attach — let xterm.js handle touch natively
+    applyState()
   }
 
   // Called by TerminalPanel on unmount
   function detach() {
     detachListeners()
+    const el = elementRef.value
+    if (el) el.style.touchAction = ''
   }
 
   return {

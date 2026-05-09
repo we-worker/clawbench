@@ -319,7 +319,6 @@ function initTerminal() {
     cursorBlink: true,
     convertEol: true,
     scrollback: 5000,
-    selectionStyle: 'line',
     rightClickSelectsWord: true,
   })
 
