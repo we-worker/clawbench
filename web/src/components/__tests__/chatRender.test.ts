@@ -14,6 +14,11 @@ function parseAssistantContent(content: string) {
       const mapped = parsed.blocks.map(b => {
         if (b.type === 'tool_use') {
           if (b.done === undefined || b.done === false) b.done = true
+          // Backward compat: old Codex format had output in input.output
+          if (!b.output && b.input && b.input.output) {
+            b.output = b.input.output
+            delete b.input.output
+          }
         }
         return b
       })
@@ -31,10 +36,14 @@ function parseAssistantContent(content: string) {
               prev.input = b.input
               prev.done = b.done
               prev.name = b.name || prev.name
+              if (b.output) prev.output = b.output
+              if (b.status) prev.status = b.status
               continue
             }
             if (b.done) prev.done = true
             if (!currEmpty) prev.input = b.input
+            if (b.output) prev.output = b.output
+            if (b.status) prev.status = b.status
             continue
           }
           toolIndex.set(b.id, result.length)
@@ -294,5 +303,94 @@ describe('truncate', () => {
 
   it('handles emoji/unicode correctly (runes, not bytes)', () => {
     expect(truncate('🎉🎊🎁', 2)).toBe('🎉🎊...')
+  })
+})
+
+// ────────────────────────────────────────────────────────────
+// Tool output/status backward compat and dedup
+// ────────────────────────────────────────────────────────────
+
+describe('parseAssistantContent tool output/status', () => {
+  it('preserves output and status on tool_use blocks', () => {
+    const content = JSON.stringify({
+      blocks: [
+        { type: 'tool_use', name: 'Bash', id: 't1', input: { command: 'ls' }, done: true, output: 'file1.go\nfile2.go', status: 'success' },
+      ],
+    })
+    const result = parseAssistantContent(content)
+    expect(result.blocks[0].output).toBe('file1.go\nfile2.go')
+    expect(result.blocks[0].status).toBe('success')
+  })
+
+  it('migrates old Codex input.output to output field', () => {
+    const content = JSON.stringify({
+      blocks: [
+        { type: 'tool_use', name: 'Bash', id: 't2', input: { command: 'ls', output: 'old-format-output' }, done: true },
+      ],
+    })
+    const result = parseAssistantContent(content)
+    expect(result.blocks[0].output).toBe('old-format-output')
+    expect(result.blocks[0].input.output).toBeUndefined()
+  })
+
+  it('does not overwrite existing output with input.output', () => {
+    const content = JSON.stringify({
+      blocks: [
+        { type: 'tool_use', name: 'Bash', id: 't3', input: { command: 'ls', output: 'legacy' }, done: true, output: 'new-format' },
+      ],
+    })
+    const result = parseAssistantContent(content)
+    // When output already exists, input.output migration is skipped
+    expect(result.blocks[0].output).toBe('new-format')
+  })
+
+  it('preserves error status on tool_use blocks', () => {
+    const content = JSON.stringify({
+      blocks: [
+        { type: 'tool_use', name: 'Bash', id: 't4', input: { command: 'bad' }, done: true, output: 'command not found', status: 'error' },
+      ],
+    })
+    const result = parseAssistantContent(content)
+    expect(result.blocks[0].status).toBe('error')
+    expect(result.blocks[0].output).toBe('command not found')
+  })
+
+  it('merges output and status during dedup - second block has output', () => {
+    const content = JSON.stringify({
+      blocks: [
+        { type: 'tool_use', name: 'Read', id: 't5', input: { file_path: '/a.go' }, done: true },
+        { type: 'tool_use', name: 'Read', id: 't5', input: { file_path: '/a.go' }, done: true, output: 'file contents', status: 'success' },
+      ],
+    })
+    const result = parseAssistantContent(content)
+    expect(result.blocks).toHaveLength(1)
+    expect(result.blocks[0].output).toBe('file contents')
+    expect(result.blocks[0].status).toBe('success')
+  })
+
+  it('merges output from first block when second is empty', () => {
+    const content = JSON.stringify({
+      blocks: [
+        { type: 'tool_use', name: 'Read', id: 't6', input: { file_path: '/a.go' }, done: true, output: 'result', status: 'success' },
+        { type: 'tool_use', name: 'Read', id: 't6', input: {}, done: true },
+      ],
+    })
+    const result = parseAssistantContent(content)
+    expect(result.blocks).toHaveLength(1)
+    // First block has output, second is empty — keep previous
+    expect(result.blocks[0].output).toBe('result')
+    expect(result.blocks[0].status).toBe('success')
+  })
+
+  it('tool_use without output or status is valid (Codebuddy/Claude backends)', () => {
+    const content = JSON.stringify({
+      blocks: [
+        { type: 'tool_use', name: 'Read', id: 't7', input: { file_path: '/a.go' }, done: true },
+      ],
+    })
+    const result = parseAssistantContent(content)
+    expect(result.blocks[0].output).toBeUndefined()
+    expect(result.blocks[0].status).toBeUndefined()
+    expect(result.blocks[0].done).toBe(true)
   })
 })

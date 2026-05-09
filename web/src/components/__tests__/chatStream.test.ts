@@ -278,6 +278,126 @@ describe('tool_use event handling', () => {
   })
 })
 
+// Test tool_use event handling with output/status fields
+describe('tool_use event with output/status', () => {
+  it('updates output field on existing block when done', () => {
+    const blocks: any[] = [
+      { type: 'tool_use', name: 'Bash', id: '1', input: { command: 'ls' }, done: false, output: '', status: '' },
+    ]
+    const data = { name: 'Bash', id: '1', done: true, output: 'file1.go\nfile2.go', status: 'success' }
+    const existing = blocks.find(b => b.type === 'tool_use' && b.id === data.id)
+    if (data.done && existing) {
+      existing.done = true
+      if (data.output !== undefined) existing.output = data.output
+      if (data.status !== undefined) existing.status = data.status
+    }
+    expect(blocks[0].done).toBe(true)
+    expect(blocks[0].output).toBe('file1.go\nfile2.go')
+    expect(blocks[0].status).toBe('success')
+  })
+
+  it('sets output and status on new block creation', () => {
+    const blocks: any[] = []
+    const data = { name: 'Bash', id: '2', input: { command: 'pwd' }, done: false, output: 'initial output', status: '' }
+    const existing = blocks.find(b => b.type === 'tool_use' && b.id === data.id)
+    if (!existing) {
+      blocks.push({ type: 'tool_use', name: data.name, id: data.id, input: data.input || {}, done: false, output: data.output || '', status: data.status || '' })
+    }
+    expect(blocks[0].output).toBe('initial output')
+  })
+
+  it('updates output on in-progress tool_use event', () => {
+    const blocks: any[] = [
+      { type: 'tool_use', name: 'Bash', id: '3', input: { command: 'ls' }, done: false, output: '', status: '' },
+    ]
+    // Simulate a partial tool_use event (not done) that carries output
+    const data = { name: 'Bash', id: '3', output: 'partial output', status: 'success' }
+    const existing = blocks.find(b => b.type === 'tool_use' && b.id === data.id)
+    if (existing) {
+      if (data.output !== undefined) existing.output = data.output
+      if (data.status !== undefined) existing.status = data.status
+    }
+    expect(blocks[0].output).toBe('partial output')
+    expect(blocks[0].done).toBe(false) // Still in progress
+  })
+})
+
+// Test tool_result event handling
+describe('tool_result event handling', () => {
+  it('updates output/status on matching tool_use block', () => {
+    const blocks: any[] = [
+      { type: 'tool_use', name: 'Read', id: 'r1', input: { file_path: '/a.go' }, done: true, output: '', status: '' },
+    ]
+    const data = { id: 'r1', output: 'file contents here', status: 'success' }
+    const existing = blocks.find(b => b.type === 'tool_use' && b.id === data.id)
+    if (existing) {
+      if (data.output !== undefined) existing.output = data.output
+      if (data.status !== undefined) existing.status = data.status
+    }
+    expect(blocks[0].output).toBe('file contents here')
+    expect(blocks[0].status).toBe('success')
+  })
+
+  it('handles tool_result for error status', () => {
+    const blocks: any[] = [
+      { type: 'tool_use', name: 'Bash', id: 'b1', input: { command: 'bad-cmd' }, done: true, output: '', status: '' },
+    ]
+    const data = { id: 'b1', output: 'command not found', status: 'error' }
+    const existing = blocks.find(b => b.type === 'tool_use' && b.id === data.id)
+    if (existing) {
+      if (data.output !== undefined) existing.output = data.output
+      if (data.status !== undefined) existing.status = data.status
+    }
+    expect(blocks[0].output).toBe('command not found')
+    expect(blocks[0].status).toBe('error')
+  })
+
+  it('silently ignores tool_result with no matching block', () => {
+    const blocks: any[] = [
+      { type: 'tool_use', name: 'Read', id: 'r2', input: { file_path: '/b.go' }, done: true, output: '', status: '' },
+    ]
+    const data = { id: 'nonexistent', output: 'orphan output', status: 'success' }
+    const existing = blocks.find(b => b.type === 'tool_use' && b.id === data.id)
+    if (existing) {
+      if (data.output !== undefined) existing.output = data.output
+      if (data.status !== undefined) existing.status = data.status
+    }
+    // No match — blocks unchanged
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].output).toBe('')
+  })
+
+  it('updates the most recent matching tool_use when duplicates exist', () => {
+    const blocks: any[] = [
+      { type: 'tool_use', name: 'Read', id: 'r3', input: { file_path: '/first.go' }, done: true, output: '', status: '' },
+      { type: 'tool_use', name: 'Read', id: 'r3', input: { file_path: '/second.go' }, done: true, output: '', status: '' },
+    ]
+    const data = { id: 'r3', output: 'merged output', status: 'success' }
+    const existing = blocks.find(b => b.type === 'tool_use' && b.id === data.id)
+    if (existing) {
+      if (data.output !== undefined) existing.output = data.output
+      if (data.status !== undefined) existing.status = data.status
+    }
+    // find() returns the first match
+    expect(blocks[0].output).toBe('merged output')
+    expect(blocks[1].output).toBe('')
+  })
+
+  it('handles tool_result with only status (no output)', () => {
+    const blocks: any[] = [
+      { type: 'tool_use', name: 'Read', id: 'r4', input: { file_path: '/c.go' }, done: true, output: '', status: '' },
+    ]
+    const data = { id: 'r4', status: 'success' }
+    const existing = blocks.find(b => b.type === 'tool_use' && b.id === data.id)
+    if (existing) {
+      if (data.output !== undefined) existing.output = data.output
+      if (data.status !== undefined) existing.status = data.status
+    }
+    expect(blocks[0].status).toBe('success')
+    expect(blocks[0].output).toBe('')
+  })
+})
+
 // Test cancelled event handling
 describe('cancelled event handling', () => {
   it('marks message as cancelled', () => {

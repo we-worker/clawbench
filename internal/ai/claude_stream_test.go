@@ -1120,3 +1120,272 @@ func TestStreamParser_InterleavedToolUseNoInputLoss(t *testing.T) {
 		}
 	}
 }
+
+// --- tool_result content block tests ---
+
+func TestStreamParser_ToolResultContentBlockStreaming(t *testing.T) {
+	// Simulate a tool_result content block via stream_event:
+	// content_block_start → text_delta → content_block_stop
+	lines := []string{
+		// First: a tool_use block completes
+		`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_read1","name":"Read"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\":\"/a.go\"}"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":1}}`,
+		// Then: tool_result content block
+		`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_result","tool_use_id":"toolu_read1"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"package main\n"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"func main() {}"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":2}}`,
+	}
+
+	events := parseLines(lines)
+
+	// Expected: tool_use start, tool_use stop, tool_result
+	var toolResultEvents []StreamEvent
+	for _, e := range events {
+		if e.Type == "tool_result" {
+			toolResultEvents = append(toolResultEvents, e)
+		}
+	}
+
+	if len(toolResultEvents) != 1 {
+		t.Fatalf("expected 1 tool_result event, got %d", len(toolResultEvents))
+	}
+
+	// Verify the tool_result references the correct tool_use ID
+	if toolResultEvents[0].Tool.ID != "toolu_read1" {
+		t.Errorf("expected tool_result ID 'toolu_read1', got %q", toolResultEvents[0].Tool.ID)
+	}
+	// Verify accumulated output
+	if toolResultEvents[0].Tool.Output != "package main\nfunc main() {}" {
+		t.Errorf("expected accumulated output, got %q", toolResultEvents[0].Tool.Output)
+	}
+	// Default status should be "success" (not error)
+	if toolResultEvents[0].Tool.Status != "success" {
+		t.Errorf("expected status 'success', got %q", toolResultEvents[0].Tool.Status)
+	}
+}
+
+func TestStreamParser_ToolResultContentBlockWithError(t *testing.T) {
+	// tool_result with is_error=true should produce status="error"
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_bash1","name":"Bash"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"command\":\"bad-cmd\"}"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":1}}`,
+		`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_result","tool_use_id":"toolu_bash1","is_error":true}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"command not found"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":2}}`,
+	}
+
+	events := parseLines(lines)
+
+	var toolResultEvents []StreamEvent
+	for _, e := range events {
+		if e.Type == "tool_result" {
+			toolResultEvents = append(toolResultEvents, e)
+		}
+	}
+
+	if len(toolResultEvents) != 1 {
+		t.Fatalf("expected 1 tool_result event, got %d", len(toolResultEvents))
+	}
+	if toolResultEvents[0].Tool.Status != "error" {
+		t.Errorf("expected status 'error', got %q", toolResultEvents[0].Tool.Status)
+	}
+	if toolResultEvents[0].Tool.Output != "command not found" {
+		t.Errorf("expected output 'command not found', got %q", toolResultEvents[0].Tool.Output)
+	}
+}
+
+func TestStreamParser_ToolResultContentBlockWithInitialContent(t *testing.T) {
+	// Some CLIs may include the full output in content_block_start's Content field
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_r1","name":"Read"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":1}}`,
+		`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_result","tool_use_id":"toolu_r1","content":"preloaded output"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":2}}`,
+	}
+
+	events := parseLines(lines)
+
+	var toolResultEvents []StreamEvent
+	for _, e := range events {
+		if e.Type == "tool_result" {
+			toolResultEvents = append(toolResultEvents, e)
+		}
+	}
+
+	if len(toolResultEvents) != 1 {
+		t.Fatalf("expected 1 tool_result event, got %d", len(toolResultEvents))
+	}
+	if toolResultEvents[0].Tool.Output != "preloaded output" {
+		t.Errorf("expected output 'preloaded output', got %q", toolResultEvents[0].Tool.Output)
+	}
+}
+
+func TestStreamParser_ToolResultContentBlockWithIDFallback(t *testing.T) {
+	// When tool_use_id is missing, fall back to ID field
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_x1","name":"Grep"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":1}}`,
+		`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_result","id":"toolu_x1","content":"match found"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":2}}`,
+	}
+
+	events := parseLines(lines)
+
+	var toolResultEvents []StreamEvent
+	for _, e := range events {
+		if e.Type == "tool_result" {
+			toolResultEvents = append(toolResultEvents, e)
+		}
+	}
+
+	if len(toolResultEvents) != 1 {
+		t.Fatalf("expected 1 tool_result event, got %d", len(toolResultEvents))
+	}
+	if toolResultEvents[0].Tool.ID != "toolu_x1" {
+		t.Errorf("expected ID fallback 'toolu_x1', got %q", toolResultEvents[0].Tool.ID)
+	}
+}
+
+func TestStreamParser_ToolResultTextDeltaDoesNotLeakAsContent(t *testing.T) {
+	// text_delta events within a tool_result content block should NOT
+	// be emitted as content events — they should be accumulated into
+	// the tool result output instead.
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_leak1","name":"Read"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":1}}`,
+		// tool_result content block — text_delta here must NOT become content
+		`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_result","tool_use_id":"toolu_leak1"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"this is tool output, not assistant content"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":2}}`,
+		// After tool_result, a text block starts — this SHOULD become content
+		`{"type":"stream_event","event":{"type":"content_block_start","index":3,"content_block":{"type":"text"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":3,"delta":{"type":"text_delta","text":"The file contains..."}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":3}}`,
+	}
+
+	events := parseLines(lines)
+
+	// Count content events — only the post-tool-result text should be content
+	var contentEvents []StreamEvent
+	for _, e := range events {
+		if e.Type == "content" {
+			contentEvents = append(contentEvents, e)
+		}
+	}
+
+	if len(contentEvents) != 1 {
+		t.Fatalf("expected 1 content event (post-tool-result text), got %d", len(contentEvents))
+	}
+	if contentEvents[0].Content != "The file contains..." {
+		t.Errorf("expected content 'The file contains...', got %q", contentEvents[0].Content)
+	}
+
+	// Verify the tool_result was properly captured
+	var toolResultEvents []StreamEvent
+	for _, e := range events {
+		if e.Type == "tool_result" {
+			toolResultEvents = append(toolResultEvents, e)
+		}
+	}
+	if len(toolResultEvents) != 1 {
+		t.Fatalf("expected 1 tool_result event, got %d", len(toolResultEvents))
+	}
+	if toolResultEvents[0].Tool.Output != "this is tool output, not assistant content" {
+		t.Errorf("tool output should contain the leaked text, got %q", toolResultEvents[0].Tool.Output)
+	}
+}
+
+func TestStreamParser_ToolResultInAssistantVerbose(t *testing.T) {
+	// Tool result in assistant verbose format (non-streaming)
+	msg := ClaudeStreamMessage{
+		Type: "assistant",
+		Message: &ClaudeStreamMessageBody{
+			Content: []ClaudeContentBlock{
+				{Type: "tool_use", ID: "toolu_v1", Name: "Read", Input: json.RawMessage(`{"file_path":"/a.go"}`)},
+				{Type: "tool_result", ID: "toolu_v1", Content: "file contents", IsError: false},
+				{Type: "text", Text: "Here is the file."},
+			},
+		},
+	}
+	data, _ := json.Marshal(msg)
+
+	events := parseLine(string(data))
+
+	// Expected: tool_use, tool_result, content
+	var toolResultEvents []StreamEvent
+	for _, e := range events {
+		if e.Type == "tool_result" {
+			toolResultEvents = append(toolResultEvents, e)
+		}
+	}
+	if len(toolResultEvents) != 1 {
+		t.Fatalf("expected 1 tool_result event, got %d", len(toolResultEvents))
+	}
+	if toolResultEvents[0].Tool.ID != "toolu_v1" {
+		t.Errorf("expected tool_result ID 'toolu_v1', got %q", toolResultEvents[0].Tool.ID)
+	}
+	if toolResultEvents[0].Tool.Output != "file contents" {
+		t.Errorf("expected output 'file contents', got %q", toolResultEvents[0].Tool.Output)
+	}
+	if toolResultEvents[0].Tool.Status != "success" {
+		t.Errorf("expected status 'success', got %q", toolResultEvents[0].Tool.Status)
+	}
+}
+
+func TestStreamParser_ToolResultInAssistantVerboseError(t *testing.T) {
+	msg := ClaudeStreamMessage{
+		Type: "assistant",
+		Message: &ClaudeStreamMessageBody{
+			Content: []ClaudeContentBlock{
+				{Type: "tool_result", ID: "toolu_err1", Content: "permission denied", IsError: true},
+			},
+		},
+	}
+	data, _ := json.Marshal(msg)
+
+	events := parseLine(string(data))
+
+	var toolResultEvents []StreamEvent
+	for _, e := range events {
+		if e.Type == "tool_result" {
+			toolResultEvents = append(toolResultEvents, e)
+		}
+	}
+	if len(toolResultEvents) != 1 {
+		t.Fatalf("expected 1 tool_result event, got %d", len(toolResultEvents))
+	}
+	if toolResultEvents[0].Tool.Status != "error" {
+		t.Errorf("expected status 'error', got %q", toolResultEvents[0].Tool.Status)
+	}
+}
+
+func TestStreamParser_ToolResultInAssistantVerboseTextFallback(t *testing.T) {
+	// When Content is empty but Text is present, use Text as output
+	msg := ClaudeStreamMessage{
+		Type: "assistant",
+		Message: &ClaudeStreamMessageBody{
+			Content: []ClaudeContentBlock{
+				{Type: "tool_result", ID: "toolu_tf1", Text: "text fallback output"},
+			},
+		},
+	}
+	data, _ := json.Marshal(msg)
+
+	events := parseLine(string(data))
+
+	var toolResultEvents []StreamEvent
+	for _, e := range events {
+		if e.Type == "tool_result" {
+			toolResultEvents = append(toolResultEvents, e)
+		}
+	}
+	if len(toolResultEvents) != 1 {
+		t.Fatalf("expected 1 tool_result event, got %d", len(toolResultEvents))
+	}
+	if toolResultEvents[0].Tool.Output != "text fallback output" {
+		t.Errorf("expected output from Text field, got %q", toolResultEvents[0].Tool.Output)
+	}
+}

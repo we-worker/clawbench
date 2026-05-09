@@ -190,6 +190,146 @@ func TestAIChatStream_ToolUseEvent(t *testing.T) {
 	assert.Equal(t, "/foo.go", input["file_path"])
 }
 
+func TestAIChatStream_ToolUseEventWithOutput(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	sessionID := "stream-tooluse-output"
+	ch := setupStreamSession(sessionID)
+	defer cleanupStreamSession(sessionID)
+
+	go func() {
+		ch <- ai.StreamEvent{
+			Type: "tool_use",
+			Tool: &ai.ToolCall{Name: "Bash", ID: "t3", Input: `{"command":"ls"}`, Done: true, Output: "file1.go\nfile2.go", Status: "success"},
+		}
+		ch <- ai.StreamEvent{Type: "done"}
+	}()
+
+	req := newRequest(t, http.MethodGet, "/api/ai/chat/stream?session_id="+sessionID, nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	w := callHandler(AIChatStream, req)
+
+	events := parseSSEEvents(w.Body.String())
+	assert.Equal(t, "tool_use", events[0]["event"])
+	var data map[string]any
+	json.Unmarshal([]byte(events[0]["data"]), &data)
+	assert.Equal(t, "Bash", data["name"])
+	assert.Equal(t, "file1.go\nfile2.go", data["output"])
+	assert.Equal(t, "success", data["status"])
+}
+
+func TestAIChatStream_ToolResultEvent(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	sessionID := "stream-toolresult"
+	ch := setupStreamSession(sessionID)
+	defer cleanupStreamSession(sessionID)
+
+	go func() {
+		ch <- ai.StreamEvent{
+			Type: "tool_result",
+			Tool: &ai.ToolCall{ID: "t5", Output: "file contents here", Status: "success"},
+		}
+		ch <- ai.StreamEvent{Type: "done"}
+	}()
+
+	req := newRequest(t, http.MethodGet, "/api/ai/chat/stream?session_id="+sessionID, nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	w := callHandler(AIChatStream, req)
+
+	events := parseSSEEvents(w.Body.String())
+	assert.Equal(t, "tool_result", events[0]["event"])
+	var data map[string]any
+	json.Unmarshal([]byte(events[0]["data"]), &data)
+	assert.Equal(t, "t5", data["id"])
+	assert.Equal(t, "file contents here", data["output"])
+	assert.Equal(t, "success", data["status"])
+}
+
+func TestAIChatStream_ToolResultEventError(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	sessionID := "stream-toolresult-err"
+	ch := setupStreamSession(sessionID)
+	defer cleanupStreamSession(sessionID)
+
+	go func() {
+		ch <- ai.StreamEvent{
+			Type: "tool_result",
+			Tool: &ai.ToolCall{ID: "t6", Output: "command not found", Status: "error"},
+		}
+		ch <- ai.StreamEvent{Type: "done"}
+	}()
+
+	req := newRequest(t, http.MethodGet, "/api/ai/chat/stream?session_id="+sessionID, nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	w := callHandler(AIChatStream, req)
+
+	events := parseSSEEvents(w.Body.String())
+	assert.Equal(t, "tool_result", events[0]["event"])
+	var data map[string]any
+	json.Unmarshal([]byte(events[0]["data"]), &data)
+	assert.Equal(t, "t6", data["id"])
+	assert.Equal(t, "command not found", data["output"])
+	assert.Equal(t, "error", data["status"])
+}
+
+func TestAIChatStream_ToolResultEventNilTool(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	sessionID := "stream-toolresult-nil"
+	ch := setupStreamSession(sessionID)
+	defer cleanupStreamSession(sessionID)
+
+	go func() {
+		ch <- ai.StreamEvent{Type: "tool_result", Tool: nil}
+		ch <- ai.StreamEvent{Type: "done"}
+	}()
+
+	req := newRequest(t, http.MethodGet, "/api/ai/chat/stream?session_id="+sessionID, nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	w := callHandler(AIChatStream, req)
+
+	events := parseSSEEvents(w.Body.String())
+	// tool_result with nil Tool should be silently skipped
+	assert.Len(t, events, 1)
+	assert.Equal(t, "done", events[0]["event"])
+}
+
+func TestAIChatStream_ToolResultEventNoOutput(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	sessionID := "stream-toolresult-nooutput"
+	ch := setupStreamSession(sessionID)
+	defer cleanupStreamSession(sessionID)
+
+	go func() {
+		// tool_result with no output/status — should only emit id
+		ch <- ai.StreamEvent{
+			Type: "tool_result",
+			Tool: &ai.ToolCall{ID: "t7"},
+		}
+		ch <- ai.StreamEvent{Type: "done"}
+	}()
+
+	req := newRequest(t, http.MethodGet, "/api/ai/chat/stream?session_id="+sessionID, nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	w := callHandler(AIChatStream, req)
+
+	events := parseSSEEvents(w.Body.String())
+	assert.Equal(t, "tool_result", events[0]["event"])
+	var data map[string]any
+	json.Unmarshal([]byte(events[0]["data"]), &data)
+	assert.Equal(t, "t7", data["id"])
+	assert.Nil(t, data["output"])
+	assert.Nil(t, data["status"])
+}
+
 func TestAIChatStream_ToolUseEvent_EmptyInput(t *testing.T) {
 	env, teardown := setupTestEnv(t)
 	defer teardown()
