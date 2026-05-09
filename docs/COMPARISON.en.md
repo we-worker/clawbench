@@ -24,7 +24,7 @@ A comprehensive comparison of mobile AI programming tools, covering both open-so
 ## Feature Matrix
 
 | Feature | ClawBench | Operit | Yep Anywhere | Happy | AnyCoding | AI Agent Remote | FeiLaude | Claude Dispatch | Claude Remote | Cursor Agent | GitHub Copilot | Paseo |
-|---------|-----------|--------|-------------|-------|-----------|-----------------|----------|-----------------|---------------|--------------|----------------|
+|---------|-----------|--------|-------------|-------|-----------|-----------------|----------|-----------------|---------------|--------------|----------------|-------|
 | **AI backend count** | 5 | 10+ | 2 | 2 | 2+ | 5 | 1 | 1 | 1 | Built-in | Built-in | 3 |
 | **File browsing/editing** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Code preview/syntax highlighting** | ✅ | ✅ | ✅ (server-rendered) | ❌ | ✅ (terminal) | ✅ (terminal) | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ |
