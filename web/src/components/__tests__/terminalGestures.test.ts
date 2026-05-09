@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { useTerminalGestures } from '@/composables/useTerminalGestures'
+import { shouldPreventTerminalContextMenu, useTerminalGestures } from '@/composables/useTerminalGestures'
 
 function makeTouch(clientX: number, clientY: number): Touch {
   return { clientX, clientY } as Touch
@@ -98,6 +98,15 @@ describe('useTerminalGestures', () => {
     expect(pinchMove.preventDefault).toHaveBeenCalled()
   })
 
+  it('restores fully native touch handling when gestures are disabled', () => {
+    const { el, gestures } = setupGestures()
+
+    gestures.toggle()
+
+    expect(gestures.enabled.value).toBe(false)
+    expect(el.style.touchAction).toBe('auto')
+  })
+
   it('does not disable native touch selection when gestures are toggled back on', () => {
     const { el, gestures } = setupGestures()
 
@@ -107,5 +116,15 @@ describe('useTerminalGestures', () => {
 
     expect(gestures.enabled.value).toBe(true)
     expect(el.style.touchAction).not.toBe('none')
+  })
+})
+
+describe('shouldPreventTerminalContextMenu', () => {
+  it('allows the native long-press copy menu when gestures are disabled', () => {
+    expect(shouldPreventTerminalContextMenu(false)).toBe(false)
+  })
+
+  it('suppresses the native context menu while gestures are enabled', () => {
+    expect(shouldPreventTerminalContextMenu(true)).toBe(true)
   })
 })

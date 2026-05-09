@@ -12,6 +12,10 @@ export interface GestureCallbacks {
 
 type Direction = 'up' | 'down' | 'left' | 'right'
 
+export function shouldPreventTerminalContextMenu(gesturesEnabled: boolean): boolean {
+  return gesturesEnabled
+}
+
 /**
  * Termius-style touch gestures for the terminal area.
  * - Swipe left/right → arrow left/right
@@ -270,8 +274,9 @@ export function useTerminalGestures(
       if (el) el.style.touchAction = 'manipulation'
     } else {
       detachListeners()
-      // Enable native scroll — vertical drag scrolls the terminal
-      if (el) el.style.touchAction = 'pan-y'
+      // Restore fully native touch handling so long-press can open the
+      // platform selection/copy UI instead of only allowing vertical panning.
+      if (el) el.style.touchAction = 'auto'
     }
   }
 

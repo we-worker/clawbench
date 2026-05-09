@@ -134,7 +134,7 @@ import QuickCommandDialog from '@/components/terminal/QuickCommandDialog.vue'
 import { useTerminalSession } from '@/composables/useTerminalSession'
 import { useTerminalViewport } from '@/composables/useTerminalViewport'
 import { useTerminalKeys } from '@/composables/useTerminalKeys'
-import { useTerminalGestures } from '@/composables/useTerminalGestures'
+import { shouldPreventTerminalContextMenu, useTerminalGestures } from '@/composables/useTerminalGestures'
 import { useToast } from '@/composables/useToast'
 import { useQuickCommands } from '@/composables/useQuickCommands'
 import { store } from '@/stores/app'
@@ -391,10 +391,13 @@ async function mountTerminal() {
   // Store for cleanup
   ;(container as any).__terminalWheelHandler = wheelHandler
 
-  // Suppress native context menu (paste/clipboard popup on mobile)
-  // but don't stopPropagation — xterm.js needs contextmenu for word selection
+  // Suppress native context menu only while terminal gestures are active.
+  // When gestures are disabled, long-press must be able to open the platform
+  // selection/copy UI instead of being reduced to a vibration.
   const contextMenuHandler = (e: Event) => {
-    e.preventDefault()
+    if (shouldPreventTerminalContextMenu(gestures.enabled.value)) {
+      e.preventDefault()
+    }
   }
   container.addEventListener('contextmenu', contextMenuHandler)
   ;(container as any).__terminalContextMenuHandler = contextMenuHandler
