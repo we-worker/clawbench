@@ -415,8 +415,10 @@ export function useChatStream(options: UseChatStreamOptions) {
     })
 
     eventSource.addEventListener('queue_consume', (e) => {
-      if (!guard()) return
       resetStreamTimeout()
+      // Always update pending queue — it's independent of the streaming message
+      onQueueConsume?.()
+      if (!guard()) return
       const data = JSON.parse(e.data)
 
       // Add user message bubble (DB message already persisted by backend)
@@ -440,7 +442,6 @@ export function useChatStream(options: UseChatStreamOptions) {
       })
       lastIndex = messages.value.length - 1 // CRITICAL: update closure variable
 
-      onQueueConsume?.()
       onRenderNeeded()
       // Force scroll: queue_done removes the streaming indicator which shrinks layout,
       // making isAtBottom=false even though the user is visually at the bottom.
@@ -449,9 +450,9 @@ export function useChatStream(options: UseChatStreamOptions) {
     })
 
     eventSource.addEventListener('queue_update', (e) => {
-      if (!guard()) return
       resetStreamTimeout()
       const data = JSON.parse(e.data)
+      // Always update pending queue — it's independent of the streaming message
       onQueueUpdate?.(data.queue || [])
     })
 

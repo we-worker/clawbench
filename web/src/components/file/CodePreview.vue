@@ -165,6 +165,19 @@ pre :deep(code) {
 </style>
 
 <style>
+/* Line flash animation for TOC jump and search jump */
+@keyframes line-flash {
+    0%, 100% { background: transparent; }
+    10%, 30%  { background: rgba(255, 230, 0, 0.4); }
+    20%, 40%  { background: transparent; }
+    50%, 70%  { background: rgba(255, 230, 0, 0.3); }
+    60%, 80%  { background: transparent; }
+    90%       { background: rgba(255, 230, 0, 0.2); }
+}
+.line-flash {
+    animation: line-flash 1.2s ease-out forwards;
+}
+
 /* Copy flash animation for block elements — used by useDoubleClickCopy */
 @keyframes copy-flash {
     0%, 100% { background: transparent; }
