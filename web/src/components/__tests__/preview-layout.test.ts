@@ -117,7 +117,7 @@ describe('preview layout contract', () => {
 
     const style = getComputedStyle(el)
 
-    expect(style.overflowY).toBe('hidden')
+    expect(style.overflow).toBe('hidden')
 
     el.remove()
   })
