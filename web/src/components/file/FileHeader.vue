@@ -77,7 +77,6 @@ import { useI18n } from 'vue-i18n'
 import { List, Search, MoreVertical, Code2, Download, Trash2, GitBranch, TextWrap, RotateCw, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { getFileType } from '@/utils/fileType.ts'
 import { useAppMode } from '@/composables/useAppMode.ts'
-import { useDialog } from '@/composables/useDialog.ts'
 import { store } from '@/stores/app.ts'
 
 const props = defineProps({
@@ -91,7 +90,6 @@ const emit = defineEmits(['delete', 'toggleView', 'showDetails', 'openGitHistory
 
 const { isAppMode } = useAppMode()
 const { t } = useI18n()
-const dialog = useDialog()
 
 const menuOpen = ref(false)
 const dropdownRef = ref(null)
@@ -161,9 +159,8 @@ function handleDownload() {
     }
 }
 
-async function handleDelete() {
+function handleDelete() {
     menuOpen.value = false
-    if (!await dialog.confirm(t('file.header.confirmDelete', { name: props.file?.name }), { dangerous: true })) return
     emit('delete', props.file?.path)
 }
 
