@@ -4,6 +4,9 @@
       <div class="lightbox-backdrop" @click="close" />
       <div class="lightbox-toolbar">
         <div v-if="currentFileName" class="lb-filename">{{ currentFileName }}</div>
+        <button v-if="currentUrl" class="lb-btn" @click="handleDownload" title="Download">
+          <Download :size="20" />
+        </button>
         <button class="lb-btn" @click="resetAndRefresh" title="Reset & Reload">
           <RotateCcw :size="20" />
         </button>
@@ -54,12 +57,14 @@
 </template>
 
 <script setup>
-import { RotateCcw, X, Loader, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { RotateCcw, X, Loader, ChevronLeft, ChevronRight, Download } from 'lucide-vue-next'
 import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
 import { store } from '@/stores/app.ts'
 import { baseName } from '@/utils/path.ts'
 import { getFileType } from '@/utils/fileType.ts'
+import { useAppMode } from '@/composables/useAppMode.ts'
 
+const { isAppMode } = useAppMode()
 const lightboxVisible = ref(false)
 const currentUrl = ref('')
 const currentSvg = ref('')
@@ -313,6 +318,23 @@ function resetAndRefresh() {
         const base = currentUrl.value.replace(/[?&]t=\d+/, '')
         currentUrl.value = base + (base.includes('?') ? '&' : '?') + 't=' + Date.now()
     }
+}
+
+function handleDownload() {
+    if (!currentUrl.value) return
+    const native = window.AndroidNative
+    if (isAppMode.value && native && native.downloadFile) {
+        // For app mode, extract file path from URL or use currentFilePath
+        native.downloadFile(currentFilePath.value)
+        return
+    }
+    const a = document.createElement('a')
+    const baseUrl = currentUrl.value.replace(/[?&]t=\d+/, '')
+    a.href = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'download=1'
+    a.download = currentFileName.value || ''
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
 }
 
 function handleWheel(e) {

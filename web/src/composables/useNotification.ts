@@ -62,8 +62,8 @@ export function showBrowserNotification(
   // Create notification with unique tag to avoid replacement
   const notification = new Notification(title, {
     body: options?.body || '',
-    icon: options?.icon || '/favicon.ico',
-    badge: options?.badge || '/favicon.ico',
+    icon: options?.icon || '/assets/favicon.png',
+    badge: options?.badge || '/assets/favicon.png',
     tag: options?.tag || `clawbench-${Date.now()}`,
     requireInteraction: false,
     silent: false,

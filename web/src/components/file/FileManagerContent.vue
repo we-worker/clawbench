@@ -478,9 +478,11 @@ function doDownload() {
         native.downloadFile(path)
     } else {
         const a = document.createElement('a')
-        a.href = '/api/local-file/' + encodeURIComponent(path)
+        a.href = '/api/local-file/' + encodeURIComponent(path) + '?download=1'
         a.download = ctxMenu.entry.name
+        document.body.appendChild(a)
         a.click()
+        document.body.removeChild(a)
     }
 }
 

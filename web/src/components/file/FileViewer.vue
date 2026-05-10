@@ -61,7 +61,7 @@
           <FileText />
           <div class="unsupported-title">{{ file.name }}</div>
           <div class="unsupported-desc">{{ t('file.viewer.fileTooLarge') }} {{ file.size ? '(' + formatSize(file.size) + ')' : '' }}</div>
-          <a v-if="!isAppMode" :href="'/api/local-file/' + encodeURIComponent(file.path)" class="download-btn" download>
+          <a v-if="!isAppMode" :href="'/api/local-file/' + encodeURIComponent(file.path) + '?download=1'" class="download-btn" :download="file.name">
             <Download :size="14" color="#fff" />
             {{ t('common.download') }}
           </a>
@@ -79,7 +79,7 @@
           <div class="unsupported-title">{{ file.name }}</div>
           <div class="unsupported-desc">{{ t('file.viewer.binaryFile') }} {{ file.size ? '(' + formatSize(file.size) + ')' : '' }}</div>
           <div class="unsupported-actions">
-            <a v-if="!isAppMode" :href="'/api/local-file/' + encodeURIComponent(file.path)" class="download-btn" download>
+            <a v-if="!isAppMode" :href="'/api/local-file/' + encodeURIComponent(file.path) + '?download=1'" class="download-btn" :download="file.name">
               <Download :size="14" color="#fff" />
               {{ t('common.download') }}
             </a>

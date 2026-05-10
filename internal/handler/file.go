@@ -264,6 +264,12 @@ func ServeLocalFile(w http.ResponseWriter, r *http.Request) {
 		mime = "application/octet-stream"
 	}
 
+	// If ?download=1 is present, force download with Content-Disposition header
+	if r.URL.Query().Get("download") == "1" {
+		fileName := filepath.Base(absPath)
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+fileName+"\"")
+	}
+
 	w.Header().Set("Content-Type", mime)
 	http.ServeFile(w, r, absPath)
 }

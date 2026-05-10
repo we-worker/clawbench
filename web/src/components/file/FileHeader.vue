@@ -49,7 +49,7 @@
             {{ t('file.header.wordWrap') }}
             <span v-if="wordWrap" class="wrap-check">✓</span>
           </button>
-          <a v-if="!isAppMode" class="dropdown-item" :href="'/api/local-file/' + encodeURIComponent(file.path)" :download="file.name" @click="menuOpen = false">
+          <a v-if="!isAppMode" class="dropdown-item" :href="'/api/local-file/' + encodeURIComponent(file.path) + '?download=1'" :download="file.name" @click="menuOpen = false">
             <Download :size="14" />
             {{ t('common.download') }}
           </a>

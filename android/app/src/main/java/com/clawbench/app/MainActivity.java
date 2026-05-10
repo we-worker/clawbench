@@ -703,9 +703,10 @@ public class MainActivity extends AppCompatActivity {
             activity.runOnUiThread(() -> {
                 String serverUrl = activity.prefs.getString(KEY_SERVER_URL, "");
                 if (serverUrl.isEmpty()) return;
-                String url = serverUrl + "/api/local-file/" + Uri.encode(path, "/");
+                String url = serverUrl + "/api/local-file/" + Uri.encode(path, "/") + "?download=1";
                 // Trigger the DownloadListener by asking WebView to load the URL
-                // The DownloadListener will intercept and use DownloadManager
+                // The ?download=1 param makes the server return Content-Disposition: attachment
+                // which forces WebView to trigger the DownloadListener instead of rendering inline
                 activity.webView.loadUrl(url);
             });
         }
