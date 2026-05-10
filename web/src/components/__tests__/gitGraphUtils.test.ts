@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeGraphData, LANE_WIDTH, LANE_COLORS, refLabelWidth, refLabelText, refLabelBg } from '@/utils/gitGraph'
 
-const ROW_HEIGHT = 46
+const ROW_HEIGHT = 64
 
 // ─── Helper: extract connection info from graph data ───
 function getConnections(commits, rowHeight = ROW_HEIGHT) {

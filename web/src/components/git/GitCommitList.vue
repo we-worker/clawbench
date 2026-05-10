@@ -58,7 +58,7 @@
           v-if="!isSearching"
           class="commit-list-graph"
           :commits="filteredCommits"
-          :row-height="46"
+          :row-height="64"
           :collapsed="graphCollapsed"
           @update:collapsed="graphCollapsed = $event"
         />
@@ -331,11 +331,11 @@ defineExpose({ observeList, unobserveList, commitSearch })
 .drilldown-item {
   display: flex;
   align-items: center;
-  padding: 11px 14px;
+  padding: 10px 14px;
   cursor: pointer;
   transition: background 0.15s;
   border-bottom: 1px solid var(--border-color, #dee2e6);
-  height: 46px;
+  height: 64px;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -362,9 +362,11 @@ defineExpose({ observeList, unobserveList, commitSearch })
 .git-commit-msg {
   font-size: 13px;
   font-weight: 500;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   color: inherit;
 }
 
@@ -372,6 +374,9 @@ defineExpose({ observeList, unobserveList, commitSearch })
   font-size: 11px;
   color: var(--text-muted, #999);
   margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .git-load-more-sentinel {

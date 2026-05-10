@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeGraphData, LANE_WIDTH, GRAPH_LEFT_PADDING } from '@/utils/gitGraph'
 
-const ROW_HEIGHT = 46
+const ROW_HEIGHT = 64
 
 // ─── Coordinate helpers (mirrors gitGraph.ts) ───
 function laneCx(lane) {

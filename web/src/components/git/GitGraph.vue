@@ -129,7 +129,7 @@ const { t } = useI18n()
 
 const props = defineProps({
   commits: { type: Array, default: () => [] },
-  rowHeight: { type: Number, default: 46 },
+  rowHeight: { type: Number, default: 64 },
   collapsed: { type: Boolean, default: false },
 })
 
