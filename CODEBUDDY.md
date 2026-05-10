@@ -60,7 +60,7 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 - `internal/speech/` — TTS abstraction (`SpeechProvider` interface). Implementations: MiniMax (cloud), Edge TTS (cloud, free), Piper (local offline), Kokoro (local ONNX-based). `summarizer.go` provides TTS summarization via multiple AI backends (mmx-cli, claude, codebuddy, gemini, opencode, codex, qoder, vecli, ollama) for long-text compression before speech. `ollama_summarizer.go` calls Ollama HTTP API (`/api/chat`, stream:false) — the first direct HTTP client in the Go backend (all others shell out to CLI tools).
 - `internal/ssh/` — SSH tunnel server (`server.go`). Supports direct-tcpip channels (-L port forwarding), password auth, ECDSA host key generation/persistence. Integrates with ProxyRegistry for port validation.
 - `internal/rag/` — RAG history memory system. DuckDB vector store (`store.go`), text chunker (`chunker.go`), Ollama embedding client (`embedding.go`), indexer worker (`indexer.go`), search (`search.go`), cleanup worker (`cleanup.go`), entry point (`rag.go`). When `rag.enabled`, indexes chat messages after finalization and provides semantic search API. Cleanup worker runs regardless of RAG enablement to purge soft-deleted data past retention.
-- `internal/terminal/` — Interactive web terminal. `manager.go` (session lifecycle, single-session-per-project, zombie client kicking), `session.go` (PTY I/O pump, idle timeout, ring buffer replay, resize handling), `buffer.go` (RingBuffer: configurable line count/size/memory cap, line-split replay), `shell.go` + `shell_posix.go` / `shell_windows.go` (shell detection: $SHELL→/bin/sh on POSIX, pwsh→powershell→cmd on Windows; process group kill via SIGTERM→3s→SIGKILL), `protocol.go` (WebSocket JSON message types). Handler in `internal/handler/terminal.go` (WebSocket upgrade, status/close/config endpoints).
+- `internal/terminal/` — Interactive web terminal. `manager.go` (concurrent sessions map keyed by session ID, session limit enforcement, auto-cleanup via onClose callback), `session.go` (PTY I/O pump, idle timeout, ring buffer replay, resize handling, auto-generated session ID), `buffer.go` (RingBuffer: configurable line count/size/memory cap, line-split replay), `shell.go` + `shell_posix.go` / `shell_windows.go` (shell detection: $SHELL→/bin/sh on POSIX, pwsh→powershell→cmd on Windows; process group kill via SIGTERM→3s→SIGKILL), `protocol.go` (WebSocket JSON message types, SessionID field, ErrCodeSessionLimit error code). Handler in `internal/handler/terminal.go` (WebSocket upgrade, per-session status/close, quick commands CRUD endpoints).
 - `internal/platform/` — Platform-specific adaptations (Windows paths).
 
 **Agent system:** YAML files in `config/agents/` define agents with id, backend, model, system_prompt, and optional `command` (custom CLI path). `config/rules.md` is always fully injected into every agent's system prompt at startup by `model.LoadAgents()` → `BuildCommonPrompt()`. It contains mandatory rules and CLI references (scheduled tasks, RAG search, etc.). Placeholders `{{AVAILABLE_AGENTS}}`, `{{PORT}}`, and `{{PROJECT_PATH}}` are replaced dynamically — `{{PROJECT_PATH}}` is replaced per-request using the project path from the cookie (not statically at startup). The `<!-- SCHEDULED_BEGIN/END -->` markers in rules.md wrap the scheduled tasks section, which is stripped by `BuildCommonPrompt(true)` during scheduled executions (anti-recursion). The skill system (`config/skills/`, `/api/skills` endpoints) has been removed — `rules.md` is now the single source of truth for all mandatory rules.
@@ -90,16 +90,15 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 2. `chat_history.indexed` column tracks indexing state; indexer polls every 10s for unindexed messages
 3. Text blocks are extracted (excluding thinking/tool_use), chunked with 512-token sliding window, embedded via Ollama BGE-M3
 4. AI agents search history via `clawbench rag` CLI subcommands (search/message/session), which call the backend RAG API endpoints (`/api/rag/search`, `/api/rag/message`, `/api/rag/session`). RAG search rules and CLI reference are in `config/rules.md`
-5. Frontend browses forwarded ports via `PortForwardBrowser` component
-6. Dev mode uses separate `rag-dev.duckdb` to avoid production DB conflict
+5. Dev mode uses separate `rag-dev.duckdb` to avoid production DB conflict
 
 **Interactive terminal:**
 1. Frontend opens WebSocket to `GET /api/terminal/ws?cwd=<dir>`
-2. Handler resolves cwd, creates PTY session via `TerminalManager`
+2. Handler resolves cwd, creates PTY session via `TerminalManager`; each client gets an independent session (auto-generated 8-byte hex ID)
 3. Session pump: PTY stdout → RingBuffer → WebSocket (`output` messages); WebSocket `input` → PTY stdin
-4. On reconnect, RingBuffer replays buffered lines via `replay` message
+4. On reconnect, client appends `&session=<id>` to WS URL to resume its specific session; RingBuffer replays buffered lines via `replay` message
 5. `resize` messages sync terminal dimensions (cols/rows) to PTY
-6. Single session per project; new client kicks old zombie; idle timeout closes PTY
+6. Multiple concurrent sessions per project (configurable `max_sessions`, default: 10); process exit auto-removes session via `onClose` callback
 7. Close via `POST /api/terminal/close` or `close` WebSocket message → SIGTERM process group → SIGKILL
 8. Quick commands: CRUD via `/api/terminal/quick-commands` endpoints; stored in SQLite `terminal_quick_commands` table; supports drag reorder, hidden flag, auto-execute (one command auto-runs on every connect/reconnect)
 
@@ -143,7 +142,7 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 - `useSwipeNavigation.ts` — Swipe gestures for file navigation.
 - `useSwipeSession.ts` — Swipe between chat sessions.
 - `usePortForward.ts` — Port forwarding state and SSH info.
-- `useAppMode.ts` — Android WebView detection, native bridge integration (addForwardedPort, openInBrowser, showServerDialog, setSSHPassword, getPassword).
+- `useAppMode.ts` — Android WebView detection, native bridge integration (addForwardedPort, openInBrowser, showServerDialog, setSSHPassword, getPassword, setVolumeKeyMode).
 - `useNotificationSound.ts` — Notification sound + haptic feedback.
 - `useNotification.ts` — Push notification support.
 - `useToast.ts` — Toast notification system.
@@ -180,7 +179,7 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 - `ProjectDialog.vue` — Project selection dialog.
 
 **Utility modules** (`web/src/utils/`):
-- `api.ts` — API helpers (apiGet, apiPost, apiDelete).
+- `api.ts` — API helpers (apiGet, apiPost, apiPut, apiDelete) with AbortController + 10s timeout for resilience against unresponsive servers.
 - `diff.ts` — Diff utilities for git views.
 - `fileType.ts` — File type detection.
 - `format.ts` — Formatting utilities.
@@ -209,13 +208,13 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 - **AutoResumeBackend:** Wraps claude, codebuddy, and qoder backends. Detects ExitPlanMode tool_use → cancels CLI → resumes with "继续" in same session. Emits `resume_split` event for DB message finalization. Transparent to outer caller.
 - **Cancel reason tracking:** Session cancels are tracked as `"user"` (explicit) or `"disconnect"` (SSE client gone). `ForceCancelSession` kills zombie CLI processes on disconnect.
 - **ProxyRegistry health checks:** Forwarded ports are probed every 5s; auto-detection scans `/proc/net/tcp` (Linux), `lsof` (macOS), `netstat` (Windows); TLS probing for HTTPS ports.
-- **Android native bridge:** `useAppMode()` detects Android WebView via JS bridge (`AndroidNative.*`). Supports auto-login, port forwarding registration, SSH password management, and native dialogs.
+- **Android native bridge:** `useAppMode()` detects Android WebView via JS bridge (`AndroidNative.*`). Supports auto-login, port forwarding registration, SSH password management, native dialogs, and volume key mode (setVolumeKeyMode: remap volume up/down to arrow keys when terminal is open).
 - **Touch device CSS:** Use `@media (hover: hover)` to scope `:hover` styles — touch devices get sticky hover that masks `.active` class changes.
 - **Green portable deployment:** All runtime data (SQLite DB, logs, uploads, SSH host keys, TTS models, auto-generated password) lives under `.clawbench/` next to the binary. Deleting that directory = clean uninstall.
 - **Zero-config startup:** `config/config.yaml` is optional. `model.ApplyDefaults()` (in `defaults.go`) fills all zero-value fields with sensible defaults. When `password` is empty, a random UUID is generated and persisted to `.clawbench/auto-password` for reuse across restarts. `ParsePresenceMap()` handles the bool-defaults problem (Go zero value is `false`, but `proxy.enabled` and `ssh.enabled` should default to `true`).
 - **Structured errors:** Backend uses `model.NotFound()`, `model.Forbidden()`, `model.Internal()` constructors for consistent HTTP error responses.
 - **Terminal virtual key groups:** Toolbar keys are grouped by type (modifiers, shortcuts, navigation, arrows, symbols, actions) with color-coded visual dividers. Modifier keys use three-state toggle (inactive→once→locked); once auto-clears after next keypress, locked persists until tapped again. Arrow keys and Esc/Tab/PgUp/PgDn hide when gestures are enabled (handled by touch gestures instead). Gesture toggle button sits outside the scroll area.
-- **Terminal drawer lifecycle:** Closing the terminal drawer (❌ button, swipe-down, parent hides) disconnects WebSocket + disposes xterm instance. Next open creates a fresh Terminal + new PTY session. `cleanupTerminal()` consolidates disposal logic.
+- **Terminal drawer lifecycle:** Closing the terminal drawer (❌ button, swipe-down, parent hides) disconnects WebSocket + disposes xterm instance. Next open creates a fresh Terminal + new PTY session. `cleanupTerminal()` consolidates disposal logic. Multiple concurrent sessions are supported — each client gets its own PTY session with independent state.
 - **Tool execution results:** `tool_result` SSE events carry output text and success/error status from AI backend tool calls. `useChatRender` accumulates these into existing `tool_use` blocks. `ContentBlocks.vue` renders a spinner while pending, green check on success, red X on error, with expandable output section. `StreamParser` suppresses `text_delta` events belonging to `tool_result` blocks to prevent tool output from leaking into content. Output is capped at 50KB via `truncateToolOutput()`.
 - **CRUD migration from YAML to SQLite:** Chat quick-send and terminal quick commands were migrated from static YAML config to SQLite-backed CRUD APIs. Both use the same pattern: module-level singleton composable (`useQuickSend` / `useQuickCommands`), drag reorder with optimistic update and rollback, separate handler files for CRUD endpoints. The old `chat.quick_send` YAML section and `terminal.quick_commands` YAML section are no longer used.
 
@@ -234,7 +233,7 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 | Proxy | `proxy.enabled`, `proxy.allowed_ports` |
 | SSH | `ssh.enabled`, `ssh.port`, `ssh.host_key` |
 | RAG | `rag.enabled`, `rag.ollama_base_url`, `rag.ollama_model` (bge-m3), `rag.chunk_size` (512), `rag.chunk_overlap` (64), `rag.poll_interval` (10s), `rag.batch_size` (10), `rag.search_limit` (5), `rag.retention_days` (90) |
-| Terminal | `terminal.enabled` (default: true), `terminal.idle_timeout` (default: 10m), `terminal.buffer_lines` (default: 2000), `terminal.max_line_bytes` (default: 65536), `terminal.max_buffer_mb` (default: 4) |
+| Terminal | `terminal.enabled` (default: true), `terminal.idle_timeout` (default: 10m), `terminal.buffer_lines` (default: 2000), `terminal.max_line_bytes` (default: 65536), `terminal.max_buffer_mb` (default: 4), `terminal.max_sessions` (default: 10) |
 | Dev | `dev.port`, `dev.frontend_port`, `dev.host` |
 | Logging | `log_dir`, `log_max_days`, `default_agent` |
 

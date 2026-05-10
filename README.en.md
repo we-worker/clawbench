@@ -224,9 +224,11 @@ Once deployed, access `http://server-ip:20000` from your phone app or mobile bro
 
 ### 💻 Web Terminal
 - **Interactive Terminal**: PTY + WebSocket + xterm.js, operate server terminal directly in browser
+- **Concurrent Sessions**: Each client gets an independent PTY session, no interference
 - **Virtual Key Toolbar**: Color-coded key groups (modifiers, shortcuts, navigation, arrows, symbols, actions), three-state modifier toggle
 - **Touch Gestures**: Termius-style gestures (swipe→arrow keys, hold-to-repeat, double-tap→Tab, pinch-to-zoom), touch scroll when gestures disabled
 - **Quick Commands**: CRUD management of common commands with drag reorder, hidden flag, auto-execute (auto-run on every connect/reconnect)
+- **Android Volume Keys**: Volume up/down remapped to arrow keys when terminal is open in the app
 
 ### 🌐 Internationalization
 - Chinese / English bilingual UI, auto-detect system language
@@ -234,6 +236,7 @@ Once deployed, access `http://server-ip:20000` from your phone app or mobile bro
 ### 📱 Android App
 - Native bridge integration: auto-login, file download, port forwarding management
 - SSH password management, server dialog
+- Terminal volume key mapping: volume keys act as arrow keys when terminal is open
 
 ### 🔔 Notifications
 - Notification sound + haptic feedback (alerts when AI completes)

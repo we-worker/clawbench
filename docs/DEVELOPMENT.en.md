@@ -117,6 +117,9 @@ cd clawbench
 | `chat.page_size` | 20 | Messages per page for lazy loading |
 | `chat.collapsed_height` | 150 | Collapsed height for history messages in px |
 | `session.max_count` | 10 | Max sessions per project |
+| `terminal.enabled` | true | Web terminal enabled by default |
+| `terminal.idle_timeout` | 10m | Terminal idle timeout |
+| `terminal.max_sessions` | 10 | Max terminal sessions per project |
 | `proxy.enabled` | true | Port forwarding enabled by default |
 | `proxy.allowed_ports` | `1024-65535` | Allowed port range for forwarding |
 | `ssh.enabled` | true | SSH tunnel enabled by default |
@@ -352,7 +355,7 @@ clawbench/
 │   │   ├── git.go               # Git operations
 │   │   ├── project.go           # Project management
 │   │   ├── ssh_info.go          # SSH tunnel info API
-│   │   ├── terminal.go          # Terminal + quick commands CRUD
+│   │   ├── terminal.go          # Terminal + quick commands CRUD + multi-session
 │   │   └── static.go            # Static files
 │   ├── middleware/              # Middleware (auth/log/recovery/request ID)
 │   ├── platform/                # Platform adaptation (Windows paths, etc.)

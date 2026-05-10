@@ -117,6 +117,9 @@ cd clawbench
 | `chat.page_size` | 20 | 懒加载每页消息条数 |
 | `chat.collapsed_height` | 150 | 历史消息折叠高度 px |
 | `session.max_count` | 10 | 每项目会话上限 |
+| `terminal.enabled` | true | Web 终端默认启用 |
+| `terminal.idle_timeout` | 10m | 终端空闲超时 |
+| `terminal.max_sessions` | 10 | 每项目终端会话上限 |
 | `proxy.enabled` | true | 端口转发默认启用 |
 | `proxy.allowed_ports` | `1024-65535` | 允许转发的端口范围 |
 | `ssh.enabled` | true | SSH 隧道默认启用 |
@@ -352,7 +355,7 @@ clawbench/
 │   │   ├── git.go               # Git 操作
 │   │   ├── project.go           # 项目管理
 │   │   ├── ssh_info.go          # SSH 隧道信息接口
-│   │   ├── terminal.go          # 终端 + 快捷命令 CRUD
+│   │   ├── terminal.go          # 终端 + 快捷命令 CRUD + 多会话管理
 │   │   └── static.go            # 静态文件
 │   ├── middleware/              # 中间件（认证/日志/恢复/请求ID）
 │   ├── platform/                # 平台适配（Windows 路径等）
