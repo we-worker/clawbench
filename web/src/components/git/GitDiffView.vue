@@ -36,7 +36,7 @@ defineProps({
 }
 
 .git-diff-scroll {
-  padding: 6px;
+  padding: 0;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -49,8 +49,8 @@ defineProps({
 
 .git-diff-scroll :deep(.diff-hunk) {
   border: 1px solid var(--border-color, #e5e5e5);
-  border-radius: 4px;
-  margin-bottom: 4px;
+  border-radius: 0;
+  margin-bottom: 0;
 }
 
 .git-diff-scroll :deep(.diff-hunk-header) {
