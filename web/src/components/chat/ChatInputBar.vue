@@ -315,17 +315,20 @@ const attachMenuItemCount = computed(() => {
 let createPressTimer = null
 let createPressStartX = 0
 let createPressStartY = 0
+let longPressFired = false
 const LONG_PRESS_MS = 500
 const MOVE_THRESHOLD = 10
 
 function onCreateTouchStart(e) {
   const btn = e.currentTarget
   btn.classList.add('pressing')
+  longPressFired = false
   const touch = e.touches[0]
   createPressStartX = touch.clientX
   createPressStartY = touch.clientY
   createPressTimer = setTimeout(() => {
     createPressTimer = null
+    longPressFired = true
     btn.classList.remove('pressing')
     lastCreateEmitTime = Date.now()
     emit('create-session')
@@ -358,12 +361,17 @@ function onCreateTouchEnd(e) {
     e.preventDefault()
     lastCreateEmitTime = Date.now()
     emit('show-agent-selector')
+  } else if (longPressFired) {
+    // Long-press already emitted create-session; prevent synthesized click
+    e.preventDefault()
+    longPressFired = false
   }
 }
 
 function onCreateTouchCancel(e) {
   const btn = e.currentTarget
   btn.classList.remove('pressing')
+  longPressFired = false
   if (createPressTimer) {
     clearTimeout(createPressTimer)
     createPressTimer = null
@@ -379,6 +387,11 @@ function onCreateContextMenu(e) {
 }
 
 function handleCreateClick(e) {
+  // Skip if long-press timer already fired (prevents synthesized click after long-press)
+  if (longPressFired) {
+    longPressFired = false
+    return
+  }
   // Skip if touchend already emitted within 300ms (avoid double-fire on touch devices)
   if (Date.now() - lastCreateEmitTime < 300) return
   // On desktop, click = show agent selector (short tap equivalent)
