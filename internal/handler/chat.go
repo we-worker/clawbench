@@ -215,16 +215,22 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 
 	// Validate all attached file paths are within project
 	validatedFilePaths := make([]string, 0, len(allFilePaths))
+	validatedDirPaths := make([]string, 0, len(allFilePaths))
 	for _, fp := range allFilePaths {
 		fAbsPath, ok := validateAndResolvePath(w, r, basePath, fp)
 		if !ok {
 			return
 		}
-		if _, err := os.Stat(fAbsPath); err != nil {
+		info, err := os.Stat(fAbsPath)
+		if err != nil {
 			writeLocalizedErrorf(w, r, http.StatusNotFound, "FileNotFound", map[string]any{"Path": fp})
 			return
 		}
-		validatedFilePaths = append(validatedFilePaths, fAbsPath)
+		if info.IsDir() {
+			validatedDirPaths = append(validatedDirPaths, fAbsPath)
+		} else {
+			validatedFilePaths = append(validatedFilePaths, fAbsPath)
+		}
 	}
 
 	// Validate file paths are within project and collect absolute paths
@@ -244,6 +250,9 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 	prompt := req.Message
 	if len(validatedFilePaths) > 0 {
 		prompt = fmt.Sprintf("[Current file: %s]\n%s", strings.Join(validatedFilePaths, ", "), req.Message)
+	}
+	if len(validatedDirPaths) > 0 {
+		prompt = fmt.Sprintf("[Current directory: %s]\n%s", strings.Join(validatedDirPaths, ", "), prompt)
 	}
 	if len(fileAbsPaths) > 0 {
 		prompt = fmt.Sprintf("[User uploaded %d file(s): %s]\n%s", len(fileAbsPaths), strings.Join(fileAbsPaths, ", "), prompt)
@@ -793,7 +802,31 @@ func buildChatRequest(prompt, sessionID, projectPath, backendName, agentID, mode
 func buildChatRequestFromQueue(qMsg model.QueuedMessage, sessionID, projectPath, backendName, agentID, fileDir string) ai.ChatRequest {
 	prompt := qMsg.Text
 	if len(qMsg.FilePaths) > 0 {
-		prompt = fmt.Sprintf("[Current file: %s]\n%s", strings.Join(qMsg.FilePaths, ", "), qMsg.Text)
+		basePath, _ := filepath.Abs(projectPath)
+		var filePaths, dirPaths []string
+		for _, fp := range qMsg.FilePaths {
+			absPath, ok := model.ValidatePath(basePath, fp)
+			if !ok {
+				filePaths = append(filePaths, fp)
+				continue
+			}
+			info, err := os.Stat(absPath)
+			if err != nil {
+				filePaths = append(filePaths, fp)
+				continue
+			}
+			if info.IsDir() {
+				dirPaths = append(dirPaths, absPath)
+			} else {
+				filePaths = append(filePaths, absPath)
+			}
+		}
+		if len(filePaths) > 0 {
+			prompt = fmt.Sprintf("[Current file: %s]\n%s", strings.Join(filePaths, ", "), qMsg.Text)
+		}
+		if len(dirPaths) > 0 {
+			prompt = fmt.Sprintf("[Current directory: %s]\n%s", strings.Join(dirPaths, ", "), prompt)
+		}
 	}
 	if len(qMsg.Files) > 0 {
 		prompt = fmt.Sprintf("[User uploaded %d file(s): %s]\n%s", len(qMsg.Files), strings.Join(qMsg.Files, ", "), prompt)

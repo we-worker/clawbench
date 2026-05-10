@@ -98,6 +98,7 @@ export default {
     },
     attach: {
       currentFile: 'Current file',
+      currentDir: 'Current directory',
       recentReferences: 'Recent references',
       uploadFile: 'Upload file',
       dropToUpload: 'Drop to upload',

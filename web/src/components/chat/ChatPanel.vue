@@ -72,6 +72,7 @@
       :inputDisabled="inputDisabled"
       :loading="loading"
       :currentFile="currentFile"
+      :currentDir="store.state.currentDir"
       :pendingFiles="pendingFiles"
       :attachedFiles="attachedFiles"
       :messages="messages"

@@ -29,6 +29,7 @@
             <ChatPanelContent
               :active="activeTab === 'chat'"
               :current-file="currentFile"
+              :current-dir="currentDir"
               @open="switchTab('chat')"
               @open-file="handleSelectFile"
             />

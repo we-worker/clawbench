@@ -63,6 +63,7 @@
       :inputDisabled="inputDisabled"
       :loading="loading"
       :currentFile="currentFile"
+      :currentDir="currentDir"
       :pendingFiles="pendingFiles"
       :attachedFiles="attachedFiles"
       :messages="messages"
@@ -193,6 +194,7 @@ const { t } = useI18n()
 const props = defineProps({
     active: Boolean,
     currentFile: Object,
+    currentDir: String,
 })
 const emit = defineEmits(['open', 'message', 'open-file'])
 

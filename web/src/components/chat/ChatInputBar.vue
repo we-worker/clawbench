@@ -68,7 +68,8 @@
       <!-- Attachment tags -->
       <div v-if="attachedFiles.length > 0 || pendingFiles.length > 0" class="chat-attachment-tags">
         <span v-for="(filePath, idx) in attachedFiles" :key="'att-' + filePath" class="chat-file-attachment attachment-ref" @click="$emit('file-tag-click', filePath)" :title="t('chat.attach.openFile')">
-          <Paperclip :size="12" :stroke-width="1.5" />
+          <Folder v-if="isDirPath(filePath)" :size="12" :stroke-width="1.5" />
+          <Paperclip v-else :size="12" :stroke-width="1.5" />
           <span class="chat-file-name">{{ getFileName(filePath) }}</span>
           <button class="attachment-tag-remove" @click.stop="$emit('remove-attached', idx)" :title="t('common.remove')">×</button>
         </span>
@@ -109,13 +110,21 @@
         </button>
       </div>
       <!-- Teleported attach menu (avoids overflow:hidden clipping) -->
-      <PopupMenu v-model:show="showAttachMenu" :target-element="attachMenuRef?.querySelector('.chat-attach-btn')" :max-width="200" :max-height="280" :menu-items-count="recentReferencedFiles.length + 2">
+      <PopupMenu v-model:show="showAttachMenu" :target-element="attachMenuRef?.querySelector('.chat-attach-btn')" :max-width="200" :max-height="280" :menu-items-count="attachMenuItemCount">
         <!-- Current file group -->
         <template v-if="currentFile?.path && !attachedFiles.includes(currentFile.path)">
           <div class="attach-menu-group-title">{{ t('chat.attach.currentFile') }}</div>
           <button class="attach-menu-item" @click="handleAttachFile(currentFile.path)">
             <FileText :size="14" :stroke-width="1.5" />
             <span class="attach-menu-item-name">{{ getFileName(currentFile.path) }}</span>
+          </button>
+        </template>
+        <!-- Current directory group -->
+        <template v-if="currentDir && !attachedFiles.includes(currentDir)">
+          <div class="attach-menu-group-title">{{ t('chat.attach.currentDir') }}</div>
+          <button class="attach-menu-item" @click="handleAttachFile(currentDir)">
+            <Folder :size="14" :stroke-width="1.5" />
+            <span class="attach-menu-item-name">{{ getFileName(currentDir) }}</span>
           </button>
         </template>
         <!-- Recently referenced group -->
@@ -162,7 +171,7 @@
 <script setup>
 import { ref, computed, nextTick, watch, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, List, Plus, Trash2, Calendar, Volume2, Upload, Paperclip, FileImage, FileText, XCircle, Inbox, Send, Square, Cpu, ChevronDown, Check } from 'lucide-vue-next'
+import { MessageSquare, List, Plus, Trash2, Calendar, Volume2, Upload, Paperclip, FileImage, FileText, Folder, XCircle, Inbox, Send, Square, Cpu, ChevronDown, Check } from 'lucide-vue-next'
 import { baseName } from '@/utils/path.ts'
 import PopupMenu from '@/components/common/PopupMenu.vue'
 import QuickSendDialog from '@/components/chat/QuickSendDialog.vue'
@@ -178,6 +187,7 @@ const props = defineProps({
   inputDisabled: Boolean,
   loading: Boolean,
   currentFile: Object,
+  currentDir: String,
   pendingFiles: Array,
   attachedFiles: Array,
   messages: Array,
@@ -288,7 +298,16 @@ const recentReferencedFiles = computed(() => {
 
 const hasFileGroups = computed(() => {
   const hasCurrent = props.currentFile?.path && !props.attachedFiles.includes(props.currentFile.path)
-  return hasCurrent || recentReferencedFiles.value.length > 0
+  const hasDir = props.currentDir && !props.attachedFiles.includes(props.currentDir)
+  return hasCurrent || hasDir || recentReferencedFiles.value.length > 0
+})
+
+const attachMenuItemCount = computed(() => {
+  let count = recentReferencedFiles.value.length
+  if (props.currentFile?.path && !props.attachedFiles.includes(props.currentFile.path)) count++
+  if (props.currentDir && !props.attachedFiles.includes(props.currentDir)) count++
+  count++ // Upload file button
+  return count
 })
 
 // Long-press detection for create-session button
@@ -374,6 +393,10 @@ async function handleDelete() {
 
 function getFileName(path) {
   return baseName(path)
+}
+
+function isDirPath(filePath) {
+  return props.currentDir && filePath === props.currentDir
 }
 
 function autoResizeTextarea() {
