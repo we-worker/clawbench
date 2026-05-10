@@ -170,8 +170,16 @@ export function useChatSession(options: UseChatSessionOptions) {
       }
       lastMessageSnapshot = newSnapshot
 
-      // Data has changed (or this is a full load) — reset UI state and apply new data
-      expandedTools.value = {}
+      // Data has changed (or this is a full load) — apply new data.
+      // Preserve expandedTools when only the last message changed (SSE done reload),
+      // to avoid collapsing user-expanded tool details and triggering full re-render.
+      // Only reset when message count or non-last message identities differ.
+      const prevCount = messages.value.length
+      const newCount = rawMsgs.length
+      const sameCore = prevCount === newCount && prevCount > 0 && rawMsgs.slice(0, -1).every((m, i) => m.id === messages.value[i]?.id)
+      if (!sameCore) {
+        expandedTools.value = {}
+      }
       // Clear stale blockAskQuestions — after backend converts <ask-question> text blocks
       // to tool_use blocks, old entries keyed by text-block indices would cause duplicate
       // rendering. extractScheduledTasks below will re-populate from current DB state.
@@ -422,7 +430,13 @@ export function useChatSession(options: UseChatSessionOptions) {
           if (taskResp.ok) {
             const taskData = await taskResp.json()
             store.state.taskUnread = !!taskData.hasUnread
-            store.state.tasks = taskData.tasks || []
+            // Only update tasks reference when data actually changed,
+            // to avoid triggering watchers (e.g. blockTasks) on every 15s poll.
+            const newTasks = taskData.tasks || []
+            if (store.state.tasks.length !== newTasks.length ||
+                newTasks.some((t, i) => t.id !== store.state.tasks[i]?.id || t.status !== store.state.tasks[i]?.status || t.runCount !== store.state.tasks[i]?.runCount)) {
+              store.state.tasks = newTasks
+            }
             totalTaskUnread = (taskData.tasks || []).reduce((sum: number, t: any) => sum + (t.unreadCount || 0), 0)
           }
         } catch (_) {}
