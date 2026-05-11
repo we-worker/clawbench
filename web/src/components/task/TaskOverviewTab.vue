@@ -58,37 +58,37 @@
     <!-- Fixed bottom action bar -->
     <div class="overview-actions">
       <button class="action-btn" @click="$emit('edit')" :title="t('task.form.editTitle')">
-        <Pencil :size="14" />
+        <Pencil :size="15" />
       </button>
-      <button v-if="task.runCount > 0 || task.runningCount > 0" class="action-btn" :disabled="actionLoading" @click="$emit('history')" :title="t('task.exec.title')">
-        <Clock :size="13" /> {{ task.runCount }}
+      <button v-if="task.runCount > 0 || task.runningCount > 0" class="action-btn" @click="$emit('history')" :title="t('task.exec.title')">
+        <Clock :size="15" />
       </button>
       <span class="actions-spacer"></span>
       <template v-if="task.status === 'active'">
-        <button class="action-btn accent" :disabled="actionLoading" @click="triggerTask">
-          <Zap :size="13" /> {{ t('chat.contentBlocks.trigger') }}
+        <button class="action-btn accent" :disabled="actionLoading" @click="triggerTask" :title="t('chat.contentBlocks.trigger')">
+          <Zap :size="15" />
         </button>
-        <button class="action-btn warn" :disabled="actionLoading" @click="pauseTask">
-          <Pause :size="13" /> {{ t('chat.contentBlocks.pause') }}
+        <button class="action-btn warn" :disabled="actionLoading" @click="pauseTask" :title="t('chat.contentBlocks.pause')">
+          <Pause :size="15" />
         </button>
-        <button class="action-btn danger" :disabled="actionLoading" @click="deleteTask">
-          <Trash2 :size="13" />
+        <button class="action-btn danger" :disabled="actionLoading" @click="deleteTask" :title="t('chat.contentBlocks.delete')">
+          <Trash2 :size="15" />
         </button>
       </template>
       <template v-else-if="task.status === 'paused'">
-        <button class="action-btn accent" :disabled="actionLoading" @click="triggerTask">
-          <Zap :size="13" /> {{ t('chat.contentBlocks.trigger') }}
+        <button class="action-btn accent" :disabled="actionLoading" @click="triggerTask" :title="t('chat.contentBlocks.trigger')">
+          <Zap :size="15" />
         </button>
-        <button class="action-btn success" :disabled="actionLoading" @click="resumeTask">
-          <Play :size="13" /> {{ t('chat.contentBlocks.resume') }}
+        <button class="action-btn success" :disabled="actionLoading" @click="resumeTask" :title="t('chat.contentBlocks.resume')">
+          <Play :size="15" />
         </button>
-        <button class="action-btn danger" :disabled="actionLoading" @click="deleteTask">
-          <Trash2 :size="13" />
+        <button class="action-btn danger" :disabled="actionLoading" @click="deleteTask" :title="t('chat.contentBlocks.delete')">
+          <Trash2 :size="15" />
         </button>
       </template>
       <template v-else-if="task.status === 'completed'">
-        <button class="action-btn danger" :disabled="actionLoading" @click="deleteTask">
-          <Trash2 :size="13" />
+        <button class="action-btn danger" :disabled="actionLoading" @click="deleteTask" :title="t('chat.contentBlocks.delete')">
+          <Trash2 :size="15" />
         </button>
       </template>
     </div>
@@ -364,8 +364,9 @@ async function deleteTask() {
 /* Fixed bottom action bar */
 .overview-actions {
   display: flex;
-  gap: 4px;
-  padding: 6px 12px;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
   border-top: 1px solid var(--border-color, #e5e5e5);
   background: var(--bg-primary, #fff);
   flex-shrink: 0;
@@ -376,92 +377,81 @@ async function deleteTask() {
 }
 
 .action-btn {
-  flex: 1;
-  padding: 5px 8px;
-  border: 1px solid var(--border-color, #e5e5e5);
-  border-radius: 6px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #1a1a1a);
-  font-size: 12px;
-  font-weight: 500;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-secondary, #f0f0f0);
+  color: var(--text-secondary, #666);
   cursor: pointer;
   transition: all 0.15s;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  flex-shrink: 0;
 }
 
 .action-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 @media (hover: hover) {
   .action-btn:hover:not(:disabled) {
-    background: var(--bg-tertiary, rgba(0, 0, 0, 0.03));
+    background: var(--bg-tertiary, rgba(0, 0, 0, 0.08));
+    color: var(--text-primary, #1a1a1a);
   }
 }
 
 .action-btn:active:not(:disabled) {
-  transform: scale(0.97);
-}
-
-.action-btn.primary {
-  background: var(--accent-color, #0066cc);
-  color: #fff;
-  border-color: var(--accent-color, #0066cc);
-}
-
-@media (hover: hover) {
-  .action-btn.primary:hover:not(:disabled) {
-    opacity: 0.9;
-    background: var(--accent-color, #0066cc);
-  }
+  transform: scale(0.92);
 }
 
 .action-btn.accent {
   background: var(--accent-color, #0066cc);
   color: #fff;
-  border-color: var(--accent-color, #0066cc);
 }
 
 @media (hover: hover) {
   .action-btn.accent:hover:not(:disabled) {
-    opacity: 0.9;
+    opacity: 0.85;
+    background: var(--accent-color, #0066cc);
+    color: #fff;
   }
 }
 
 .action-btn.warn {
+  background: rgba(234, 179, 8, 0.12);
   color: #eab308;
-  border-color: rgba(234, 179, 8, 0.4);
 }
 
 @media (hover: hover) {
   .action-btn.warn:hover:not(:disabled) {
-    background: rgba(234, 179, 8, 0.08);
+    background: rgba(234, 179, 8, 0.22);
+    color: #d4a006;
   }
 }
 
 .action-btn.success {
+  background: rgba(34, 197, 94, 0.12);
   color: #22c55e;
-  border-color: rgba(34, 197, 94, 0.4);
 }
 
 @media (hover: hover) {
   .action-btn.success:hover:not(:disabled) {
-    background: rgba(34, 197, 94, 0.08);
+    background: rgba(34, 197, 94, 0.22);
+    color: #1ba84a;
   }
 }
 
 .action-btn.danger {
+  background: rgba(220, 53, 69, 0.08);
   color: #dc3545;
-  border-color: #dc3545;
 }
 
 @media (hover: hover) {
   .action-btn.danger:hover:not(:disabled) {
-    background: rgba(220, 53, 69, 0.06);
+    background: rgba(220, 53, 69, 0.16);
   }
 }
 </style>
