@@ -1,8 +1,8 @@
 <template>
   <div class="task-tab" v-show="active">
     <Transition name="slide-view" mode="out-in">
-      <TaskListPage v-if="currentView === 'list' && !formViewOpen" key="list" ref="listPageRef" @create="onCreate" @select="onTaskSelect" @select-history="onTaskHistorySelect" />
-      <TaskDetailPage v-else-if="currentView === 'settings' && !execDetailOpen && !formViewOpen" key="settings" :task="selectedTaskData" @back="goBack" @edit="onEdit" @deleted="onTaskDeleted" />
+      <TaskListPage v-if="currentView === 'list' && !formViewOpen" key="list" ref="listPageRef" @create="onCreate" @select="onTaskSelect" />
+      <TaskDetailPage v-else-if="currentView === 'settings' && !execDetailOpen && !formViewOpen" key="settings" :task="selectedTaskData" @back="goBack" @edit="onEdit" @deleted="onTaskDeleted" @history="onTaskHistory" />
       <TaskHistoryTab v-else-if="currentView === 'history' && !execDetailOpen && !formViewOpen" key="history" :task="selectedTaskData" @open-file="onOpenFile" />
       <TaskExecDetail v-else-if="execDetailOpen && !formViewOpen" key="exec" :execDetail="selectedExecData" :taskName="selectedTaskData?.name" @close="closeExecDetail" @navigate="onExecNavigate" @open-file="onOpenFile" />
       <TaskFormPage v-else-if="formViewOpen" key="form" :mode="formMode" :task="formMode === 'edit' ? selectedTaskData : null" @close="closeForm" @saved="onFormSaved" />
@@ -68,8 +68,8 @@ function onTaskSelect(taskId: string) {
   navigateToTaskSettings(taskId)
 }
 
-function onTaskHistorySelect(taskId: string) {
-  navigateToTaskHistory(taskId)
+function onTaskHistory() {
+  navigateToTaskHistory(selectedTaskId.value!)
 }
 
 function onExecNavigate(view: string) {

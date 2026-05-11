@@ -10,7 +10,7 @@
     </div>
     <!-- Settings content -->
     <div class="detail-content">
-      <TaskOverviewTab :task="task" @deleted="$emit('deleted')" @edit="$emit('edit')" />
+      <TaskOverviewTab :task="task" @deleted="$emit('deleted')" @edit="$emit('edit')" @history="$emit('history')" />
     </div>
   </div>
 </template>
@@ -32,6 +32,7 @@ defineEmits<{
   back: []
   edit: []
   deleted: []
+  history: []
 }>()
 
 function onBreadcrumbNavigate(view: string) {

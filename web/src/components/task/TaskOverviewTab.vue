@@ -60,6 +60,10 @@
       <button class="action-btn" @click="$emit('edit')" :title="t('task.form.editTitle')">
         <Pencil :size="14" />
       </button>
+      <button v-if="task.runCount > 0 || task.runningCount > 0" class="action-btn" :disabled="actionLoading" @click="$emit('history')" :title="t('task.exec.title')">
+        <Clock :size="13" /> {{ task.runCount }}
+      </button>
+      <span class="actions-spacer"></span>
       <template v-if="task.status === 'active'">
         <button class="action-btn accent" :disabled="actionLoading" @click="triggerTask">
           <Zap :size="13" /> {{ t('chat.contentBlocks.trigger') }}
@@ -93,7 +97,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Pencil, Pause, Play, Zap, Trash2 } from 'lucide-vue-next'
+import { Pencil, Pause, Play, Zap, Trash2, Clock } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useTaskTab } from '@/composables/useTaskTab'
 import { useDialog } from '@/composables/useDialog'
@@ -114,6 +118,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'deleted'): void
   (e: 'edit'): void
+  (e: 'history'): void
 }>()
 
 const actionLoading = ref(false)
@@ -364,6 +369,10 @@ async function deleteTask() {
   border-top: 1px solid var(--border-color, #e5e5e5);
   background: var(--bg-primary, #fff);
   flex-shrink: 0;
+}
+
+.actions-spacer {
+  flex: 1;
 }
 
 .action-btn {
