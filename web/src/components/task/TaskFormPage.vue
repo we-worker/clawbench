@@ -1,25 +1,29 @@
 <template>
-  <ModalDialog :open="open" :title="mode === 'create' ? t('task.form.createTitle') : t('task.form.editTitle')" @close="$emit('close')">
-    <template #header>
-      <Clock :size="16" class="modal-header-icon" />
-      <span class="modal-title">{{ mode === 'create' ? t('task.form.createTitle') : t('task.form.editTitle') }}</span>
-    </template>
-
-    <!-- Tab bar -->
-    <div class="tab-bar">
-      <button class="tab-btn" :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">
-        <Settings :size="13" />
-        {{ t('task.form.tabSettings') }}
-      </button>
-      <button class="tab-btn" :class="{ active: activeTab === 'prompt', 'has-error': errors.prompt }" @click="activeTab = 'prompt'">
-        <FileText :size="13" />
-        {{ t('task.form.tabPrompt') }}
-        <span class="required-dot">*</span>
-      </button>
+  <div class="task-form-page">
+    <!-- Compact header: breadcrumb + tabs -->
+    <div class="form-header">
+      <TaskBreadcrumb
+        currentView="detail"
+        :taskName="task?.name"
+        :formOpen="true"
+        :formMode="mode"
+        @navigate="onBreadcrumbNavigate"
+      />
+      <div class="form-tabs">
+        <button class="form-tab" :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">
+          <Settings :size="12" />
+          {{ t('task.form.tabSettings') }}
+        </button>
+        <button class="form-tab" :class="{ active: activeTab === 'prompt', 'has-error': errors.prompt }" @click="activeTab = 'prompt'">
+          <FileText :size="12" />
+          {{ t('task.form.tabPrompt') }}
+          <span class="required-dot">*</span>
+        </button>
+      </div>
     </div>
 
     <!-- Settings tab -->
-    <div v-show="activeTab === 'settings'" class="details-content">
+    <div v-show="activeTab === 'settings'" class="form-scroll">
       <div v-if="saving" class="saving-indicator">{{ t('task.form.saving') }}</div>
 
       <!-- Task name -->
@@ -159,7 +163,7 @@
     </div>
 
     <!-- Prompt tab -->
-    <div v-show="activeTab === 'prompt'" class="prompt-tab">
+    <div v-show="activeTab === 'prompt'" class="form-scroll">
       <div v-if="saving" class="saving-indicator">{{ t('task.form.saving') }}</div>
       <div class="prompt-toolbar">
         <button class="preview-toggle" :class="{ active: promptPreview }" :title="promptPreview ? t('task.form.editPrompt') : t('task.form.previewPrompt')" @click="togglePromptPreview">
@@ -175,37 +179,39 @@
       <div v-if="errors.prompt" class="form-error">{{ errors.prompt }}</div>
     </div>
 
-    <template #footer>
+    <!-- Fixed bottom bar -->
+    <div class="form-footer">
       <template v-if="mode === 'edit' && task">
-        <button v-if="task.status === 'active'" class="btn btn-warn" :disabled="saving" @click="pauseTask">
+        <button v-if="task.status === 'active'" class="footer-btn warn" :disabled="saving" @click="pauseTask">
           <Pause :size="13" /> {{ t('task.pause') }}
         </button>
-        <button v-if="task.status === 'paused'" class="btn btn-success" :disabled="saving" @click="resumeTask">
+        <button v-if="task.status === 'paused'" class="footer-btn success" :disabled="saving" @click="resumeTask">
           <Play :size="13" /> {{ t('task.resume') }}
         </button>
         <span class="footer-spacer"></span>
       </template>
-      <button class="btn btn-primary" :disabled="saving" @click="submit">
+      <button class="footer-btn primary" :disabled="saving" @click="submit">
         {{ mode === 'create' ? t('task.form.create') : t('task.form.save') }}
       </button>
-      <button class="btn btn-secondary" @click="$emit('close')">{{ t('common.cancel') }}</button>
-    </template>
-  </ModalDialog>
+      <button class="footer-btn secondary" @click="$emit('close')">{{ t('common.cancel') }}</button>
+    </div>
+  </div>
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Clock, Pause, Play, Eye, EyeOff, Settings, FileText } from 'lucide-vue-next'
-import ModalDialog from '@/components/common/ModalDialog.vue'
+import { Pause, Play, Eye, EyeOff, Settings, FileText } from 'lucide-vue-next'
+import TaskBreadcrumb from '@/components/task/TaskBreadcrumb.vue'
 import { useAgents } from '@/composables/useAgents.ts'
 import { useMarkdownRenderer } from '@/composables/useMarkdownRenderer.ts'
+import { useTaskTab } from '@/composables/useTaskTab.ts'
 import { humanizeCron } from '@/utils/format.ts'
 
 const { t } = useI18n()
+const { goBack } = useTaskTab()
 
 const props = defineProps({
-  open: Boolean,
   mode: { type: String, default: 'create' },  // 'create' | 'edit'
   task: Object,  // required for edit mode
 })
@@ -427,9 +433,18 @@ async function resumeTask() {
   }
 }
 
-// Initialize form when dialog opens
-watch(() => props.open, (isOpen) => {
-  if (!isOpen) return
+// Breadcrumb navigation
+function onBreadcrumbNavigate(view) {
+  if (view === 'list') {
+    goBack() // close form first, then go back to list
+    goBack()
+  } else if (view === 'detail') {
+    goBack() // close form, return to detail
+  }
+}
+
+// Initialize form on mount
+onMounted(() => {
   errors.value = {}
   promptPreview.value = true
   activeTab.value = 'settings'
@@ -472,49 +487,58 @@ watch(() => props.open, (isOpen) => {
 </script>
 
 <style scoped>
-/* Tab bar */
-.tab-bar {
+.task-form-page {
   display: flex;
-  gap: 2px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--border-color, #e5e5e5);
-  flex-shrink: 0;
-  position: sticky;
-  top: 0;
-  background: var(--bg-secondary, #fff);
-  z-index: 1;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 }
 
-.tab-btn {
+/* Compact header: breadcrumb + tabs */
+.form-header {
   display: flex;
   align-items: center;
-  gap: 4px;
   padding: 6px 12px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.form-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-secondary, #f0f0f0);
+  border-radius: 6px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.form-tab {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 10px;
   border: none;
-  border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--text-secondary, #666);
-  font-size: 12px;
+  color: var(--text-muted, #999);
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
 }
 
-.tab-btn:hover {
+.form-tab.active {
+  background: var(--bg-primary, #fff);
   color: var(--accent-color, #0066cc);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-.tab-btn.active {
-  color: var(--accent-color, #0066cc);
-  border-bottom-color: var(--accent-color, #0066cc);
-}
-
-.tab-btn.has-error {
+.form-tab.has-error {
   color: #dc3545;
 }
 
-.tab-btn.has-error.active {
-  border-bottom-color: #dc3545;
+.form-tab.has-error.active {
+  color: #dc3545;
 }
 
 .required-dot {
@@ -522,11 +546,11 @@ watch(() => props.open, (isOpen) => {
   font-size: 11px;
 }
 
-/* Details content */
-.details-content {
+/* Scrollable form content */
+.form-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 10px;
+  padding: 10px 12px;
 }
 
 .saving-indicator {
@@ -599,22 +623,15 @@ watch(() => props.open, (isOpen) => {
 }
 
 /* Prompt tab */
-.prompt-tab {
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-}
-
 .prompt-toolbar {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 4px 10px;
+  padding: 4px 0;
   flex-shrink: 0;
 }
 
 .prompt-editor-wrap {
-  padding: 0 10px 8px;
   display: flex;
   flex-direction: column;
 }
@@ -637,7 +654,7 @@ watch(() => props.open, (isOpen) => {
   line-height: 1.6;
 }
 
-/* Preview toggle button (text style) */
+/* Preview toggle button */
 .preview-toggle {
   display: inline-flex;
   align-items: center;
@@ -797,53 +814,72 @@ watch(() => props.open, (isOpen) => {
   cursor: pointer;
 }
 
-/* Buttons */
-.btn {
-  padding: 5px 14px;
-  border: none;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s, opacity 0.15s;
+/* Fixed bottom bar */
+.form-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-color, #e5e5e5);
+  background: var(--bg-primary, #fff);
+  flex-shrink: 0;
 }
-
-.btn-primary {
-  background: var(--accent-color, #0066cc);
-  color: #fff;
-}
-
-.btn-primary:hover { background: #0055aa; }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.btn-secondary {
-  background: var(--bg-tertiary, #f0f0f0);
-  color: var(--text-primary, #1a1a1a);
-}
-
-.btn-secondary:hover { background: #e0e0e0; }
 
 .footer-spacer {
   flex: 1;
 }
 
-.btn-warn {
+.footer-btn {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.footer-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.footer-btn.primary {
+  background: var(--accent-color, #0066cc);
+  color: #fff;
+}
+
+.footer-btn.primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.footer-btn.secondary {
+  background: var(--bg-tertiary, #f0f0f0);
+  color: var(--text-primary, #1a1a1a);
+}
+
+.footer-btn.secondary:hover {
+  background: #e0e0e0;
+}
+
+.footer-btn.warn {
   background: rgba(234, 179, 8, 0.12);
   color: #eab308;
-  display: flex;
-  align-items: center;
-  gap: 3px;
 }
 
-.btn-warn:hover { background: rgba(234, 179, 8, 0.2); }
+.footer-btn.warn:hover:not(:disabled) {
+  background: rgba(234, 179, 8, 0.2);
+}
 
-.btn-success {
+.footer-btn.success {
   background: rgba(34, 197, 94, 0.12);
   color: #22c55e;
-  display: flex;
-  align-items: center;
-  gap: 3px;
 }
 
-.btn-success:hover { background: rgba(34, 197, 94, 0.2); }
+.footer-btn.success:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.2);
+}
 </style>

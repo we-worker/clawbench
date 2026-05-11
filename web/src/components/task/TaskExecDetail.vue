@@ -229,8 +229,8 @@ onUnmounted(() => {
 .exec-detail-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }

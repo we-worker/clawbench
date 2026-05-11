@@ -3,8 +3,8 @@
     <!-- Root crumb: 任务列表 -->
     <span
       class="task-crumb"
-      :class="{ current: currentView === 'list', clickable: currentView !== 'list' }"
-      @click="currentView !== 'list' && $emit('navigate', 'list')"
+      :class="{ current: currentView === 'list' && !formOpen, clickable: currentView !== 'list' || formOpen }"
+      @click="(currentView !== 'list' || formOpen) && $emit('navigate', 'list')"
     >{{ t('task.title') }}</span>
 
     <!-- Task crumb (shown when a task is selected) -->
@@ -12,8 +12,8 @@
       <span class="task-crumb-sep">›</span>
       <span
         class="task-crumb"
-        :class="{ current: currentView === 'detail' && !execDetailOpen, clickable: currentView === 'exec' }"
-        @click="currentView === 'exec' && $emit('navigate', 'detail')"
+        :class="{ current: currentView === 'detail' && !execDetailOpen && !formOpen, clickable: currentView === 'exec' || formOpen }"
+        @click="(currentView === 'exec' || formOpen) && $emit('navigate', 'detail')"
       >{{ taskName }}</span>
     </template>
 
@@ -21,6 +21,12 @@
     <template v-if="execDetailOpen">
       <span class="task-crumb-sep">›</span>
       <span class="task-crumb current">{{ t('task.exec.title') }}</span>
+    </template>
+
+    <!-- Form crumb -->
+    <template v-if="formOpen">
+      <span class="task-crumb-sep">›</span>
+      <span class="task-crumb current">{{ formMode === 'create' ? t('task.form.createTitle') : t('task.form.editTitle') }}</span>
     </template>
   </div>
 </template>
@@ -30,10 +36,12 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 
-const props = defineProps({
+defineProps({
   currentView: { type: String, default: 'list' },
   taskName: String,
   execDetailOpen: Boolean,
+  formOpen: Boolean,
+  formMode: { type: String, default: 'create' },
 })
 
 defineEmits(['navigate'])
@@ -43,9 +51,9 @@ defineEmits(['navigate'])
 .task-breadcrumb {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   overflow-x: auto;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-muted, #999);
   scrollbar-width: none;
   flex: 1;
@@ -57,8 +65,8 @@ defineEmits(['navigate'])
 }
 
 .task-crumb {
-  padding: 3px 6px;
-  border-radius: 4px;
+  padding: 1px 4px;
+  border-radius: 3px;
   white-space: nowrap;
   transition: background 0.15s, color 0.15s;
 }
@@ -86,6 +94,6 @@ defineEmits(['navigate'])
 
 .task-crumb-sep {
   color: var(--text-muted, #999);
-  font-size: 11px;
+  font-size: 10px;
 }
 </style>

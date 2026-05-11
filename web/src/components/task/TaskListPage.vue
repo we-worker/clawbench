@@ -1,11 +1,5 @@
 <template>
   <div class="task-list-page">
-    <div class="task-list-header">
-      <TaskBreadcrumb currentView="list" />
-      <button class="create-btn" @click="$emit('create')" :title="t('task.form.createTitle')">
-        <Plus :size="18" />
-      </button>
-    </div>
     <div class="task-list-body">
       <div v-if="loading" class="task-loading">{{ t('common.loading') }}</div>
       <div v-else-if="tasks.length === 0" class="task-empty">{{ t('task.noTasks') }}</div>
@@ -38,6 +32,10 @@
         </div>
       </div>
     </div>
+    <!-- Fixed FAB -->
+    <button class="create-fab" @click="$emit('create')" :title="t('task.form.createTitle')">
+      <Plus :size="20" />
+    </button>
   </div>
 </template>
 
@@ -45,7 +43,6 @@
 import { Plus, ChevronRight } from 'lucide-vue-next'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import TaskBreadcrumb from '@/components/task/TaskBreadcrumb.vue'
 import { useTaskTab } from '@/composables/useTaskTab'
 import { useAgents } from '@/composables/useAgents'
 import { humanizeCron, repeatLabel, statusLabel, formatDateTime } from '@/utils/format'
@@ -84,40 +81,7 @@ onMounted(refresh)
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.task-list-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-color, #e5e5e5);
-  flex-shrink: 0;
-}
-
-.create-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 50%;
-  background: var(--accent-color, #0066cc);
-  color: #fff;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: opacity 0.15s;
-  flex-shrink: 0;
-}
-
-.create-btn:active {
-  opacity: 0.8;
-}
-
-@media (hover: hover) {
-  .create-btn:hover {
-    opacity: 0.85;
-  }
+  position: relative;
 }
 
 .task-list-body {
@@ -132,6 +96,36 @@ onMounted(refresh)
   text-align: center;
   color: var(--text-muted, #999);
   font-size: 13px;
+}
+
+/* Floating Action Button — fixed bottom-right */
+.create-fab {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent-color, #0066cc);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  transition: transform 0.15s, opacity 0.15s;
+  z-index: 1;
+}
+
+.create-fab:active {
+  transform: scale(0.92);
+}
+
+@media (hover: hover) {
+  .create-fab:hover {
+    opacity: 0.88;
+  }
 }
 
 .task-item {

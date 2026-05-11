@@ -1,6 +1,6 @@
 <template>
   <div class="task-detail-page">
-    <!-- Header: breadcrumb + edit button -->
+    <!-- Compact header: breadcrumb + sub tabs on same row -->
     <div class="detail-header">
       <TaskBreadcrumb
         currentView="detail"
@@ -8,16 +8,14 @@
         :execDetailOpen="false"
         @navigate="onBreadcrumbNavigate"
       />
-      <button class="edit-btn" @click="$emit('edit')" :title="t('task.form.editTitle')"><Pencil :size="16" /></button>
-    </div>
-    <!-- Sub tabs -->
-    <div class="sub-tabs">
-      <button class="sub-tab" :class="{ active: subTab === 'overview' }" @click="subTab = 'overview'">{{ t('task.form.tabSettings') }}</button>
-      <button class="sub-tab" :class="{ active: subTab === 'history' }" @click="subTab = 'history'">{{ t('task.exec.title') }}</button>
+      <div class="sub-tabs">
+        <button class="sub-tab" :class="{ active: subTab === 'overview' }" @click="subTab = 'overview'">{{ t('task.form.tabSettings') }}</button>
+        <button class="sub-tab" :class="{ active: subTab === 'history' }" @click="subTab = 'history'">{{ t('task.exec.title') }}</button>
+      </div>
     </div>
     <!-- Tab content -->
     <div class="detail-content">
-      <TaskOverviewTab v-if="subTab === 'overview'" :task="task" @deleted="$emit('deleted')" />
+      <TaskOverviewTab v-if="subTab === 'overview'" :task="task" @deleted="$emit('deleted')" @edit="$emit('edit')" />
       <TaskHistoryTab v-else :task="task" @open-file="$emit('open-file', $event)" />
     </div>
   </div>
@@ -25,7 +23,6 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Pencil } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import TaskBreadcrumb from '@/components/task/TaskBreadcrumb.vue'
 import TaskOverviewTab from '@/components/task/TaskOverviewTab.vue'
@@ -69,69 +66,36 @@ function onBreadcrumbNavigate(view: string) {
 .detail-header {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-color, #e5e5e5);
-  flex-shrink: 0;
+  padding: 6px 12px;
   gap: 8px;
-}
-
-.edit-btn {
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text-muted, #999);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s;
-}
-
-@media (hover: hover) {
-  .edit-btn:hover {
-    background: var(--bg-tertiary, rgba(0, 0, 0, 0.04));
-  }
-}
-
-.edit-btn:active {
-  background: var(--bg-tertiary, rgba(0, 0, 0, 0.08));
 }
 
 .sub-tabs {
   display: flex;
-  border-bottom: 1px solid var(--border-color, #e5e5e5);
+  gap: 2px;
+  background: var(--bg-secondary, #f0f0f0);
+  border-radius: 6px;
+  padding: 2px;
   flex-shrink: 0;
 }
 
 .sub-tab {
-  flex: 1;
-  padding: 8px 0;
+  padding: 3px 10px;
   border: none;
   background: transparent;
   color: var(--text-muted, #999);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  position: relative;
-  transition: color 0.15s;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
 }
 
 .sub-tab.active {
+  background: var(--bg-primary, #fff);
   color: var(--accent-color, #0066cc);
-}
-
-.sub-tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  left: 20%;
-  right: 20%;
-  height: 2px;
-  background: var(--accent-color, #0066cc);
-  border-radius: 1px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .detail-content {

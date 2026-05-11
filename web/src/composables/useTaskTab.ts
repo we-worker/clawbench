@@ -8,6 +8,8 @@ const selectedExecId = ref<string | null>(null)
 const selectedExecData = ref<any>(null)
 const detailSubTab = ref<'overview' | 'history'>('overview')
 const execDetailOpen = ref(false)
+const formViewOpen = ref(false)
+const formMode = ref<'create' | 'edit'>('create')
 
 // Module-level polling timer
 let pollingTimer: ReturnType<typeof setInterval> | null = null
@@ -20,10 +22,13 @@ export function useTaskTab() {
         currentView.value = 'detail'
         detailSubTab.value = 'overview'
         execDetailOpen.value = false
+        formViewOpen.value = false
     }
 
     function goBack() {
-        if (execDetailOpen.value) {
+        if (formViewOpen.value) {
+            formViewOpen.value = false
+        } else if (execDetailOpen.value) {
             execDetailOpen.value = false
             selectedExecId.value = null
         } else {
@@ -42,6 +47,20 @@ export function useTaskTab() {
         execDetailOpen.value = false
         selectedExecId.value = null
         selectedExecData.value = null
+    }
+
+    function openCreateForm() {
+        formMode.value = 'create'
+        formViewOpen.value = true
+    }
+
+    function openEditForm() {
+        formMode.value = 'edit'
+        formViewOpen.value = true
+    }
+
+    function closeForm() {
+        formViewOpen.value = false
     }
 
     // --- Data methods ---
@@ -108,12 +127,17 @@ export function useTaskTab() {
         selectedExecData,
         detailSubTab: detailSubTab as Ref<'overview' | 'history'>,
         execDetailOpen,
+        formViewOpen,
+        formMode: formMode as Ref<'create' | 'edit'>,
 
         // Navigation methods
         navigateToTask,
         goBack,
         openExecDetail,
         closeExecDetail,
+        openCreateForm,
+        openEditForm,
+        closeForm,
 
         // Data methods
         loadTasks,

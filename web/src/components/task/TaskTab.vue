@@ -1,11 +1,11 @@
 <template>
   <div class="task-tab" v-show="active">
     <Transition name="slide-view" mode="out-in">
-      <TaskListPage v-if="currentView === 'list'" key="list" ref="listPageRef" @create="openCreateDialog" @select="onTaskSelect" />
-      <TaskDetailPage v-else-if="!execDetailOpen" key="detail" :task="selectedTaskData" @back="goBack" @edit="openEditDialog" @deleted="onTaskDeleted" @open-file="onOpenFile" />
-      <TaskExecDetail v-else key="exec" :execDetail="selectedExecData" :taskName="selectedTaskData?.name" @close="closeExecDetail" @navigate="onExecNavigate" @open-file="onOpenFile" />
+      <TaskListPage v-if="currentView === 'list' && !formViewOpen" key="list" ref="listPageRef" @create="onCreate" @select="onTaskSelect" />
+      <TaskDetailPage v-else-if="currentView === 'detail' && !execDetailOpen && !formViewOpen" key="detail" :task="selectedTaskData" @back="goBack" @edit="onEdit" @deleted="onTaskDeleted" @open-file="onOpenFile" />
+      <TaskExecDetail v-else-if="execDetailOpen && !formViewOpen" key="exec" :execDetail="selectedExecData" :taskName="selectedTaskData?.name" @close="closeExecDetail" @navigate="onExecNavigate" @open-file="onOpenFile" />
+      <TaskFormPage v-else-if="formViewOpen" key="form" :mode="formMode" :task="formMode === 'edit' ? selectedTaskData : null" @close="closeForm" @saved="onFormSaved" />
     </Transition>
-    <TaskFormDialog :open="formOpen" :mode="formMode" :task="formTaskData" @close="formOpen = false" @saved="onFormSaved" />
   </div>
 </template>
 
@@ -14,7 +14,7 @@ import { ref, computed } from 'vue'
 import TaskListPage from '@/components/task/TaskListPage.vue'
 import TaskDetailPage from '@/components/task/TaskDetailPage.vue'
 import TaskExecDetail from '@/components/task/TaskExecDetail.vue'
-import TaskFormDialog from '@/components/task/TaskFormDialog.vue'
+import TaskFormPage from '@/components/task/TaskFormPage.vue'
 import { useTaskTab } from '@/composables/useTaskTab'
 import { store } from '@/stores/app'
 
@@ -26,7 +26,7 @@ const emit = defineEmits<{
   'open-file': [filePath: string]
 }>()
 
-const { currentView, selectedTaskId, selectedExecData, execDetailOpen, navigateToTask, goBack, closeExecDetail, loadTasks } = useTaskTab()
+const { currentView, selectedTaskId, selectedExecData, execDetailOpen, formViewOpen, formMode, navigateToTask, goBack, closeExecDetail, openCreateForm, openEditForm, closeForm, loadTasks } = useTaskTab()
 
 // Read from store directly — NOT from listPageRef (Vue refs don't expose internal computed)
 const selectedTaskData = computed(() =>
@@ -35,26 +35,17 @@ const selectedTaskData = computed(() =>
 
 const listPageRef = ref<InstanceType<typeof TaskListPage> | null>(null)
 
-// TaskFormDialog state
-const formOpen = ref(false)
-const formMode = ref<'create' | 'edit'>('create')
-const formTaskData = ref<any>(null)
-
-function openCreateDialog() {
-  formMode.value = 'create'
-  formTaskData.value = null
-  formOpen.value = true
+function onCreate() {
+  openCreateForm()
 }
 
-function openEditDialog() {
-  formMode.value = 'edit'
-  formTaskData.value = selectedTaskData.value
-  formOpen.value = true
+function onEdit() {
+  openEditForm()
 }
 
 async function onFormSaved(newTaskId: string) {
-  formOpen.value = false
   await loadTasks()
+  closeForm()
   if (formMode.value === 'create' && newTaskId) {
     navigateToTask(newTaskId)
   }
