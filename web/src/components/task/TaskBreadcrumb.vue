@@ -17,7 +17,7 @@
       >{{ taskName }}</span>
     </template>
 
-    <!-- History crumb (when on history or exec detail from history) -->
+    <!-- History crumb -->
     <template v-if="showHistoryCrumb">
       <span class="task-crumb-sep">›</span>
       <span
@@ -25,6 +25,12 @@
         :class="{ current: isHistory, clickable: !isHistory }"
         @click="!isHistory && navigate('history')"
       >{{ t('task.exec.title') }}</span>
+    </template>
+
+    <!-- Exec detail crumb -->
+    <template v-if="execDetailOpen">
+      <span class="task-crumb-sep">›</span>
+      <span class="task-crumb current">{{ t('task.exec.detail') }}</span>
     </template>
 
     <!-- Form crumb -->
@@ -56,7 +62,7 @@ const isSettings = computed(() => currentView.value === 'settings' && !execDetai
 const isHistory = computed(() => currentView.value === 'history' && !execDetailOpen.value && !formViewOpen.value)
 
 const showHistoryCrumb = computed(() => {
-  // Show when on history page, or when exec detail is open from history
+  // Show when on history page or when exec detail is open (from history)
   if (formViewOpen.value) return false
   return currentView.value === 'history'
 })

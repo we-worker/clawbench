@@ -329,6 +329,7 @@ export default {
       cancelled: '已中止执行',
       alreadyRunning: '任务正在执行中',
       alreadyFinished: '执行已结束',
+      detail: '执行详情',
     },
   },
   file: {

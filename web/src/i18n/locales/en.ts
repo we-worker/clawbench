@@ -329,6 +329,7 @@ export default {
       cancelled: 'Execution cancelled',
       alreadyRunning: 'Task is already running',
       alreadyFinished: 'Execution already finished',
+      detail: 'Execution detail',
     },
   },
   file: {
