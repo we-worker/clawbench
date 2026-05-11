@@ -39,12 +39,15 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskTab } from '@/composables/useTaskTab'
+import { store } from '@/stores/app'
 
 const { t } = useI18n()
 const { currentView, selectedTaskId, execDetailOpen, formViewOpen, formMode, navigateToList, navigateToTaskSettings, navigateToTaskHistory } = useTaskTab()
 
-const props = defineProps({
-  taskName: String,
+// Derive task name from store (same pattern as TaskTab)
+const taskName = computed(() => {
+  if (!selectedTaskId.value) return null
+  return (store.state.tasks || []).find(t => t.id === selectedTaskId.value)?.name || null
 })
 
 // Derived state

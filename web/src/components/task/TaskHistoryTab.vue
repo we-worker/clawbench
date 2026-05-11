@@ -2,7 +2,7 @@
   <div class="task-history-page">
     <!-- Header with breadcrumb -->
     <div class="history-header">
-      <TaskBreadcrumb :taskName="task?.name" />
+      <TaskBreadcrumb />
     </div>
     <!-- History content -->
     <div class="task-history-tab">

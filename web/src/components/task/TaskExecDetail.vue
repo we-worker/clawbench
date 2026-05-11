@@ -2,7 +2,7 @@
   <div class="exec-detail-page">
     <!-- Header: breadcrumb + info button -->
     <div class="exec-detail-header">
-      <TaskBreadcrumb :taskName="taskName" />
+      <TaskBreadcrumb />
       <button class="info-btn" @click="showMetadata"><Info :size="16" /></button>
     </div>
 

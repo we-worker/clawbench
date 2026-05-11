@@ -2,7 +2,7 @@
   <div class="task-detail-page">
     <!-- Compact header: breadcrumb only -->
     <div class="detail-header">
-      <TaskBreadcrumb :taskName="task?.name" />
+      <TaskBreadcrumb />
     </div>
     <!-- Settings content -->
     <div class="detail-content">

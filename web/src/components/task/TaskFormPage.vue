@@ -2,7 +2,7 @@
   <div class="task-form-page">
     <!-- Compact header: breadcrumb -->
     <div class="form-header">
-      <TaskBreadcrumb :taskName="task?.name" />
+      <TaskBreadcrumb />
     </div>
 
     <!-- Scrollable form content -->
