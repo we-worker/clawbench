@@ -327,11 +327,12 @@ config/agents/
 ```
 
 - **Agent 配置化**：每个智能体通过 YAML 定义专属 system prompt、模型、后端，无需改代码
+- **自动发现**：首次启动时若 `config/agents/` 为空，自动扫描已安装的 AI CLI（claude、codebuddy、opencode、gemini、codex、qodercli、vecli），为每个检测到的后端生成最小化 YAML 配置。仅执行一次，不会覆盖已有文件
 - **共享提示词**：`config/rules.md` 定义所有智能体的公共行为和强制规则（定时任务 CLI、RAG 搜索、媒体处理），避免重复配置
 - **模板占位符**：`{{AVAILABLE_AGENTS}}` 自动替换为可用智能体列表，方便智能体间互相调度
 - **多 Agent 调度**：不同任务匹配不同智能体，全能助手负责对话，专业 Agent 执行定时任务
 - **工具调用透传**：AI 的工具调用（文件读写、Bash 命令、代码编辑）实时可视化展示
-- **Cron 定时执行**：AI 通过 `clawbench task` CLI 子命令创建定时任务，确认后由 Cron 调度自动执行，聊天消息中内嵌任务卡片
+- **Cron 定时执行**：AI 通过 `clawbench task` CLI 子命令创建定时任务，确认后由 Cron 调度自动执行，聊天消息中内嵌任务卡片；`list` 和 `get` 子命令可查看已有任务，`--prompt` 支持 `@path` 语法从文件读取提示词
 - **Cron 管控**：定时任务执行时自动剥离 rules.md 中的定时任务段落（`<!-- SCHEDULED_BEGIN/END -->` 标记），防止 AI 递归创建任务；CLI 层通过 `CLAWBENCH_SCHEDULED=1` 环境变量提供双重保护
 - **多后端可切换**：同一平台同时支持 CodeBuddy、Claude Code、OpenCode、Gemini CLI、Codex、Qoder CLI、VeCLI 后端，会话数据隔离
 
@@ -366,13 +367,13 @@ clawbench/
 │   │   ├── uuid.go              # UUID 工具
 │   │   └── logger.go            # 文件日志（按天轮转）
 │   ├── model/                   # 数据模型
-│   │   ├── config.go / defaults.go / chat.go / file.go / agent.go / scheduler.go / path.go / ssh.go
+│   │   ├── config.go / defaults.go / chat.go / file.go / agent.go / scheduler.go / path.go / ssh.go / discovery.go
 │   │   └── errors.go
 │   ├── ssh/                     # SSH 隧道服务器
 │   │   ├── server.go            # SSH 服务器（direct-tcpip 端口转发）
 │   │   └── server_test.go       # 测试
 │   ├── cli/                     # CLI 子命令（AI 智能体自服务）
-│   │   ├── task.go              # 定时任务子命令（create/update/delete/pause/resume/trigger/list-agents）
+│   │   ├── task.go              # 定时任务子命令（create/update/delete/pause/resume/trigger/list/get/list-agents；--prompt 支持 @path 语法）
 │   │   ├── rag.go               # RAG 搜索子命令（search/message/session）
 │   │   ├── help.go              # --help 自文档化基础设施
 │   │   └── helpers.go           # 共享代码（loadConfig/apiURL/httpDo/TLS/cookie）

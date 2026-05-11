@@ -154,6 +154,7 @@ Each `.yaml.example` file contains complete configuration fields and description
 - Recursive directory browsing with 120+ file extension support
 - Search filtering, sorting (name/time/extension)
 - Context menu: rename, delete, copy, cut, paste, new file/folder, download, open as project
+- **Multi-Select Operations**: Toggle multi-select mode from toolbar, batch copy/cut/delete; mobile long-press triggers context menu
 - File upload (image support, configurable size and count)
 - Toggle hidden file visibility
 
@@ -174,7 +175,7 @@ Each `.yaml.example` file contains complete configuration fields and description
 - **Streaming Response**: Real-time SSE push, thinking process and tool calls fully visible
 - **Multi-Agent Support**: General assistant, coding expert, handyman, etc. — YAML config, plug-and-play
 - **AI Backend Switching**: CodeBuddy, Claude Code, OpenCode, Gemini CLI, Codex, Qoder CLI, VeCLI — session-level isolation
-- **Scheduled Tasks**: AI creates Cron schedules via CLI subcommands, executes automatically; task cards embedded in chat messages; frequency presets (hourly/daily/weekly/monthly) + custom cron expressions
+- **Scheduled Tasks**: AI creates Cron schedules via CLI subcommands, executes automatically; independent tab with 4-level breadcrumb navigation; task cards embedded in chat messages; frequency presets (hourly/daily/weekly/monthly) + custom cron expressions
 - **Multi-Session Management**: Create, switch, delete independent sessions, swipe to switch
 - **Image Upload**: Upload images for AI conversation (multimodal)
 - **Disconnect Protection**: Messages persist immediately, no data loss on disconnect, 60s timeout auto-reconnect (3 attempts then fallback to polling)
@@ -187,6 +188,7 @@ Each `.yaml.example` file contains complete configuration fields and description
 - **File Path Navigation**: Clickable file paths in AI responses
 - **Quick Send**: Preset common commands (continue, build, commit, etc.) with drag reorder, one-click send
 - **Quote & Ask**: Select code or text, ask AI directly, auto-attaches context
+- **Current Directory Attachment**: Chat input supports attaching current directory context, AI auto-gets directory structure
 - **Unread Badge**: Chat panel icon shows unread message count
 
 ### 🖼️ Media Preview

@@ -327,11 +327,12 @@ config/agents/
 ```
 
 - **Configurable Agents**: Each agent is defined via YAML with dedicated system prompt, model, and backend — no code changes needed
+- **Auto-Discovery**: On first startup, if `config/agents/` is empty, the system auto-scans for installed AI CLIs (claude, codebuddy, opencode, gemini, codex, qodercli, vecli) and generates minimal YAML configs for each detected backend. One-time only; existing files are never overwritten
 - **Shared Rules**: `config/rules.md` defines common behaviors and mandatory rules for all agents (scheduled task CLI, RAG search, media handling), avoiding duplicate configuration
 - **Template Placeholder**: `{{AVAILABLE_AGENTS}}` is auto-replaced with the available agent list, facilitating inter-agent dispatching
 - **Multi-Agent Dispatching**: Different tasks match different agents; the all-round assistant handles conversations while specialized agents execute scheduled tasks
 - **Transparent Tool Calls**: AI tool calls (file read/write, Bash commands, code editing) are visualized in real time
-- **Cron Scheduled Execution**: AI creates scheduled tasks via `clawbench task` CLI subcommands; after confirmation, Cron scheduler executes them automatically. Task cards are embedded in chat messages
+- **Cron Scheduled Execution**: AI creates scheduled tasks via `clawbench task` CLI subcommands; after confirmation, Cron scheduler executes them automatically. Task cards are embedded in chat messages. `list` and `get` subcommands allow inspecting existing tasks; `--prompt` supports `@path` syntax to read prompt text from a file
 - **Cron Governance**: During scheduled execution, the Scheduled Tasks section in rules.md is automatically stripped (`<!-- SCHEDULED_BEGIN/END -->` markers), preventing AI from recursively creating tasks; CLI layer provides dual-layer protection via `CLAWBENCH_SCHEDULED=1` env var
 - **Multi-Backend Switching**: The same platform simultaneously supports CodeBuddy, Claude Code, OpenCode, Gemini CLI, Codex, Qoder CLI, and VeCLI backends with isolated session data
 
@@ -366,13 +367,13 @@ clawbench/
 │   │   ├── uuid.go              # UUID utility
 │   │   └── logger.go            # File logger (daily rotation)
 │   ├── model/                   # Data models
-│   │   ├── config.go / defaults.go / chat.go / file.go / agent.go / scheduler.go / path.go / ssh.go
+│   │   ├── config.go / defaults.go / chat.go / file.go / agent.go / scheduler.go / path.go / ssh.go / discovery.go
 │   │   └── errors.go
 │   ├── ssh/                     # SSH tunnel server
 │   │   ├── server.go            # SSH server (direct-tcpip port forwarding)
 │   │   └── server_test.go       # Tests
 │   ├── cli/                     # CLI subcommands (AI agent self-service)
-│   │   ├── task.go              # Scheduled task subcommands (create/update/delete/pause/resume/trigger/list-agents)
+│   │   ├── task.go              # Scheduled task subcommands (create/update/delete/pause/resume/trigger/list/get/list-agents; --prompt supports @path syntax)
 │   │   ├── rag.go               # RAG search subcommands (search/message/session)
 │   │   ├── help.go              # --help self-documentation infrastructure
 │   │   └── helpers.go           # Shared code (loadConfig/apiURL/httpDo/TLS/cookie)
