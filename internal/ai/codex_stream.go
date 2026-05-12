@@ -208,12 +208,9 @@ func parseCodexResumeOutput(scanner *bufio.Scanner, ch chan<- StreamEvent, sessi
 		}
 
 		// Handle ERROR lines from codex resume output
-		if strings.HasPrefix(line, "ERROR:") {
-			errMsg := strings.TrimSpace(strings.TrimPrefix(line, "ERROR:"))
-			if errMsg != "" {
-				ch <- StreamEvent{Type: "error", Error: errMsg}
-				return
-			}
+		if errMsg, ok := strings.CutPrefix(line, "ERROR:"); ok && errMsg != "" {
+			ch <- StreamEvent{Type: "error", Error: errMsg}
+			return
 		}
 
 		// Detect role markers
@@ -260,11 +257,9 @@ func parseCodexResumeOutput(scanner *bufio.Scanner, ch chan<- StreamEvent, sessi
 				thinkingBuf.Reset()
 				rest := strings.TrimPrefix(line, codexThinkOpen)
 				// Check if closing tag is on the same line
-				if closeIdx := strings.Index(rest, codexThinkClose); closeIdx >= 0 {
-					thinkingContent := rest[:closeIdx]
-					afterClose := rest[closeIdx+len(codexThinkClose):]
-					if thinkingContent != "" {
-						ch <- StreamEvent{Type: "thinking", Content: thinkingContent}
+				if before, afterClose, ok := strings.Cut(rest, codexThinkClose); ok {
+					if before != "" {
+						ch <- StreamEvent{Type: "thinking", Content: before}
 					}
 					inThinking = false
 					afterClose = strings.TrimSpace(afterClose)
@@ -294,9 +289,7 @@ func parseCodexResumeOutput(scanner *bufio.Scanner, ch chan<- StreamEvent, sessi
 			}
 			if inThinking {
 				// Check for inline closing tag within a thinking line
-				if closeIdx := strings.Index(line, codexThinkClose); closeIdx >= 0 {
-					before := line[:closeIdx]
-					afterClose := line[closeIdx+len(codexThinkClose):]
+				if before, afterClose, ok := strings.Cut(line, codexThinkClose); ok {
 					if before != "" {
 						if thinkingBuf.Len() > 0 {
 							thinkingBuf.WriteByte('\n')

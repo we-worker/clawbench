@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/nicksnyder/go-i18n/v2/i18n"
@@ -20,12 +21,12 @@ func loc(r *http.Request) *i18n.Localizer {
 }
 
 // T is a shorthand for translating a message key in the handler layer.
-func T(r *http.Request, msgKey string, templateData ...map[string]interface{}) string {
+func T(r *http.Request, msgKey string, templateData ...map[string]any) string {
 	return i18npkg.T(loc(r), msgKey, templateData...)
 }
 
 // writeLocalizedErrorf writes a localized error response with i18n message key.
-func writeLocalizedErrorf(w http.ResponseWriter, r *http.Request, status int, msgKey string, templateData ...map[string]interface{}) {
+func writeLocalizedErrorf(w http.ResponseWriter, r *http.Request, status int, msgKey string, templateData ...map[string]any) {
 	localizedMsg := T(r, msgKey, templateData...)
 	var detail map[string]any
 	if len(templateData) > 0 {
@@ -67,10 +68,8 @@ func requireProject(w http.ResponseWriter, r *http.Request) (string, bool) {
 // requireMethod checks that the request method is one of the allowed methods.
 // Writes 405 on mismatch. Returns true if allowed.
 func requireMethod(w http.ResponseWriter, r *http.Request, methods ...string) bool {
-	for _, m := range methods {
-		if r.Method == m {
-			return true
-		}
+	if slices.Contains(methods, r.Method) {
+		return true
 	}
 	writeLocalizedErrorf(w, r, http.StatusMethodNotAllowed, "MethodNotAllowed")
 	return false

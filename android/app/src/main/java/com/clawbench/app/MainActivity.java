@@ -526,8 +526,18 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
             super.onReceivedError(view, request, error);
+            // Only show error toast for main frame errors.
+            // Defer the check: if the connection recovers before the deferred runnable fires,
+            // we avoid showing a stale "offline" toast after screen unlock.
             if (request.isForMainFrame()) {
-                Toast.makeText(MainActivity.this, R.string.error_connection_failed, Toast.LENGTH_SHORT).show();
+                view.postDelayed(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        // Only show if WebView still can't load (connection genuinely down)
+                        if (!isNetworkAvailable()) {
+                            Toast.makeText(MainActivity.this, R.string.error_connection_failed, Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                }, 600);
             }
         }
     }
