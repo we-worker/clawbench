@@ -33,7 +33,7 @@ func ServeChatHistory(w http.ResponseWriter, r *http.Request) {
 				writeLocalizedErrorf(w, r, http.StatusServiceUnavailable, "NoAgentsAvailable")
 						return
 					}
-					sessionID, err = service.CreateSession(projectPath, backend, T(r, "NewSession"), agentID, defaultModel, "default")
+					sessionID, err = service.CreateSession(projectPath, backend, T(r, "NewSession"), agentID, defaultModel, "default", "chat")
 					if err != nil {
 						model.WriteError(w, model.Internal(fmt.Errorf("failed to create session")))
 						return

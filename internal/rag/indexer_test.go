@@ -52,6 +52,7 @@ func setupIndexerDB(t *testing.T) *sql.DB {
 			agent_id TEXT DEFAULT '',
 			agent_source TEXT DEFAULT 'default',
 			model TEXT DEFAULT '',
+			session_type TEXT NOT NULL DEFAULT 'chat',
 			deleted INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,

@@ -78,7 +78,7 @@ func ServeSessions(w http.ResponseWriter, r *http.Request) {
 				title = T(r, "NewSession")
 			}
 		}
-		sessionID, err := service.CreateSession(projectPath, backend, title, resolvedAgentID, agentModel, agentSource)
+		sessionID, err := service.CreateSession(projectPath, backend, title, resolvedAgentID, agentModel, agentSource, "chat")
 		if err != nil {
 			model.WriteError(w, model.Internal(fmt.Errorf("failed to create session")))
 			return

@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 	agent_id TEXT DEFAULT '',
 	agent_source TEXT DEFAULT 'default',
 	model TEXT DEFAULT '',
+	session_type TEXT NOT NULL DEFAULT 'chat',
 	external_session_id TEXT DEFAULT '',
 	deleted INTEGER NOT NULL DEFAULT 0,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -110,12 +111,21 @@ func setupDB(t *testing.T) *sql.DB {
 // helperCreateSession creates a session and asserts success, returning the session ID.
 func helperCreateSession(t *testing.T, projectPath, backend, title string) string {
 	t.Helper()
-	id, err := service.CreateSession(projectPath, backend, title, "", "", "default")
+	id, err := service.CreateSession(projectPath, backend, title, "", "", "default", "chat")
 	assert.NoError(t, err)
 	assert.NotEmpty(t, id)
 	t.Cleanup(func() {
 		service.SetSessionRunning(id, false)
 	})
+	return id
+}
+
+// helperCreateScheduledSession creates a scheduled session and asserts success.
+func helperCreateScheduledSession(t *testing.T, projectPath, backend, title string) string {
+	t.Helper()
+	id, err := service.CreateSession(projectPath, backend, title, "", "", "default", "scheduled")
+	assert.NoError(t, err)
+	assert.NotEmpty(t, id)
 	return id
 }
 
@@ -277,7 +287,7 @@ func TestAddChatMessage_AssistantDoesNotAutoTitle(t *testing.T) {
 func TestCreateSession_UUIDFormat(t *testing.T) {
 	setupDB(t)
 
-	id, err := service.CreateSession("/project", "claude", "Test", "", "", "default")
+	id, err := service.CreateSession("/project", "claude", "Test", "", "", "default", "chat")
 	assert.NoError(t, err)
 	assert.NotEmpty(t, id)
 
@@ -294,9 +304,9 @@ func TestCreateSession_UUIDFormat(t *testing.T) {
 func TestCreateSession_UniqueIDs(t *testing.T) {
 	setupDB(t)
 
-	id1, err := service.CreateSession("/project", "claude", "Session 1", "", "", "default")
+	id1, err := service.CreateSession("/project", "claude", "Session 1", "", "", "default", "chat")
 	assert.NoError(t, err)
-	id2, err := service.CreateSession("/project", "claude", "Session 2", "", "", "default")
+	id2, err := service.CreateSession("/project", "claude", "Session 2", "", "", "default", "chat")
 	assert.NoError(t, err)
 	assert.NotEqual(t, id1, id2)
 }
@@ -369,7 +379,7 @@ func TestDeleteSession_GetSessionBackendHidden(t *testing.T) {
 func TestDeleteSession_GetSessionAgentIDHidden(t *testing.T) {
 	setupDB(t)
 
-	sid, err := service.CreateSession("/project", "claude", "Agent Test", "my-agent", "gpt-4", "user")
+	sid, err := service.CreateSession("/project", "claude", "Agent Test", "my-agent", "gpt-4", "user", "chat")
 	assert.NoError(t, err)
 
 	err = service.DeleteSession("/project", "claude", sid)
@@ -975,7 +985,7 @@ func TestUpdateLastRead(t *testing.T) {
 func TestGetSessionAgentID(t *testing.T) {
 	setupDB(t)
 	// Create session with agent ID
-	sid, err := service.CreateSession("/project", "claude", "Test", "my-agent", "gpt-4", "user")
+	sid, err := service.CreateSession("/project", "claude", "Test", "my-agent", "gpt-4", "user", "chat")
 	assert.NoError(t, err)
 	assert.Equal(t, "my-agent", service.GetSessionAgentID(sid))
 }
@@ -1310,4 +1320,89 @@ func TestAddChatMessage_NonExistentSessionStillWorks(t *testing.T) {
 	// (This is the existing behavior — message gets inserted with orphaned session_id)
 	_, err := service.AddChatMessage("/project", "claude", "non-existent-session", "user", "orphan msg", nil, false, "NewSession")
 	assert.NoError(t, err)
+}
+
+// ---------- SessionType (Task 2/3/4) ----------
+
+func TestCreateSession_ScheduledType(t *testing.T) {
+	setupDB(t)
+
+	sid, err := service.CreateSession("/project", "claude", "Scheduled Session", "", "", "default", "scheduled")
+	assert.NoError(t, err)
+	assert.NotEmpty(t, sid)
+
+	// Verify session_type is stored correctly in DB
+	var sessionType string
+	err = service.DB.QueryRow("SELECT session_type FROM chat_sessions WHERE id = ?", sid).Scan(&sessionType)
+	assert.NoError(t, err)
+	assert.Equal(t, "scheduled", sessionType)
+}
+
+func TestCreateSession_DefaultsToChatType(t *testing.T) {
+	setupDB(t)
+
+	sid, err := service.CreateSession("/project", "claude", "Chat Session", "", "", "default", "")
+	assert.NoError(t, err)
+	assert.NotEmpty(t, sid)
+
+	// Verify session_type defaults to 'chat'
+	var sessionType string
+	err = service.DB.QueryRow("SELECT session_type FROM chat_sessions WHERE id = ?", sid).Scan(&sessionType)
+	assert.NoError(t, err)
+	assert.Equal(t, "chat", sessionType)
+}
+
+func TestGetSessions_FiltersBySessionType(t *testing.T) {
+	setupDB(t)
+
+	// Create a chat session and a scheduled session
+	chatSID := helperCreateSession(t, "/project", "claude", "Chat Session")
+	_ = chatSID
+	schedSID := helperCreateScheduledSession(t, "/project", "claude", "Scheduled Session")
+	_ = schedSID
+
+	sessions, err := service.GetSessions("/project", "claude")
+	assert.NoError(t, err)
+	assert.Len(t, sessions, 1)
+	assert.Equal(t, "chat", sessions[0].SessionType)
+	assert.Equal(t, "Chat Session", sessions[0].Title)
+}
+
+func TestGetSessionCount_ExcludesScheduledSessions(t *testing.T) {
+	setupDB(t)
+
+	helperCreateSession(t, "/project", "claude", "Chat Session")
+	helperCreateScheduledSession(t, "/project", "claude", "Scheduled Session")
+
+	count, err := service.GetSessionCount("/project")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+}
+
+func TestGetSessions_SessionTypeField(t *testing.T) {
+	setupDB(t)
+
+	sid := helperCreateSession(t, "/project", "claude", "Chat Session")
+	_ = sid
+
+	sessions, err := service.GetSessions("/project", "claude")
+	assert.NoError(t, err)
+	assert.Len(t, sessions, 1)
+	assert.Equal(t, "chat", sessions[0].SessionType)
+}
+
+func TestGetSessions_AllBackendsFiltersBySessionType(t *testing.T) {
+	setupDB(t)
+
+	helperCreateSession(t, "/project", "claude", "Chat")
+	helperCreateScheduledSession(t, "/project", "claude", "Scheduled")
+	helperCreateSession(t, "/project", "codebuddy", "Chat CB")
+
+	// Only chat sessions should appear
+	sessions, err := service.GetSessions("/project", "")
+	assert.NoError(t, err)
+	assert.Len(t, sessions, 2)
+	for _, s := range sessions {
+		assert.Equal(t, "chat", s.SessionType)
+	}
 }

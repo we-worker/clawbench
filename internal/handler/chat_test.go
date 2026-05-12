@@ -432,7 +432,7 @@ func TestServeChatHistory_Get_WithExistingSession(t *testing.T) {
 	defer teardown()
 
 	// Create a session first
-	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "test session", "", "", "default")
+	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "test session", "", "", "default", "chat")
 	assert.NoError(t, err)
 
 	// Add a message to that session
@@ -460,7 +460,7 @@ func TestServeChatHistory_Post_AddMessage(t *testing.T) {
 	defer teardown()
 
 	// Create a session first
-	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "test session", "", "", "default")
+	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "test session", "", "", "default", "chat")
 	assert.NoError(t, err)
 
 	body := map[string]string{
@@ -541,9 +541,9 @@ func TestServeSessions_Get_WithExistingSessions(t *testing.T) {
 	defer teardown()
 
 	// Create some sessions
-	_, err := service.CreateSession(env.ProjectDir, "codebuddy", "session 1", "", "", "default")
+	_, err := service.CreateSession(env.ProjectDir, "codebuddy", "session 1", "", "", "default", "chat")
 	assert.NoError(t, err)
-	_, err = service.CreateSession(env.ProjectDir, "codebuddy", "session 2", "", "", "default")
+	_, err = service.CreateSession(env.ProjectDir, "codebuddy", "session 2", "", "", "default", "chat")
 	assert.NoError(t, err)
 
 	req := newRequest(t, http.MethodGet, "/api/ai/sessions", nil)
@@ -633,7 +633,7 @@ func TestDeleteSession_ExistingSession(t *testing.T) {
 	env, teardown := setupTestEnv(t)
 	defer teardown()
 
-	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "to delete", "", "", "default")
+	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "to delete", "", "", "default", "chat")
 	assert.NoError(t, err)
 
 	req := newRequest(t, http.MethodDelete, "/api/ai/session/delete?session_id="+sessionID, nil)
@@ -1051,7 +1051,7 @@ func TestAddChatMessage_FilesNoDuplicate(t *testing.T) {
 	env, teardown := setupTestEnv(t)
 	defer teardown()
 
-	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "files-dedup", "", "", "default")
+	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "files-dedup", "", "", "default", "chat")
 	assert.NoError(t, err)
 
 	// Simulate what the handler does: allFiles = req.Files (frontend already merged filePaths into files)
@@ -1075,7 +1075,7 @@ func TestAddChatMessage_FilesWithUploadsAndReferences(t *testing.T) {
 	env, teardown := setupTestEnv(t)
 	defer teardown()
 
-	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "files-mixed", "", "", "default")
+	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "files-mixed", "", "", "default", "chat")
 	assert.NoError(t, err)
 
 	// Frontend sends: files = [upload path, reference path] (already merged)
@@ -1102,7 +1102,7 @@ func TestAIChat_EnqueuePath_FilesNoDuplicate(t *testing.T) {
 	createTestFile(t, env.ProjectDir, "config.yaml", "test: true")
 
 	// Create a session and mark it as running (to trigger enqueue path)
-	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "enqueue-dedup", "", "", "default")
+	sessionID, err := service.CreateSession(env.ProjectDir, "codebuddy", "enqueue-dedup", "", "", "default", "chat")
 	assert.NoError(t, err)
 	service.TrySetSessionRunning(sessionID)
 	defer func() {

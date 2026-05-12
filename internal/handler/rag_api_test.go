@@ -179,7 +179,7 @@ func TestServeRAGSession_Found(t *testing.T) {
 	defer teardown()
 
 	// Create a session and add messages
-	sid, err := service.CreateSession(env.ProjectDir, "claude", "Test Session", "", "", "default")
+	sid, err := service.CreateSession(env.ProjectDir, "claude", "Test Session", "", "", "default", "chat")
 	require.NoError(t, err)
 	_, err = service.AddChatMessage(env.ProjectDir, "claude", sid, "user", "hello", nil, false, "NewSession")
 	require.NoError(t, err)

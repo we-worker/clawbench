@@ -248,12 +248,13 @@ func generateSessionID() string {
 
 // GetSessions retrieves chat sessions for a given project path.
 // If backend is non-empty, filters by backend; otherwise returns all backends.
+// Only returns sessions with session_type='chat' (excludes scheduled sessions).
 func GetSessions(projectPath, backend string) ([]model.ChatSession, error) {
 	sessions := []model.ChatSession{}
-	query := `SELECT s.id, s.title, s.backend, s.agent_id, s.agent_source, s.model, s.created_at, s.updated_at, s.last_read_at,
+	query := `SELECT s.id, s.title, s.backend, s.agent_id, s.agent_source, s.model, s.session_type, s.created_at, s.updated_at, s.last_read_at,
 		(SELECT COUNT(*) FROM chat_history h WHERE h.session_id = s.id AND h.role = 'assistant' AND h.streaming = 0 AND h.deleted = 0
 		 AND (s.last_read_at IS NULL OR h.created_at > s.last_read_at)) AS unread_count
-		FROM chat_sessions s WHERE s.project_path = ? AND s.deleted = 0`
+		FROM chat_sessions s WHERE s.project_path = ? AND s.deleted = 0 AND s.session_type = 'chat'`
 	args := []interface{}{projectPath}
 	if backend != "" {
 		query += " AND s.backend = ?"
@@ -270,7 +271,7 @@ func GetSessions(projectPath, backend string) ([]model.ChatSession, error) {
 	for rows.Next() {
 		var s model.ChatSession
 		var lastRead sql.NullTime
-		if err := rows.Scan(&s.ID, &s.Title, &s.Backend, &s.AgentID, &s.AgentSource, &s.Model, &s.CreatedAt, &s.UpdatedAt, &lastRead, &s.UnreadCount); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.Backend, &s.AgentID, &s.AgentSource, &s.Model, &s.SessionType, &s.CreatedAt, &s.UpdatedAt, &lastRead, &s.UnreadCount); err != nil {
 			return nil, err
 		}
 		if lastRead.Valid {
@@ -316,14 +317,18 @@ func UpdateSessionModel(sessionID, modelID string) error {
 
 // CreateSession creates a new chat session and returns its ID.
 // agentSource tracks how the agent was chosen: "default" (auto-assigned) or "user" (manually selected).
-func CreateSession(projectPath, backend, title, agentID, modelName, agentSource string) (string, error) {
+// sessionType is "chat" or "scheduled"; empty string defaults to "chat".
+func CreateSession(projectPath, backend, title, agentID, modelName, agentSource, sessionType string) (string, error) {
+	if sessionType == "" {
+		sessionType = "chat"
+	}
 	sessionID := generateSessionID()
 	if sessionID == "" {
 		return "", fmt.Errorf("failed to generate unique session ID after 10 attempts")
 	}
 	_, err := DB.Exec(
-		"INSERT INTO chat_sessions (id, project_path, backend, title, agent_id, agent_source, model) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		sessionID, projectPath, backend, title, agentID, agentSource, modelName,
+		"INSERT INTO chat_sessions (id, project_path, backend, title, agent_id, agent_source, model, session_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		sessionID, projectPath, backend, title, agentID, agentSource, modelName, sessionType,
 	)
 	if err != nil {
 		return "", err
@@ -345,10 +350,11 @@ func DeleteSession(projectPath, backend, sessionID string) error {
 	return err
 }
 
-// GetSessionCount returns the number of sessions for a given project.
+// GetSessionCount returns the number of chat sessions for a given project.
+// Only counts sessions with session_type='chat' (excludes scheduled sessions).
 func GetSessionCount(projectPath string) (int, error) {
 	var count int
-	err := DB.QueryRow("SELECT COUNT(*) FROM chat_sessions WHERE project_path = ? AND deleted = 0", projectPath).Scan(&count)
+	err := DB.QueryRow("SELECT COUNT(*) FROM chat_sessions WHERE project_path = ? AND deleted = 0 AND session_type = 'chat'", projectPath).Scan(&count)
 	return count, err
 }
 

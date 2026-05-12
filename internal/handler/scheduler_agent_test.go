@@ -556,7 +556,7 @@ func TestServeTaskByID_UpdateTaskNotFound(t *testing.T) {
 
 func createTestSession(t *testing.T, projectPath string) string {
 	t.Helper()
-	id, err := service.CreateSession(projectPath, "claude", "Test Session", "", "", "default")
+	id, err := service.CreateSession(projectPath, "claude", "Test Session", "", "", "default", "chat")
 	if err != nil {
 		t.Fatalf("failed to create test session: %v", err)
 	}

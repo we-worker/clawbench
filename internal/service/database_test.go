@@ -52,6 +52,7 @@ func setupTestDBForTTS(t *testing.T) (*sql.DB, func()) {
 			agent_id TEXT DEFAULT '',
 			agent_source TEXT DEFAULT 'default',
 			model TEXT DEFAULT '',
+			session_type TEXT NOT NULL DEFAULT 'chat',
 			external_session_id TEXT DEFAULT '',
 			deleted INTEGER NOT NULL DEFAULT 0,
 			last_read_at DATETIME,

@@ -23,6 +23,7 @@ type ChatSession struct {
 	AgentID     string     `json:"agentId,omitempty"`
 	AgentSource string     `json:"agentSource,omitempty"`
 	Model       string     `json:"model,omitempty"`
+	SessionType string     `json:"sessionType,omitempty"` // "chat" | "scheduled"
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
 	Running     bool       `json:"running,omitempty"`

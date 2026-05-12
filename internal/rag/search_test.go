@@ -36,6 +36,7 @@ func setupSearchDB(t *testing.T) *sql.DB {
 			agent_id TEXT DEFAULT '',
 			agent_source TEXT DEFAULT 'default',
 			model TEXT DEFAULT '',
+			session_type TEXT NOT NULL DEFAULT 'chat',
 			deleted INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -178,7 +179,7 @@ func TestGetSessionTitles(t *testing.T) {
 	setupSearchDB(t)
 
 	// Create a session with known title
-	sid, err := service.CreateSession("/test", "claude", "Test Session Title", "", "", "default")
+	sid, err := service.CreateSession("/test", "claude", "Test Session Title", "", "", "default", "chat")
 	require.NoError(t, err)
 
 	titles := getSessionTitles(map[string]bool{sid: true})

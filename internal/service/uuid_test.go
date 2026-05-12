@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 	agent_id TEXT DEFAULT '',
 	agent_source TEXT DEFAULT 'default',
 	model TEXT DEFAULT '',
+	session_type TEXT NOT NULL DEFAULT 'chat',
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	last_read_at DATETIME
