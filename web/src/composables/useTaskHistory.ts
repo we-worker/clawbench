@@ -4,6 +4,7 @@ import { useToast } from '@/composables/useToast.ts'
 import { useDialog } from '@/composables/useDialog.ts'
 import { useTaskTab } from '@/composables/useTaskTab.ts'
 import { useChatRender } from '@/composables/useChatRender.ts'
+import { gt } from '@/composables/useLocale'
 
 interface UseTaskHistoryOptions {
   task: Ref<any>
@@ -80,16 +81,16 @@ export function useTaskHistory(options: UseTaskHistoryOptions) {
 
   async function cancelExecution(execId: string): Promise<void> {
     if (!task.value?.id) return
-    if (!await dialog.confirm('task.exec.confirmCancel')) return
+    if (!await dialog.confirm(gt('task.exec.confirmCancel'))) return
     try {
       await apiPut(`/api/tasks/${task.value.id}`, {
         action: 'cancel',
         executionId: execId,
       })
-      toast.show('task.exec.cancelled', { type: 'success' })
+      toast.show(gt('task.exec.cancelled'), { type: 'success' })
     } catch (err: any) {
       if (err?.message?.includes('404')) {
-        toast.show('task.exec.alreadyFinished', { type: 'info' })
+        toast.show(gt('task.exec.alreadyFinished'), { type: 'info' })
       }
     }
     await loadRunningStatus()

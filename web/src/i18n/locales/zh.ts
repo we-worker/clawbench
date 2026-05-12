@@ -264,6 +264,7 @@ export default {
     run: '执行',
     history: '记录',
     delete: '删除',
+    actionFailed: '操作失败',
     status: {
       active: '已启用',
       paused: '已禁用',

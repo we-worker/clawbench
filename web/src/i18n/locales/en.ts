@@ -264,6 +264,7 @@ export default {
     run: 'Run',
     history: 'History',
     delete: 'Delete',
+    actionFailed: 'Action failed',
     status: {
       active: 'Enabled',
       paused: 'Disabled',
