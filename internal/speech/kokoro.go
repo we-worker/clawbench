@@ -25,7 +25,12 @@ const (
 // It uses the shared summarizer (configured globally) and the kokoro-onnx Python
 // library for synthesis via a bridge script. Kokoro produces high-quality Chinese
 // speech and runs locally with ONNX Runtime (no GPU required).
+//
+// Synthesize is implemented separately because it uses a two-step binary resolution
+// (Python interpreter + bridge script) that does not fit the single-binary pattern
+// of CLISpeechProvider.
 type KokoroProvider struct {
+	CLISpeechProvider
 	// ModelPath is the path to the Kokoro .onnx model file.
 	// If empty, defaults to .clawbench/kokoro-models/kokoro-v1.1-zh.onnx.
 	ModelPath string
