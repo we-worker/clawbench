@@ -86,7 +86,7 @@ func InitDB(runFromServer ...bool) error {
 			accessed_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE TABLE IF NOT EXISTS scheduled_tasks (
-			id TEXT PRIMARY KEY,
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			project_path TEXT NOT NULL,
 			name TEXT NOT NULL,
 			cron_expr TEXT NOT NULL,
@@ -106,7 +106,7 @@ func InitDB(runFromServer ...bool) error {
 
 		CREATE TABLE IF NOT EXISTS task_executions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			task_id TEXT NOT NULL,
+			task_id INTEGER NOT NULL,
 			session_id TEXT NOT NULL,
 			trigger_type TEXT NOT NULL DEFAULT 'auto',
 			status TEXT NOT NULL DEFAULT 'completed',
@@ -442,4 +442,3 @@ func ReorderChatQuickSend(ids []int64) error {
 	}
 	return tx.Commit()
 }
-

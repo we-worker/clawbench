@@ -4,7 +4,7 @@ import { apiPost, apiPut } from '@/utils/api.ts'
 interface UseTaskFormOptions {
   mode: Ref<string>
   task?: Ref<any>
-  onSuccess: (taskId: string) => void
+  onSuccess: (taskId: number) => void
   onClose: () => void
 }
 
@@ -33,7 +33,7 @@ export function useTaskForm(options: UseTaskFormOptions) {
   const formError = ref('')
 
   const form = ref({
-    id: '',
+    id: 0,
     name: '',
     cronExpr: '',
     agentId: '',
@@ -51,7 +51,7 @@ export function useTaskForm(options: UseTaskFormOptions) {
 
     if (taskData) {
       form.value = {
-        id: taskData.id || '',
+        id: taskData.id || 0,
         name: taskData.name || '',
         cronExpr: taskData.cronExpr || '',
         agentId: taskData.agentId || '',
@@ -61,7 +61,7 @@ export function useTaskForm(options: UseTaskFormOptions) {
       }
     } else {
       form.value = {
-        id: '',
+        id: 0,
         name: '',
         cronExpr: '',
         agentId: '',

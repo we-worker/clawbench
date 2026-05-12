@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,7 +52,7 @@ func ServeTasks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.Name == "" || req.CronExpr == "" || req.AgentID == "" || req.Prompt == "" {
-		writeLocalizedErrorf(w, r, http.StatusBadRequest, "TaskFieldsRequired")
+			writeLocalizedErrorf(w, r, http.StatusBadRequest, "TaskFieldsRequired")
 			return
 		}
 	if req.RepeatMode == "" {
@@ -96,14 +97,20 @@ func ServeTaskByID(w http.ResponseWriter, r *http.Request) {
 	// Extract task ID from path: /api/tasks/{id} or /api/tasks/{id}/executions
 	path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
 	parts := strings.SplitN(path, "/", 2)
-	taskID := parts[0]
+	taskIDStr := parts[0]
 	subPath := ""
 	if len(parts) > 1 {
 		subPath = parts[1]
 	}
 
-	if taskID == "" {
+	if taskIDStr == "" {
 		writeLocalizedErrorf(w, r, http.StatusBadRequest, "TaskIdRequired")
+		return
+	}
+
+	taskID, err := strconv.ParseInt(taskIDStr, 10, 64)
+	if err != nil {
+		writeLocalizedErrorf(w, r, http.StatusBadRequest, "TaskIdInvalid")
 		return
 	}
 
@@ -271,7 +278,7 @@ func ServeTaskByID(w http.ResponseWriter, r *http.Request) {
 
 // serveTaskExecutions returns the execution history for a task.
 // It joins task_executions with chat_history to fetch the assistant content.
-func serveTaskExecutions(w http.ResponseWriter, r *http.Request, taskID string, projectPath string) {
+func serveTaskExecutions(w http.ResponseWriter, r *http.Request, taskID int64, projectPath string) {
 	task, err := service.GetTaskByID(taskID)
 	if err != nil {
 		writeLocalizedError(w, r, model.NotFound(nil, "TaskNotFound"))

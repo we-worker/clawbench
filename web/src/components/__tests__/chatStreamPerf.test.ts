@@ -51,7 +51,7 @@ function renderTextBlockDeferred(text, msgId, blockIdx, streaming = false) {
 
 describe('renderTextBlock deferred rendering', () => {
   it('streaming=true skips all structured detection', () => {
-    const text = 'Hello <scheduled-task id="12345678-1234-1234-1234-123456789abc" /> and $E=mc^2$'
+    const text = 'Hello <scheduled-task id="1" /> and $E=mc^2$'
     const result = renderTextBlockDeferred(text, 'msg1', 0, true)
     expect(result.streaming).toBe(true)
     expect(result.ranKaTeX).toBe(false)
@@ -61,7 +61,7 @@ describe('renderTextBlock deferred rendering', () => {
   })
 
   it('streaming=false runs full pipeline', () => {
-    const text = 'Hello <scheduled-task id="12345678-1234-1234-1234-123456789abc" /> world'
+    const text = 'Hello <scheduled-task id="1" /> world'
     const result = renderTextBlockDeferred(text, 'msg1', 0, false)
     expect(result.streaming).toBe(false)
     expect(result.ranKaTeX).toBe(true)
@@ -69,9 +69,9 @@ describe('renderTextBlock deferred rendering', () => {
   })
 
   it('streaming=false detects scheduled tasks', () => {
-    const text = 'Created <scheduled-task id="12345678-1234-1234-1234-123456789abc" />'
+    const text = 'Created <scheduled-task id="42" />'
     const result = renderTextBlockDeferred(text, 'msg1', 0, false)
-    expect(result.taskIds).toEqual(['12345678-1234-1234-1234-123456789abc'])
+    expect(result.taskIds).toEqual(['42'])
   })
 
   it('streaming=false detects ask-question', () => {
@@ -81,7 +81,7 @@ describe('renderTextBlock deferred rendering', () => {
   })
 
   it('streaming=false strips scheduled-task tags', () => {
-    const text = 'Before <scheduled-task id="12345678-1234-1234-1234-123456789abc" /> After'
+    const text = 'Before <scheduled-task id="1" /> After'
     const result = renderTextBlockDeferred(text, 'msg1', 0, false)
     expect(result.cleanText).toBe('Before  After')
   })
@@ -168,22 +168,16 @@ describe('Mermaid rendering deferred to post-streaming', () => {
 // ────────────────────────────────────────────────────────────
 
 describe('scheduled-task regex (module-level constant)', () => {
-  it('extracts task ID from tag without task- prefix', () => {
-    const text = 'Created <scheduled-task id="12345678-1234-1234-1234-123456789abc" />'
+  it('extracts integer task ID from tag', () => {
+    const text = 'Created <scheduled-task id="42" />'
     const ids = extractScheduledTaskIds(text)
-    expect(ids).toEqual(['12345678-1234-1234-1234-123456789abc'])
-  })
-
-  it('extracts task ID from tag with task- prefix', () => {
-    const text = 'Created <scheduled-task id="task-12345678-1234-1234-1234-123456789abc" />'
-    const ids = extractScheduledTaskIds(text)
-    expect(ids).toEqual(['task-12345678-1234-1234-1234-123456789abc'])
+    expect(ids).toEqual(['42'])
   })
 
   it('extracts multiple task IDs', () => {
-    const text = 'A <scheduled-task id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" /> and B <scheduled-task id="task-11111111-2222-3333-4444-555555555555" />'
+    const text = 'A <scheduled-task id="1" /> and B <scheduled-task id="2" />'
     const ids = extractScheduledTaskIds(text)
-    expect(ids).toHaveLength(2)
+    expect(ids).toEqual(['1', '2'])
   })
 
   it('returns empty array for text without tags', () => {
@@ -192,28 +186,34 @@ describe('scheduled-task regex (module-level constant)', () => {
   })
 
   it('regex is reused correctly across multiple calls', () => {
-    const text1 = '<scheduled-task id="12345678-1234-1234-1234-123456789abc" />'
-    extractScheduledTaskIds(text1)
-    extractScheduledTaskIds(text1)
-    const ids = extractScheduledTaskIds(text1)
-    expect(ids).toEqual(['12345678-1234-1234-1234-123456789abc'])
+    const text = '<scheduled-task id="1" />'
+    extractScheduledTaskIds(text)
+    extractScheduledTaskIds(text)
+    const ids = extractScheduledTaskIds(text)
+    expect(ids).toEqual(['1'])
   })
 
   it('regex has global flag for multi-match', () => {
     expect(SCHEDULED_TASK_RE.global).toBe(true)
     expect(SCHEDULED_TASK_RE.ignoreCase).toBe(true)
   })
+
+  it('does not match non-numeric IDs', () => {
+    const text = 'Created <scheduled-task id="task-abc" />'
+    const ids = extractScheduledTaskIds(text)
+    expect(ids).toEqual([])
+  })
 })
 
 describe('stripScheduledTaskTags', () => {
   it('strips scheduled-task tags from text', () => {
-    const text = 'Before <scheduled-task id="12345678-1234-1234-1234-123456789abc" /> After'
+    const text = 'Before <scheduled-task id="1" /> After'
     const result = stripScheduledTaskTags(text)
     expect(result).toBe('Before  After')
   })
 
   it('strips multiple tags', () => {
-    const text = 'A <scheduled-task id="12345678-1234-1234-1234-123456789abc" /> B <scheduled-task id="task-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" /> C'
+    const text = 'A <scheduled-task id="1" /> B <scheduled-task id="2" /> C'
     const result = stripScheduledTaskTags(text)
     expect(result).toBe('A  B  C')
   })
@@ -282,8 +282,8 @@ describe('isValidAskContent', () => {
 
 describe('taskChanged (semantic equality)', () => {
   it('returns false for semantically identical tasks (different references)', () => {
-    const task1 = { id: '1', status: 'active', name: 'Test', cronExpr: '0 * * * *', runCount: 5 }
-    const task2 = { id: '1', status: 'active', name: 'Test', cronExpr: '0 * * * *', runCount: 5 }
+    const task1 = { id: 1, status: 'active', name: 'Test', cronExpr: '0 * * * *', runCount: 5 }
+    const task2 = { id: 1, status: 'active', name: 'Test', cronExpr: '0 * * * *', runCount: 5 }
     expect(taskChanged(task1, task2)).toBe(false)
   })
 

@@ -19,8 +19,8 @@
 // Module-level scheduled-task regex
 // ────────────────────────────────────────────────────────────
 
-/** Regex to match <scheduled-task id="..." /> tags (with optional "task-" prefix before UUID). */
-export const SCHEDULED_TASK_RE = /<scheduled-task\s+id="(task-)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"\s*\/>/gi
+/** Regex to match <scheduled-task id="..." /> tags with integer IDs. */
+export const SCHEDULED_TASK_RE = /<scheduled-task\s+id="(\d+)"\s*\/>/gi
 
 /**
  * Extract scheduled task IDs from text.
@@ -32,8 +32,7 @@ export function extractScheduledTaskIds(text: string): string[] {
   SCHEDULED_TASK_RE.lastIndex = 0
   let match
   while ((match = SCHEDULED_TASK_RE.exec(text)) !== null) {
-    // match[1] = "task-" prefix (or undefined), match[2] = UUID
-    ids.push(match[1] ? match[1] + match[2] : match[2])
+    ids.push(match[1])
   }
   return ids
 }

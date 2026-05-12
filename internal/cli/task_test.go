@@ -130,34 +130,34 @@ func TestCreateTask_InvalidRepeat(t *testing.T) {
 
 func TestReorderFlagsFirst_AllFlagsFirst(t *testing.T) {
 	// Flags already before positional — no change needed
-	args := []string{"--project", "/path", "--prompt", "hello", "task-abc"}
+	args := []string{"--project", "/path", "--prompt", "hello", "1"}
 	result := reorderFlagsFirst(args)
-	assert.Equal(t, []string{"--project", "/path", "--prompt", "hello", "task-abc"}, result)
+	assert.Equal(t, []string{"--project", "/path", "--prompt", "hello", "1"}, result)
 }
 
 func TestReorderFlagsFirst_PositionalBetweenFlags(t *testing.T) {
 	// The exact bug: task-ID before --prompt causes Go flag to skip --prompt
-	args := []string{"task-abc", "--prompt", "hello", "--project", "/path"}
+	args := []string{"1", "--prompt", "hello", "--project", "/path"}
 	result := reorderFlagsFirst(args)
-	assert.Equal(t, []string{"--prompt", "hello", "--project", "/path", "task-abc"}, result)
+	assert.Equal(t, []string{"--prompt", "hello", "--project", "/path", "1"}, result)
 }
 
 func TestReorderFlagsFirst_MixedOrder(t *testing.T) {
-	args := []string{"--project", "/path", "task-abc", "--prompt", "hello"}
+	args := []string{"--project", "/path", "1", "--prompt", "hello"}
 	result := reorderFlagsFirst(args)
-	assert.Equal(t, []string{"--project", "/path", "--prompt", "hello", "task-abc"}, result)
+	assert.Equal(t, []string{"--project", "/path", "--prompt", "hello", "1"}, result)
 }
 
 func TestReorderFlagsFirst_FlagWithEquals(t *testing.T) {
-	args := []string{"task-abc", "--project=/path", "--prompt=hello"}
+	args := []string{"1", "--project=/path", "--prompt=hello"}
 	result := reorderFlagsFirst(args)
-	assert.Equal(t, []string{"--project=/path", "--prompt=hello", "task-abc"}, result)
+	assert.Equal(t, []string{"--project=/path", "--prompt=hello", "1"}, result)
 }
 
 func TestReorderFlagsFirst_NoFlags(t *testing.T) {
-	args := []string{"task-abc"}
+	args := []string{"1"}
 	result := reorderFlagsFirst(args)
-	assert.Equal(t, []string{"task-abc"}, result)
+	assert.Equal(t, []string{"1"}, result)
 }
 
 func TestReorderFlagsFirst_NoPositional(t *testing.T) {

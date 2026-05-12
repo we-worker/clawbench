@@ -4,7 +4,7 @@ import "time"
 
 // ScheduledTask represents a cron-scheduled AI task.
 type ScheduledTask struct {
-	ID                string                   `json:"id"`
+	ID                int64                    `json:"id"`
 	ProjectPath       string                   `json:"projectPath"`
 	Name              string                   `json:"name"`
 	Description       string                   `json:"description,omitempty"`

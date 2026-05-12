@@ -56,7 +56,7 @@ const loading = ref(false)
 
 defineEmits<{
   create: []
-  select: [taskId: string]
+  select: [taskId: number]
 }>()
 
 async function refresh() {

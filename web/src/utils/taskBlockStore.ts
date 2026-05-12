@@ -2,7 +2,7 @@ import { reactive } from 'vue'
 import { apiGet } from '@/utils/api.ts'
 
 interface TaskBlockEntry {
-  taskId: string
+  taskId: number
   task: any | null
   loading: boolean
   deleted: boolean
@@ -11,7 +11,7 @@ interface TaskBlockEntry {
 
 interface TaskKey {
   key: string
-  taskId: string
+  taskId: number
 }
 
 export function createTaskBlockStore() {

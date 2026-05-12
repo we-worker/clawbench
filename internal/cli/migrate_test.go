@@ -25,8 +25,32 @@ func setupOldSchemaDB(t *testing.T) string {
 
 	db := service.DB
 
+	// Replace scheduled_tasks with TEXT id for old-schema compatibility
+	// (InitDB now creates INTEGER id, but old data uses TEXT IDs)
+	_, err := db.Exec("DROP TABLE scheduled_tasks")
+	assert.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE scheduled_tasks (
+		id TEXT PRIMARY KEY,
+		project_path TEXT NOT NULL,
+		name TEXT NOT NULL,
+		cron_expr TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		prompt TEXT NOT NULL,
+		session_id TEXT,
+		status TEXT NOT NULL DEFAULT 'active',
+		repeat_mode TEXT NOT NULL DEFAULT 'unlimited',
+		max_runs INTEGER DEFAULT 0,
+		last_run_at DATETIME,
+		next_run_at DATETIME,
+		run_count INTEGER DEFAULT 0,
+		last_read_at DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	assert.NoError(t, err)
+
 	// Rename current table out of the way
-	_, err := db.Exec("ALTER TABLE task_executions RENAME TO task_executions_new")
+	_, err = db.Exec("ALTER TABLE task_executions RENAME TO task_executions_new")
 	assert.NoError(t, err)
 
 	// Create old-style task_executions with content column
@@ -163,11 +187,39 @@ func TestRunMigrateCommand_MigratesData(t *testing.T) {
 	_ = tmpDir
 }
 
+// replaceWithTextIDScheduledTasks drops the current INTEGER-id scheduled_tasks
+// and recreates it with TEXT id for old-schema compatibility in migration tests.
+func replaceWithTextIDScheduledTasks(t *testing.T) {
+	t.Helper()
+	service.DB.Exec("DROP TABLE scheduled_tasks")
+	_, err := service.DB.Exec(`CREATE TABLE scheduled_tasks (
+		id TEXT PRIMARY KEY,
+		project_path TEXT NOT NULL,
+		name TEXT NOT NULL,
+		cron_expr TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		prompt TEXT NOT NULL,
+		session_id TEXT,
+		status TEXT NOT NULL DEFAULT 'active',
+		repeat_mode TEXT NOT NULL DEFAULT 'unlimited',
+		max_runs INTEGER DEFAULT 0,
+		last_run_at DATETIME,
+		next_run_at DATETIME,
+		run_count INTEGER DEFAULT 0,
+		last_read_at DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	assert.NoError(t, err)
+}
+
 func TestRunMigrateCommand_SkipsExecutionWithMissingTask(t *testing.T) {
 	tmpDir := t.TempDir()
 	model.BinDir = tmpDir
 	model.ConfigInstance = model.Config{WatchDir: tmpDir}
 	service.InitDB()
+
+	replaceWithTextIDScheduledTasks(t)
 
 	// Create old-style task_executions
 	service.DB.Exec("DROP TABLE task_executions")
@@ -215,6 +267,8 @@ func TestRunMigrateCommand_EmptyContentSkipped(t *testing.T) {
 	model.BinDir = tmpDir
 	model.ConfigInstance = model.Config{WatchDir: tmpDir}
 	service.InitDB()
+
+	replaceWithTextIDScheduledTasks(t)
 
 	// Create old-style task_executions
 	service.DB.Exec("DROP TABLE task_executions")

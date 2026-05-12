@@ -146,7 +146,7 @@ const promptExpanded = ref(true)
 
 function copyId() {
   if (props.task.id) {
-    navigator.clipboard.writeText(props.task.id).catch(() => {})
+    navigator.clipboard.writeText(String(props.task.id)).catch(() => {})
   }
 }
 
@@ -216,7 +216,7 @@ const renderedPrompt = computed(() => {
 }
 
 .task-id-value {
-  font-size: 11px;
+  font-size: 13px;
   font-family: monospace;
   color: var(--text-muted, #999);
   cursor: pointer;

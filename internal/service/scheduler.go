@@ -22,7 +22,7 @@ var GlobalScheduler *Scheduler
 // RunningExecution tracks a currently executing task instance.
 type RunningExecution struct {
 	ID          string
-	TaskID      string
+	TaskID      int64
 	CancelFunc  context.CancelFunc
 	StartedAt   time.Time
 	TriggerType string // "auto" | "manual"
@@ -30,9 +30,9 @@ type RunningExecution struct {
 
 // Scheduler manages cron-scheduled AI tasks.
 type Scheduler struct {
-	cron             *cron.Cron
-	entries          map[string]cron.EntryID // task ID -> cron entry ID
-	mu               sync.Mutex
+	cron              *cron.Cron
+	entries           map[int64]cron.EntryID // task ID -> cron entry ID
+	mu                sync.Mutex
 	runningExecutions sync.Map // key: executionID, value: *RunningExecution
 }
 
@@ -40,7 +40,7 @@ type Scheduler struct {
 func NewScheduler() *Scheduler {
 	return &Scheduler{
 		cron:    cron.New(),
-		entries: make(map[string]cron.EntryID),
+		entries: make(map[int64]cron.EntryID),
 	}
 }
 
@@ -57,7 +57,7 @@ func (s *Scheduler) Stop() {
 }
 
 // GetRunningExecutions returns the running execution views for a specific task.
-func (s *Scheduler) GetRunningExecutions(taskID string) []model.RunningExecutionView {
+func (s *Scheduler) GetRunningExecutions(taskID int64) []model.RunningExecutionView {
 	var result []model.RunningExecutionView
 	s.runningExecutions.Range(func(key, value any) bool {
 		exec := value.(*RunningExecution)
@@ -74,8 +74,8 @@ func (s *Scheduler) GetRunningExecutions(taskID string) []model.RunningExecution
 }
 
 // GetRunningCounts returns a map of taskID -> running execution count.
-func (s *Scheduler) GetRunningCounts() map[string]int {
-	counts := make(map[string]int)
+func (s *Scheduler) GetRunningCounts() map[int64]int {
+	counts := make(map[int64]int)
 	s.runningExecutions.Range(func(key, value any) bool {
 		exec := value.(*RunningExecution)
 		counts[exec.TaskID]++
@@ -85,7 +85,7 @@ func (s *Scheduler) GetRunningCounts() map[string]int {
 }
 
 // HasRunningExecutions checks if a task has any running executions.
-func (s *Scheduler) HasRunningExecutions(taskID string) bool {
+func (s *Scheduler) HasRunningExecutions(taskID int64) bool {
 	found := false
 	s.runningExecutions.Range(func(key, value any) bool {
 		if value.(*RunningExecution).TaskID == taskID {
@@ -108,20 +108,20 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 	exec.CancelFunc()
 	slog.Info("cancelled running execution",
 		slog.String("exec_id", executionID),
-		slog.String("task_id", exec.TaskID),
+		slog.Int64("task_id", exec.TaskID),
 	)
 	return nil
 }
 
 // CancelAllExecutions cancels all running executions for a specific task.
-func (s *Scheduler) CancelAllExecutions(taskID string) {
+func (s *Scheduler) CancelAllExecutions(taskID int64) {
 	s.runningExecutions.Range(func(key, value any) bool {
 		exec := value.(*RunningExecution)
 		if exec.TaskID == taskID {
 			exec.CancelFunc()
 			slog.Info("cancelled running execution for task",
 				slog.String("exec_id", exec.ID),
-				slog.String("task_id", taskID),
+				slog.Int64("task_id", taskID),
 			)
 		}
 		return true
@@ -147,7 +147,7 @@ func (s *Scheduler) LoadTasksFromDB(projectPath string) error {
 			// will be registered on next restart when agents are available.
 			// Runtime validation in executeTask() handles genuinely invalid agents.
 			slog.Warn("skipping task with unavailable agent_id",
-				slog.String("task_id", task.ID),
+				slog.Int64("task_id", task.ID),
 				slog.String("name", task.Name),
 				slog.String("agent_id", task.AgentID),
 			)
@@ -157,14 +157,14 @@ func (s *Scheduler) LoadTasksFromDB(projectPath string) error {
 		// was likely down when the cron should have fired.
 		if task.NextRunAt != nil && task.NextRunAt.Before(time.Now()) {
 			slog.Warn("detected missed scheduled execution",
-				slog.String("task_id", task.ID),
+				slog.Int64("task_id", task.ID),
 				slog.String("name", task.Name),
 				slog.Time("missed_run", *task.NextRunAt),
 			)
 		}
 		if err := s.registerTask(task); err != nil {
 			slog.Warn("failed to register task on load",
-				slog.String("task_id", task.ID),
+				slog.Int64("task_id", task.ID),
 				slog.String("err", err.Error()),
 			)
 		}
@@ -174,9 +174,6 @@ func (s *Scheduler) LoadTasksFromDB(projectPath string) error {
 
 // AddTask creates a new scheduled task, persists it, and registers it with cron.
 func (s *Scheduler) AddTask(task *model.ScheduledTask) error {
-	if task.ID == "" {
-		task.ID = generateTaskID()
-	}
 	now := time.Now()
 	task.CreatedAt = now
 	task.UpdatedAt = now
@@ -190,8 +187,8 @@ func (s *Scheduler) AddTask(task *model.ScheduledTask) error {
 	nextRun := schedule.Next(now)
 	task.NextRunAt = &nextRun
 
-	// Persist to database
-	if err := saveTask(task); err != nil {
+	// Persist to database (auto-increment ID)
+	if err := insertTask(task); err != nil {
 		return err
 	}
 
@@ -201,7 +198,7 @@ func (s *Scheduler) AddTask(task *model.ScheduledTask) error {
 
 // RemoveTask removes a task from cron and hard-deletes it from the database.
 // Also soft-deletes associated chat sessions and removes task_executions rows.
-func (s *Scheduler) RemoveTask(id string) {
+func (s *Scheduler) RemoveTask(id int64) {
 	s.mu.Lock()
 	if entryID, ok := s.entries[id]; ok {
 		s.cron.Remove(entryID)
@@ -217,7 +214,7 @@ func (s *Scheduler) RemoveTask(id string) {
 		WHERE te.task_id = ?`, id)
 	if err != nil {
 		slog.Error("failed to query sessions for task removal",
-			slog.String("task_id", id),
+			slog.Int64("task_id", id),
 			slog.String("err", err.Error()),
 		)
 	} else {
@@ -255,7 +252,7 @@ func (s *Scheduler) RemoveTask(id string) {
 }
 
 // PauseTask removes a task from cron but keeps it in the database as paused.
-func (s *Scheduler) PauseTask(id string) {
+func (s *Scheduler) PauseTask(id int64) {
 	s.mu.Lock()
 	if entryID, ok := s.entries[id]; ok {
 		s.cron.Remove(entryID)
@@ -267,7 +264,7 @@ func (s *Scheduler) PauseTask(id string) {
 }
 
 // ResumeTask re-registers a paused task with cron.
-func (s *Scheduler) ResumeTask(id string) error {
+func (s *Scheduler) ResumeTask(id int64) error {
 	task, err := GetTaskByID(id)
 	if err != nil {
 		return err
@@ -282,10 +279,8 @@ func (s *Scheduler) ResumeTask(id string) error {
 	return s.registerTask(task)
 }
 
-// UpdateTask updates an existing task's configuration and re-registers if needed.
-
 // TriggerTask runs a task immediately in a background goroutine, regardless of its status.
-func (s *Scheduler) TriggerTask(id string) error {
+func (s *Scheduler) TriggerTask(id int64) error {
 	task, err := GetTaskByID(id)
 	if err != nil {
 		return fmt.Errorf("task not found: %w", err)
@@ -331,12 +326,12 @@ func (s *Scheduler) UpdateTask(task *model.ScheduledTask) error {
 	}
 
 	// Persist to database
-	if err := saveTask(task); err != nil {
+	if err := updateTask(task); err != nil {
 		return err
 	}
 
 	slog.Info("updated task",
-		slog.String("task_id", task.ID),
+		slog.Int64("task_id", task.ID),
 		slog.String("name", task.Name),
 		slog.String("status", task.Status),
 	)
@@ -375,7 +370,7 @@ func (s *Scheduler) registerTaskLocked(task *model.ScheduledTask) error {
 	s.entries[taskID] = entryID
 
 	slog.Info("registered cron task",
-		slog.String("task_id", taskID),
+		slog.Int64("task_id", taskID),
 		slog.String("cron", task.CronExpr),
 	)
 	return nil
@@ -395,7 +390,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 	if !ok {
 		slog.Error("agent not found for task, pausing",
 			slog.String("agent_id", task.AgentID),
-			slog.String("task_id", task.ID),
+			slog.Int64("task_id", task.ID),
 			slog.String("name", task.Name),
 		)
 		s.PauseTask(task.ID)
@@ -411,14 +406,14 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 	sessionID, err := CreateSession(projectPath, backendName, task.Name, task.AgentID, "", "default", "scheduled")
 	if err != nil {
 		slog.Error("failed to create session for task",
-			slog.String("task_id", task.ID),
+			slog.Int64("task_id", task.ID),
 			slog.String("err", err.Error()),
 		)
 		return
 	}
 
 	slog.Info("executing scheduled task",
-		slog.String("task_id", task.ID),
+		slog.Int64("task_id", task.ID),
 		slog.String("session_id", sessionID),
 		slog.String("name", task.Name),
 	)
@@ -522,7 +517,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 	// If context was cancelled, mark execution as cancelled and update stats
 	if ctx.Err() == context.Canceled {
 		slog.Info("task execution cancelled",
-			slog.String("task_id", task.ID),
+			slog.Int64("task_id", task.ID),
 			slog.String("session_id", sessionID),
 		)
 		UpdateExecutionStatus(sessionID, "cancelled")
@@ -590,7 +585,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 	}
 
 	slog.Info("task execution completed",
-		slog.String("task_id", task.ID),
+		slog.Int64("task_id", task.ID),
 		slog.String("session_id", sessionID),
 		slog.String("status", newStatus),
 	)
@@ -648,7 +643,7 @@ func GetTasks(projectPath string) ([]model.ScheduledTask, error) {
 }
 
 // GetTaskByID retrieves a single task by its ID.
-func GetTaskByID(id string) (*model.ScheduledTask, error) {
+func GetTaskByID(id int64) (*model.ScheduledTask, error) {
 	var t model.ScheduledTask
 	var lastRun, nextRun, lastRead sql.NullTime
 	err := DB.QueryRow(
@@ -676,20 +671,35 @@ func GetTaskByID(id string) (*model.ScheduledTask, error) {
 	return &t, nil
 }
 
-// saveTask inserts or updates a task in the database.
-func saveTask(task *model.ScheduledTask) error {
+// insertTask inserts a new task into the database and sets the auto-generated ID.
+func insertTask(task *model.ScheduledTask) error {
+	result, err := DB.Exec(
+		`INSERT INTO scheduled_tasks (project_path, name, cron_expr, agent_id, prompt, session_id, status, repeat_mode, max_runs, next_run_at, run_count, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		task.ProjectPath, task.Name, task.CronExpr, task.AgentID, task.Prompt, task.SessionID, task.Status, task.RepeatMode, task.MaxRuns, task.NextRunAt, task.RunCount, task.CreatedAt, task.UpdatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	task.ID = id
+	return nil
+}
+
+// updateTask updates an existing task in the database.
+func updateTask(task *model.ScheduledTask) error {
 	_, err := DB.Exec(
-		`INSERT INTO scheduled_tasks (id, project_path, name, cron_expr, agent_id, prompt, session_id, status, repeat_mode, max_runs, next_run_at, run_count, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(id) DO UPDATE SET name=?, cron_expr=?, agent_id=?, prompt=?, session_id=?, status=?, repeat_mode=?, max_runs=?, next_run_at=?, run_count=?, updated_at=CURRENT_TIMESTAMP`,
-		task.ID, task.ProjectPath, task.Name, task.CronExpr, task.AgentID, task.Prompt, task.SessionID, task.Status, task.RepeatMode, task.MaxRuns, task.NextRunAt, task.RunCount, task.CreatedAt, task.UpdatedAt,
-		task.Name, task.CronExpr, task.AgentID, task.Prompt, task.SessionID, task.Status, task.RepeatMode, task.MaxRuns, task.NextRunAt, task.RunCount,
+		`UPDATE scheduled_tasks SET name=?, cron_expr=?, agent_id=?, prompt=?, session_id=?, status=?, repeat_mode=?, max_runs=?, next_run_at=?, run_count=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		task.Name, task.CronExpr, task.AgentID, task.Prompt, task.SessionID, task.Status, task.RepeatMode, task.MaxRuns, task.NextRunAt, task.RunCount, task.ID,
 	)
 	return err
 }
 
 // AddTaskExecution records a task execution linked to a chat session.
-func AddTaskExecution(taskID string, sessionID string, triggerType string) error {
+func AddTaskExecution(taskID int64, sessionID string, triggerType string) error {
 	_, err := DB.Exec(
 		"INSERT INTO task_executions (task_id, session_id, trigger_type) VALUES (?, ?, ?)",
 		taskID, sessionID, triggerType,
@@ -707,7 +717,7 @@ func UpdateExecutionStatus(sessionID string, status string) error {
 }
 
 // UpdateTaskLastRead updates the last_read_at timestamp for a task, clearing unread status.
-func UpdateTaskLastRead(taskID string) error {
+func UpdateTaskLastRead(taskID int64) error {
 	_, err := DB.Exec(
 		"UPDATE scheduled_tasks SET last_read_at = CURRENT_TIMESTAMP WHERE id = ?",
 		taskID,
@@ -747,9 +757,3 @@ func HasUnreadTasks(projectPath string) (bool, error) {
 	}
 	return count > 0, err
 }
-
-// generateTaskID creates a unique ID for a scheduled task.
-func generateTaskID() string {
-	return generateUUID("task-", "scheduled_tasks", "id")
-}
-

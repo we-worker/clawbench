@@ -23,7 +23,7 @@ export function useTaskHistory(options: UseTaskHistoryOptions) {
   const runningExecutions = ref<any[]>([])
 
   // ISS-015: Track locally-read execution IDs to prevent unread flash-back
-  const locallyReadIds = reactive(new Set<string>())
+  const locallyReadIds = reactive(new Set<number>())
 
   // ISS-016: AbortController for cancelling in-flight requests on task change/unmount
   let abortController = new AbortController()

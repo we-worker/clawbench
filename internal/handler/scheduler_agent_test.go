@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -294,7 +295,7 @@ func TestServeTaskByID_Get(t *testing.T) {
 	err := s.AddTask(task)
 	assert.NoError(t, err)
 
-	req := newRequest(t, http.MethodGet, "/api/tasks/"+task.ID, nil)
+	req := newRequest(t, http.MethodGet, fmt.Sprintf("/api/tasks/%d", task.ID), nil)
 	req = withProjectCookie(req, env.ProjectDir)
 	w := callHandler(ServeTaskByID, req)
 
@@ -325,7 +326,7 @@ func TestServeTaskByID_Delete(t *testing.T) {
 	}
 	s.AddTask(task)
 
-	req := newRequest(t, http.MethodDelete, "/api/tasks/"+task.ID, nil)
+	req := newRequest(t, http.MethodDelete, fmt.Sprintf("/api/tasks/%d", task.ID), nil)
 	req = withProjectCookie(req, env.ProjectDir)
 	w := callHandler(ServeTaskByID, req)
 	assertOK(t, w)
@@ -355,7 +356,7 @@ func TestServeTaskByID_Pause(t *testing.T) {
 	}
 	s.AddTask(task)
 
-	req := newRequest(t, http.MethodPut, "/api/tasks/"+task.ID, map[string]any{
+	req := newRequest(t, http.MethodPut, fmt.Sprintf("/api/tasks/%d", task.ID), map[string]any{
 		"action": "pause",
 	})
 	req = withProjectCookie(req, env.ProjectDir)
@@ -388,7 +389,7 @@ func TestServeTaskByID_Resume(t *testing.T) {
 	s.AddTask(task)
 	s.PauseTask(task.ID)
 
-	req := newRequest(t, http.MethodPut, "/api/tasks/"+task.ID, map[string]any{
+	req := newRequest(t, http.MethodPut, fmt.Sprintf("/api/tasks/%d", task.ID), map[string]any{
 		"action": "resume",
 	})
 	req = withProjectCookie(req, env.ProjectDir)
@@ -405,7 +406,7 @@ func TestServeTaskByID_NotFound(t *testing.T) {
 	service.GlobalScheduler = s
 	defer func() { service.GlobalScheduler = nil }()
 
-	req := newRequest(t, http.MethodGet, "/api/tasks/non-existent", nil)
+	req := newRequest(t, http.MethodGet, "/api/tasks/99999", nil)
 	req = withProjectCookie(req, env.ProjectDir)
 	w := callHandler(ServeTaskByID, req)
 	assertStatus(t, w, http.StatusNotFound)
@@ -473,7 +474,7 @@ func TestServeTaskByID_Executions(t *testing.T) {
 	service.AddTaskExecution(task.ID, sessionID, "manual")
 
 	// Get executions
-	req := newRequest(t, http.MethodGet, "/api/tasks/"+task.ID+"/executions", nil)
+	req := newRequest(t, http.MethodGet, fmt.Sprintf("/api/tasks/%d", task.ID)+"/executions", nil)
 	req = withProjectCookie(req, env.ProjectDir)
 	w := callHandler(ServeTaskByID, req)
 	assertOK(t, w)
@@ -498,7 +499,7 @@ func TestServeTaskByID_ExecutionsTaskNotFound(t *testing.T) {
 	service.GlobalScheduler = s
 	defer func() { service.GlobalScheduler = nil }()
 
-	req := newRequest(t, http.MethodGet, "/api/tasks/non-existent/executions", nil)
+	req := newRequest(t, http.MethodGet, "/api/tasks/99999/executions", nil)
 	req = withProjectCookie(req, env.ProjectDir)
 	w := callHandler(ServeTaskByID, req)
 	assertStatus(t, w, http.StatusNotFound)
@@ -530,7 +531,7 @@ func TestServeTaskByID_Update(t *testing.T) {
 	}
 	s.AddTask(task)
 
-	req := newRequest(t, http.MethodPut, "/api/tasks/"+task.ID, map[string]any{
+	req := newRequest(t, http.MethodPut, fmt.Sprintf("/api/tasks/%d", task.ID), map[string]any{
 		"action":   "update",
 		"name":     "Updated Name",
 		"cron_expr": "0 */2 * * *",
@@ -567,7 +568,7 @@ func TestServeTaskByID_UpdateAssistantAgent(t *testing.T) {
 	}
 	s.AddTask(task)
 
-	req := newRequest(t, http.MethodPut, "/api/tasks/"+task.ID, map[string]any{
+	req := newRequest(t, http.MethodPut, fmt.Sprintf("/api/tasks/%d", task.ID), map[string]any{
 		"agent_id": "assistant",
 	})
 	req = withProjectCookie(req, env.ProjectDir)
@@ -584,7 +585,7 @@ func TestServeTaskByID_UpdateTaskNotFound(t *testing.T) {
 	service.GlobalScheduler = s
 	defer func() { service.GlobalScheduler = nil }()
 
-	req := newRequest(t, http.MethodPut, "/api/tasks/non-existent", map[string]any{
+	req := newRequest(t, http.MethodPut, "/api/tasks/99999", map[string]any{
 		"action": "update",
 		"name":   "Updated",
 	})
@@ -622,7 +623,7 @@ func TestServeTaskByID_WrongProject_Get(t *testing.T) {
 
 	// Try to access with a different project cookie
 	otherProject := t.TempDir()
-	req := newRequest(t, http.MethodGet, "/api/tasks/"+task.ID, nil)
+	req := newRequest(t, http.MethodGet, fmt.Sprintf("/api/tasks/%d", task.ID), nil)
 	req = withProjectCookie(req, otherProject)
 	w := callHandler(ServeTaskByID, req)
 	assertStatus(t, w, http.StatusForbidden)
@@ -653,7 +654,7 @@ func TestServeTaskByID_WrongProject_Delete(t *testing.T) {
 	s.AddTask(task)
 
 	otherProject := t.TempDir()
-	req := newRequest(t, http.MethodDelete, "/api/tasks/"+task.ID, nil)
+	req := newRequest(t, http.MethodDelete, fmt.Sprintf("/api/tasks/%d", task.ID), nil)
 	req = withProjectCookie(req, otherProject)
 	w := callHandler(ServeTaskByID, req)
 	assertStatus(t, w, http.StatusForbidden)
@@ -684,7 +685,7 @@ func TestServeTaskByID_WrongProject_Pause(t *testing.T) {
 	s.AddTask(task)
 
 	otherProject := t.TempDir()
-	req := newRequest(t, http.MethodPut, "/api/tasks/"+task.ID, map[string]any{
+	req := newRequest(t, http.MethodPut, fmt.Sprintf("/api/tasks/%d", task.ID), map[string]any{
 		"action": "pause",
 	})
 	req = withProjectCookie(req, otherProject)
@@ -718,7 +719,7 @@ func TestServeTaskByID_WrongProject_Executions(t *testing.T) {
 	service.AddTaskExecution(task.ID, `{"blocks":[{"type":"text","text":"result"}]}`, "manual")
 
 	otherProject := t.TempDir()
-	req := newRequest(t, http.MethodGet, "/api/tasks/"+task.ID+"/executions", nil)
+	req := newRequest(t, http.MethodGet, fmt.Sprintf("/api/tasks/%d", task.ID)+"/executions", nil)
 	req = withProjectCookie(req, otherProject)
 	w := callHandler(ServeTaskByID, req)
 	assertStatus(t, w, http.StatusForbidden)
@@ -749,7 +750,7 @@ func TestServeTaskByID_NoProject(t *testing.T) {
 	s.AddTask(task)
 
 	// No project cookie at all → 403
-	req := newRequest(t, http.MethodGet, "/api/tasks/"+task.ID, nil)
+	req := newRequest(t, http.MethodGet, fmt.Sprintf("/api/tasks/%d", task.ID), nil)
 	w := callHandler(ServeTaskByID, req)
 	assertStatus(t, w, http.StatusForbidden)
 }

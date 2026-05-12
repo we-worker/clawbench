@@ -45,7 +45,7 @@ var createHelp = HelpInfo{
   30 8 * * 1      Every Monday at 8:30
 
 Response format:
-  {"ok":true,"task":{"id":"task-xxx","name":"...","status":"active",...}}
+  {"ok":true,"task":{"id":1,"name":"...","status":"active",...}}
   {"ok":false,"error":"..."}`,
 }
 
@@ -59,7 +59,7 @@ var listHelp = HelpInfo{
 		`clawbench task list --project /path/to/project`,
 	},
 	Footer: `Response format:
-  {"ok":true,"tasks":[{"id":"task-xxx","name":"...","status":"active","cron_expr":"0 9 * * *","agent_id":"codebuddy","repeat_mode":"unlimited","run_count":5,"max_runs":0,...}]}
+  {"ok":true,"tasks":[{"id":1,"name":"...","status":"active","cron_expr":"0 9 * * *","agent_id":"codebuddy","repeat_mode":"unlimited","run_count":5,"max_runs":0,...}]}
   {"ok":false,"error":"..."}`,
 }
 
@@ -71,7 +71,7 @@ var getHelp = HelpInfo{
 		{Name: "project", Type: "string", Desc: "Project path", Required: true},
 	},
 	Examples: []string{
-		`clawbench task get task-abc123 --project /path/to/project`,
+		`clawbench task get 1 --project /path/to/project`,
 	},
 }
 
@@ -89,9 +89,9 @@ var updateHelp = HelpInfo{
 		{Name: "project", Type: "string", Desc: "Project path", Required: true},
 	},
 	Examples: []string{
-		`clawbench task update task-abc123 --cron "0 10 * * 1-5"`,
-		`clawbench task update task-abc123 --prompt "Updated prompt" --repeat limited --max-runs 5`,
-		`clawbench task update task-abc123 --prompt @/path/to/prompt.txt`,
+		`clawbench task update 1 --cron "0 10 * * 1-5"`,
+		`clawbench task update 1 --prompt "Updated prompt" --repeat limited --max-runs 5`,
+		`clawbench task update 1 --prompt @/path/to/prompt.txt`,
 	},
 }
 
@@ -103,7 +103,7 @@ var deleteHelp = HelpInfo{
 		{Name: "project", Type: "string", Desc: "Project path", Required: true},
 	},
 	Examples: []string{
-		`clawbench task delete task-abc123`,
+		`clawbench task delete 1`,
 	},
 }
 
@@ -115,7 +115,7 @@ var pauseHelp = HelpInfo{
 		{Name: "project", Type: "string", Desc: "Project path", Required: true},
 	},
 	Examples: []string{
-		`clawbench task pause task-abc123`,
+		`clawbench task pause 1`,
 	},
 }
 
@@ -127,7 +127,7 @@ var resumeHelp = HelpInfo{
 		{Name: "project", Type: "string", Desc: "Project path", Required: true},
 	},
 	Examples: []string{
-		`clawbench task resume task-abc123`,
+		`clawbench task resume 1`,
 	},
 }
 
@@ -139,7 +139,7 @@ var triggerHelp = HelpInfo{
 		{Name: "project", Type: "string", Desc: "Project path", Required: true},
 	},
 	Examples: []string{
-		`clawbench task trigger task-abc123`,
+		`clawbench task trigger 1`,
 	},
 }
 
@@ -171,8 +171,8 @@ func readFlagOrFile(val string) (string, error) {
 // come before positional arguments. This works around Go's flag package behavior
 // where parsing stops at the first non-flag argument.
 //
-// Example: ["task-abc", "--prompt", "hello", "--project", "/path"]
-//       → ["--prompt", "hello", "--project", "/path", "task-abc"]
+// Example: ["1", "--prompt", "hello", "--project", "/path"]
+//       → ["--prompt", "hello", "--project", "/path", "1"]
 func reorderFlagsFirst(args []string) []string {
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {

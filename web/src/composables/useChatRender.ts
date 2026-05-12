@@ -222,7 +222,7 @@ export function useChatRender(options) {
     if (taskIds.length > 0) {
       const taskKeys = taskIds.map((tid, tagIdx) => ({
         key: `${msgId}-${blockIdx}-${tagIdx}`,
-        taskId: tid,
+        taskId: Number(tid),
       }))
       fetchBatchTaskData(taskKeys)
     }
@@ -277,7 +277,7 @@ export function useChatRender(options) {
             for (let tagIdx = 0; tagIdx < taskIds.length; tagIdx++) {
               allTaskKeys.push({
                 key: `${msg.id}-${bi}-${tagIdx}`,
-                taskId: taskIds[tagIdx],
+                taskId: Number(taskIds[tagIdx]),
               })
             }
           }

@@ -3,7 +3,7 @@ import { store } from '@/stores/app'
 
 // Module-level singleton refs (shared across all consumers)
 const currentView = ref<'list' | 'settings' | 'history'>('list')
-const selectedTaskId = ref<string | null>(null)
+const selectedTaskId = ref<number | null>(null)
 const selectedExecId = ref<string | null>(null)
 const selectedExecData = ref<any>(null)
 const execDetailOpen = ref(false)
@@ -20,14 +20,14 @@ let markingReadInProgress = false
 export function useTaskTab() {
     // --- Navigation methods ---
 
-    function navigateToTaskSettings(taskId: string) {
+    function navigateToTaskSettings(taskId: number) {
         selectedTaskId.value = taskId
         currentView.value = 'settings'
         execDetailOpen.value = false
         formViewOpen.value = false
     }
 
-    function navigateToTaskHistory(taskId: string) {
+    function navigateToTaskHistory(taskId: number) {
         selectedTaskId.value = taskId
         currentView.value = 'history'
         execDetailOpen.value = false

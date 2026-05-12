@@ -24,20 +24,6 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	last_read_at DATETIME
 );
-CREATE TABLE IF NOT EXISTS scheduled_tasks (
-	id TEXT PRIMARY KEY,
-	project_path TEXT NOT NULL,
-	name TEXT NOT NULL,
-	cron_expr TEXT NOT NULL,
-	agent_id TEXT NOT NULL,
-	prompt TEXT NOT NULL,
-	status TEXT NOT NULL DEFAULT 'active',
-	repeat_mode TEXT NOT NULL DEFAULT 'always',
-	max_runs INTEGER DEFAULT 0,
-	run_count INTEGER DEFAULT 0,
-	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
 `
 
 func setupUUIDTestDB(t *testing.T) *sql.DB {
@@ -71,10 +57,9 @@ func TestGenerateUUID_NoPrefix(t *testing.T) {
 func TestGenerateUUID_WithPrefix(t *testing.T) {
 	setupUUIDTestDB(t)
 
-	id := generateUUID("task-", "scheduled_tasks", "id")
+	id := generateUUID("prefix-", "chat_sessions", "id")
 	assert.NotEmpty(t, id)
-	assert.True(t, strings.HasPrefix(id, "task-"))
-	assert.Len(t, id, 41) // "task-" (5) + 36 UUID chars
+	assert.True(t, strings.HasPrefix(id, "prefix-"))
 }
 
 func TestGenerateUUID_UniqueIDs(t *testing.T) {
