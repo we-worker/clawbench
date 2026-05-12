@@ -200,6 +200,7 @@ func (s *Scheduler) AddTask(task *model.ScheduledTask) error {
 }
 
 // RemoveTask removes a task from cron and marks it as deleted in the database.
+// Also soft-deletes associated chat sessions and removes task_executions rows.
 func (s *Scheduler) RemoveTask(id string) {
 	s.mu.Lock()
 	if entryID, ok := s.entries[id]; ok {
@@ -208,6 +209,48 @@ func (s *Scheduler) RemoveTask(id string) {
 	}
 	s.mu.Unlock()
 
+	// Cascade: soft-delete associated chat sessions
+	rows, err := DB.Query(`
+		SELECT te.session_id, cs.project_path, cs.backend
+		FROM task_executions te
+		JOIN chat_sessions cs ON cs.id = te.session_id
+		WHERE te.task_id = ?`, id)
+	if err != nil {
+		slog.Error("failed to query sessions for task removal",
+			slog.String("task_id", id),
+			slog.String("err", err.Error()),
+		)
+	} else {
+		// Collect all sessions first before updating (avoids deadlock with SetMaxOpenConns(1))
+		type sessionInfo struct {
+			sessionID   string
+			projectPath string
+			backend     string
+		}
+		var sessions []sessionInfo
+		for rows.Next() {
+			var si sessionInfo
+			if rows.Scan(&si.sessionID, &si.projectPath, &si.backend) == nil {
+				sessions = append(sessions, si)
+			}
+		}
+		rows.Close()
+
+		// Now soft-delete each session
+		for _, si := range sessions {
+			if err := DeleteSession(si.projectPath, si.backend, si.sessionID); err != nil {
+				slog.Error("failed to soft-delete session during task removal",
+					slog.String("session_id", si.sessionID),
+					slog.String("err", err.Error()),
+				)
+			}
+		}
+	}
+
+	// Delete task_executions rows
+	DB.Exec("DELETE FROM task_executions WHERE task_id = ?", id)
+
+	// Mark task as deleted
 	DB.Exec("UPDATE scheduled_tasks SET status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?", id)
 }
 
@@ -338,17 +381,16 @@ func (s *Scheduler) registerTaskLocked(task *model.ScheduledTask) error {
 	return nil
 }
 
+// UpdateTaskStats increments run_count and updates last_run_at for a task.
+func UpdateTaskStats(task *model.ScheduledTask, newStatus string) {
+	now := time.Now()
+	DB.Exec("UPDATE scheduled_tasks SET last_run_at = ?, run_count = run_count + 1, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		now, newStatus, task.ID)
+}
+
 // executeTask runs a scheduled task by invoking the AI backend and inserting
 // the result as an assistant message in the original session.
 func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, triggerType string) {
-	execID := generateExecutionID()
-
-	slog.Info("executing scheduled task",
-		slog.String("task_id", task.ID),
-		slog.String("exec_id", execID),
-		slog.String("name", task.Name),
-	)
-
 	agent, ok := model.Agents[task.AgentID]
 	if !ok {
 		slog.Error("agent not found for task, pausing",
@@ -363,6 +405,32 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 	backendName := agent.Backend
 	if backendName == "" {
 		backendName = "codebuddy"
+	}
+
+	// Create a chat session for this execution
+	sessionID, err := CreateSession(projectPath, backendName, task.Name, task.AgentID, "", "default", "scheduled")
+	if err != nil {
+		slog.Error("failed to create session for task",
+			slog.String("task_id", task.ID),
+			slog.String("err", err.Error()),
+		)
+		return
+	}
+
+	slog.Info("executing scheduled task",
+		slog.String("task_id", task.ID),
+		slog.String("session_id", sessionID),
+		slog.String("name", task.Name),
+	)
+
+	// Record execution linked to the session
+	if err := AddTaskExecution(task.ID, sessionID, triggerType); err != nil {
+		slog.Error("failed to record task execution", slog.String("err", err.Error()))
+	}
+
+	// Write user message (the prompt)
+	if _, err := AddChatMessage(projectPath, backendName, sessionID, "user", task.Prompt, nil, false, task.Name); err != nil {
+		slog.Error("failed to write user message for task", slog.String("err", err.Error()))
 	}
 
 	// Build chat request — no session resume, standalone execution
@@ -392,7 +460,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 
 	chatReq := ai.ChatRequest{
 		Prompt:             task.Prompt,
-		SessionID:          execID, // use executionID to identify this run
+		SessionID:          sessionID,
 		WorkDir:            projectPath,
 		SystemPrompt:       systemPrompt,
 		Model:              agent.DefaultModelID(),
@@ -407,27 +475,29 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 
 	// Register running execution
 	running := &RunningExecution{
-		ID:          execID,
+		ID:          sessionID,
 		TaskID:      task.ID,
 		CancelFunc:  cancel,
 		StartedAt:   time.Now(),
 		TriggerType: triggerType,
 	}
-	s.runningExecutions.Store(execID, running)
+	s.runningExecutions.Store(sessionID, running)
 	defer func() {
-		s.runningExecutions.Delete(execID)
+		s.runningExecutions.Delete(sessionID)
 		cancel()
 	}()
 
 	backend, err := ai.NewBackend(backendName)
 	if err != nil {
 		slog.Error("failed to create backend for task", slog.String("err", err.Error()))
+		UpdateExecutionStatus(sessionID, "failed")
 		return
 	}
 
 	eventCh, err := backend.ExecuteStream(ctx, chatReq)
 	if err != nil {
 		slog.Error("failed to execute stream for task", slog.String("err", err.Error()))
+		UpdateExecutionStatus(sessionID, "failed")
 		return
 	}
 
@@ -449,12 +519,15 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 		}
 	}
 
-	// If context was cancelled, skip persisting the execution result
+	// If context was cancelled, mark execution as cancelled and update stats
 	if ctx.Err() == context.Canceled {
-		slog.Info("task execution cancelled, skipping result persistence",
+		slog.Info("task execution cancelled",
 			slog.String("task_id", task.ID),
-			slog.String("exec_id", execID),
+			slog.String("session_id", sessionID),
 		)
+		UpdateExecutionStatus(sessionID, "cancelled")
+		newStatus := task.Status
+		UpdateTaskStats(task, newStatus)
 		return
 	}
 
@@ -465,20 +538,19 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 	}
 	responseMetadata.WallMs = wallMs
 
-	// Build content JSON
+	// Build content JSON for the assistant message
 	contentMap := map[string]any{"blocks": blocks}
 	if responseMetadata != nil {
 		contentMap["metadata"] = responseMetadata
 	}
 	contentJSON, _ := json.Marshal(contentMap)
 
-	// Record execution directly in task_executions (no longer writes to chat_history)
-	if err := AddTaskExecution(task.ID, string(contentJSON), triggerType); err != nil {
-		slog.Error("failed to record task execution", slog.String("err", err.Error()))
+	// Write assistant message to chat_history
+	if _, err := AddChatMessage(projectPath, backendName, sessionID, "assistant", string(contentJSON), nil, false, task.Name); err != nil {
+		slog.Error("failed to write assistant message for task", slog.String("err", err.Error()))
 	}
 
 	// Update task execution stats
-	now := time.Now()
 	newStatus := task.Status
 
 	// Check repeat mode — for "limited", read current DB value to decide completion
@@ -497,7 +569,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 	schedule, _ := cron.ParseStandard(task.CronExpr)
 	var nextRunAt *time.Time
 	if newStatus == "active" {
-		nr := schedule.Next(now)
+		nr := schedule.Next(time.Now())
 		nextRunAt = &nr
 	} else {
 		// Task completed, remove from cron
@@ -511,15 +583,15 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 
 	if nextRunAt != nil {
 		DB.Exec("UPDATE scheduled_tasks SET last_run_at = ?, next_run_at = ?, run_count = run_count + 1, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			now, nextRunAt, newStatus, task.ID)
+			time.Now(), nextRunAt, newStatus, task.ID)
 	} else {
 		DB.Exec("UPDATE scheduled_tasks SET last_run_at = ?, next_run_at = NULL, run_count = run_count + 1, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			now, newStatus, task.ID)
+			time.Now(), newStatus, task.ID)
 	}
 
 	slog.Info("task execution completed",
 		slog.String("task_id", task.ID),
-		slog.String("exec_id", execID),
+		slog.String("session_id", sessionID),
 		slog.String("status", newStatus),
 	)
 }
@@ -616,11 +688,20 @@ func saveTask(task *model.ScheduledTask) error {
 	return err
 }
 
-// AddTaskExecution records a task execution with its content directly in task_executions.
-func AddTaskExecution(taskID string, content string, triggerType string) error {
+// AddTaskExecution records a task execution linked to a chat session.
+func AddTaskExecution(taskID string, sessionID string, triggerType string) error {
 	_, err := DB.Exec(
-		"INSERT INTO task_executions (task_id, content, trigger_type) VALUES (?, ?, ?)",
-		taskID, content, triggerType,
+		"INSERT INTO task_executions (task_id, session_id, trigger_type) VALUES (?, ?, ?)",
+		taskID, sessionID, triggerType,
+	)
+	return err
+}
+
+// UpdateExecutionStatus updates the status of a task execution by session_id.
+func UpdateExecutionStatus(sessionID string, status string) error {
+	_, err := DB.Exec(
+		"UPDATE task_executions SET status = ? WHERE session_id = ?",
+		status, sessionID,
 	)
 	return err
 }
@@ -664,7 +745,3 @@ func generateTaskID() string {
 	return generateUUID("task-", "scheduled_tasks", "id")
 }
 
-// generateExecutionID creates a unique ID for a task execution instance.
-func generateExecutionID() string {
-	return generateUUID("exec-", "task_executions", "id")
-}

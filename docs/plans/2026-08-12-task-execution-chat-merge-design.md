@@ -1,7 +1,7 @@
 # Scheduled Task Execution → Chat Storage Merge Design
 
 **Date:** 2026-08-12
-**Status:** Final
+**Status:** Implemented
 
 ## Goal
 

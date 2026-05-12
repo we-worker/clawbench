@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
@@ -233,24 +234,31 @@ func ServeTaskByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveTaskExecutions returns the execution history for a task.
-// It queries task_executions directly (content is stored inline, no chat_history dependency).
+// It joins task_executions with chat_history to fetch the assistant content.
 func serveTaskExecutions(w http.ResponseWriter, r *http.Request, taskID string) {
 	task, err := service.GetTaskByID(taskID)
 	if err != nil {
-	writeLocalizedError(w, r, model.NotFound(nil, "TaskNotFound"))
-	return
+		writeLocalizedError(w, r, model.NotFound(nil, "TaskNotFound"))
+		return
 	}
 
 	type Execution struct {
-		Content     string `json:"content"`
-		TriggerType string `json:"triggerType"`
-		CreatedAt   string `json:"createdAt"`
-		IsUnread    bool   `json:"isUnread"`
+		SessionID   string  `json:"sessionId"`
+		TriggerType string  `json:"triggerType"`
+		Status      string  `json:"status"`
+		Content     *string `json:"content"`
+		CreatedAt   string  `json:"createdAt"`
+		IsUnread    bool    `json:"isUnread"`
 	}
 
 	rows, err := service.DB.Query(`
-		SELECT te.content, te.trigger_type, te.created_at
+		SELECT te.session_id, te.trigger_type, te.status, te.created_at,
+		       ch.content AS assistant_content
 		FROM task_executions te
+		LEFT JOIN chat_history ch ON ch.session_id = te.session_id
+		    AND ch.role = 'assistant'
+		    AND ch.deleted = 0
+		    AND ch.streaming = 0
 		WHERE te.task_id = ?
 		ORDER BY te.created_at DESC
 	`, taskID)
@@ -263,9 +271,13 @@ func serveTaskExecutions(w http.ResponseWriter, r *http.Request, taskID string) 
 	var executions []Execution
 	for rows.Next() {
 		var exec Execution
-		if err := rows.Scan(&exec.Content, &exec.TriggerType, &exec.CreatedAt); err != nil {
+		var content sql.NullString
+		if err := rows.Scan(&exec.SessionID, &exec.TriggerType, &exec.Status, &exec.CreatedAt, &content); err != nil {
 			model.WriteError(w, model.Internal(fmt.Errorf("failed to scan execution record")))
 			return
+		}
+		if content.Valid {
+			exec.Content = &content.String
 		}
 		if task.LastReadAt == nil {
 			exec.IsUnread = true

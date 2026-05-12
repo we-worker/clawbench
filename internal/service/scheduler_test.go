@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS chat_history (
 	session_id TEXT,
 	backend TEXT NOT NULL DEFAULT 'claude',
 	streaming INTEGER NOT NULL DEFAULT 0,
+	indexed INTEGER NOT NULL DEFAULT 0,
+	deleted INTEGER NOT NULL DEFAULT 0,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -37,9 +39,10 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 	agent_source TEXT DEFAULT 'default',
 	model TEXT DEFAULT '',
 	session_type TEXT NOT NULL DEFAULT 'chat',
+	deleted INTEGER NOT NULL DEFAULT 0,
+	last_read_at DATETIME,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-	last_read_at DATETIME,
 	UNIQUE(project_path, backend, id)
 );
 CREATE TABLE IF NOT EXISTS scheduled_tasks (
@@ -63,19 +66,30 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
 CREATE TABLE IF NOT EXISTS task_executions (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	task_id TEXT NOT NULL,
-	content TEXT NOT NULL DEFAULT '',
+	session_id TEXT NOT NULL,
 	trigger_type TEXT NOT NULL DEFAULT 'auto',
+	status TEXT NOT NULL DEFAULT 'completed',
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_executions_task ON task_executions(task_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_history_session ON chat_history(project_path, backend, session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_project_backend ON chat_sessions(project_path, backend);
+CREATE INDEX IF NOT EXISTS idx_executions_session ON task_executions(session_id);
+CREATE TABLE IF NOT EXISTS ai_raw_responses (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	session_id TEXT NOT NULL,
+	message_id INTEGER NOT NULL,
+	backend TEXT NOT NULL DEFAULT '',
+	raw_output TEXT NOT NULL,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 `
 
 func setupSchedulerDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	assert.NoError(t, err)
+	db.SetMaxOpenConns(1) // Required for :memory: SQLite — all queries must use the same connection
 	_, err = db.Exec(schedulerSchema)
 	assert.NoError(t, err)
 	service.DB = db
@@ -601,8 +615,7 @@ func TestAddTaskExecution(t *testing.T) {
 		"task-1", "/proj", "Task", "0 * * * *", "agent1", "p", "", "active", "unlimited", now, now,
 	)
 
-	content := `{"blocks":[{"type":"text","text":"execution result"}]}`
-	err := service.AddTaskExecution("task-1", content, "cron")
+	err := service.AddTaskExecution("task-1", "session-abc", "auto")
 	assert.NoError(t, err)
 
 	// Verify the execution was recorded
@@ -611,25 +624,76 @@ func TestAddTaskExecution(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 1, count)
 
-	var fetchedContent string
-	err = service.DB.QueryRow("SELECT content FROM task_executions WHERE task_id = ?", "task-1").Scan(&fetchedContent)
+	var fetchedSessionID string
+	err = service.DB.QueryRow("SELECT session_id FROM task_executions WHERE task_id = ?", "task-1").Scan(&fetchedSessionID)
 	assert.NoError(t, err)
-	assert.Equal(t, content, fetchedContent)
+	assert.Equal(t, "session-abc", fetchedSessionID)
 }
 
 func TestAddTaskExecution_MultipleExecutions(t *testing.T) {
 	_, cleanup := setupScheduler(t)
 	defer cleanup()
 
-	err := service.AddTaskExecution("task-1", `{"blocks":[{"type":"text","text":"result1"}]}`, "cron")
+	err := service.AddTaskExecution("task-1", "session-1", "auto")
 	assert.NoError(t, err)
-	err = service.AddTaskExecution("task-1", `{"blocks":[{"type":"text","text":"result2"}]}`, "cron")
+	err = service.AddTaskExecution("task-1", "session-2", "auto")
 	assert.NoError(t, err)
 
 	var count int
 	err = service.DB.QueryRow("SELECT COUNT(*) FROM task_executions WHERE task_id = ?", "task-1").Scan(&count)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, count)
+}
+
+func TestUpdateExecutionStatus(t *testing.T) {
+	_, cleanup := setupScheduler(t)
+	defer cleanup()
+
+	now := time.Now()
+	service.DB.Exec(
+		"INSERT INTO scheduled_tasks (id, project_path, name, cron_expr, agent_id, prompt, session_id, status, repeat_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"task-1", "/proj", "Task", "0 * * * *", "agent1", "p", "", "active", "unlimited", now, now,
+	)
+
+	err := service.AddTaskExecution("task-1", "session-abc", "auto")
+	assert.NoError(t, err)
+
+	// Verify default status is 'completed'
+	var status string
+	err = service.DB.QueryRow("SELECT status FROM task_executions WHERE session_id = ?", "session-abc").Scan(&status)
+	assert.NoError(t, err)
+	assert.Equal(t, "completed", status)
+
+	// Update to cancelled
+	err = service.UpdateExecutionStatus("session-abc", "cancelled")
+	assert.NoError(t, err)
+
+	err = service.DB.QueryRow("SELECT status FROM task_executions WHERE session_id = ?", "session-abc").Scan(&status)
+	assert.NoError(t, err)
+	assert.Equal(t, "cancelled", status)
+}
+
+func TestUpdateTaskStats(t *testing.T) {
+	_, cleanup := setupScheduler(t)
+	defer cleanup()
+
+	now := time.Now()
+	service.DB.Exec(
+		"INSERT INTO scheduled_tasks (id, project_path, name, cron_expr, agent_id, prompt, session_id, status, repeat_mode, run_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"task-stats", "/proj", "Stats Task", "0 * * * *", "agent1", "p", "", "active", "unlimited", 0, now, now,
+	)
+
+	task, err := service.GetTaskByID("task-stats")
+	assert.NoError(t, err)
+	assert.Equal(t, 0, task.RunCount)
+
+	service.UpdateTaskStats(task, "active")
+
+	updated, err := service.GetTaskByID("task-stats")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, updated.RunCount)
+	assert.NotNil(t, updated.LastRunAt)
+	assert.Equal(t, "active", updated.Status)
 }
 
 // ---------- saveTask (tested indirectly via AddTask / UpdateTask) ----------
@@ -757,4 +821,106 @@ func TestRunCount_AtomicIncrement(t *testing.T) {
 	task, err := service.GetTaskByID("task-rc")
 	assert.NoError(t, err)
 	assert.Equal(t, 10, task.RunCount, "run_count should be exactly 10 after 10 sequential increments")
+}
+
+// ---------- RemoveTask cascade deletes sessions (Task 7) ----------
+
+func TestRemoveTask_CascadeDeletesSessions(t *testing.T) {
+	s, cleanup := setupScheduler(t)
+	defer cleanup()
+
+	// Create a task
+	task := helperTask(func(t *model.ScheduledTask) {
+		t.ProjectPath = "/cascade-proj"
+	})
+	assert.NoError(t, s.AddTask(task))
+
+	// Create a scheduled chat session
+	sessionID, err := service.CreateSession("/cascade-proj", "claude", "Exec 1", "agent1", "", "default", "scheduled")
+	assert.NoError(t, err)
+
+	// Add messages to the session
+	_, err = service.AddChatMessage("/cascade-proj", "claude", sessionID, "user", "test prompt", nil, false, "Exec 1")
+	assert.NoError(t, err)
+	_, err = service.AddChatMessage("/cascade-proj", "claude", sessionID, "assistant", "test response", nil, false, "Exec 1")
+	assert.NoError(t, err)
+
+	// Create a task_execution linked to this session
+	err = service.AddTaskExecution(task.ID, sessionID, "auto")
+	assert.NoError(t, err)
+
+	// Verify the session exists
+	var sessionDeleted int
+	err = service.DB.QueryRow("SELECT deleted FROM chat_sessions WHERE id = ?", sessionID).Scan(&sessionDeleted)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, sessionDeleted, "session should not be deleted before RemoveTask")
+
+	// Remove the task — should cascade-delete sessions
+	s.RemoveTask(task.ID)
+
+	// Verify session is soft-deleted
+	err = service.DB.QueryRow("SELECT deleted FROM chat_sessions WHERE id = ?", sessionID).Scan(&sessionDeleted)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, sessionDeleted, "session should be soft-deleted after RemoveTask")
+
+	// Verify task_executions rows are deleted
+	var execCount int
+	err = service.DB.QueryRow("SELECT COUNT(*) FROM task_executions WHERE task_id = ?", task.ID).Scan(&execCount)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, execCount, "task_executions should be deleted after RemoveTask")
+
+	// Verify task is marked deleted
+	persisted, err := service.GetTaskByID(task.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, "deleted", persisted.Status)
+}
+
+// ---------- PurgeDeletedData cleans task_executions (Task 8) ----------
+
+func TestPurgeDeletedData_CleansTaskExecutions(t *testing.T) {
+	_, cleanup := setupScheduler(t)
+	defer cleanup()
+
+	// Create a scheduled chat session
+	sessionID, err := service.CreateSession("/purge-proj", "claude", "Exec 1", "agent1", "", "default", "scheduled")
+	assert.NoError(t, err)
+
+	// Add messages
+	service.AddChatMessage("/purge-proj", "claude", sessionID, "user", "prompt", nil, false, "Exec 1")
+
+	// Create task_execution
+	now := time.Now()
+	service.DB.Exec(
+		"INSERT INTO scheduled_tasks (id, project_path, name, cron_expr, agent_id, prompt, session_id, status, repeat_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"task-purge", "/purge-proj", "Purge Task", "0 * * * *", "agent1", "p", "", "active", "unlimited", now, now,
+	)
+	err = service.AddTaskExecution("task-purge", sessionID, "auto")
+	assert.NoError(t, err)
+
+	// Verify task_execution exists
+	var execCount int
+	err = service.DB.QueryRow("SELECT COUNT(*) FROM task_executions WHERE session_id = ?", sessionID).Scan(&execCount)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, execCount)
+
+	// Soft-delete the session and set updated_at to old date
+	service.DeleteSession("/purge-proj", "claude", sessionID)
+	oldTime := time.Now().Add(-100 * 24 * time.Hour) // 100 days ago
+	service.DB.Exec("UPDATE chat_sessions SET updated_at = ? WHERE id = ?", oldTime, sessionID)
+
+	// Get expired sessions and purge
+	cutoff := time.Now().Add(-90 * 24 * time.Hour)
+	expiredIDs, err := service.GetExpiredDeletedSessions(cutoff)
+	assert.NoError(t, err)
+	assert.Contains(t, expiredIDs, sessionID)
+
+	sessionsPurged, messagesPurged, err := service.PurgeDeletedData(expiredIDs)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), sessionsPurged)
+	assert.True(t, messagesPurged >= 1)
+
+	// Verify task_executions rows are also deleted
+	err = service.DB.QueryRow("SELECT COUNT(*) FROM task_executions WHERE session_id = ?", sessionID).Scan(&execCount)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, execCount, "task_executions should be purged along with the session")
 }

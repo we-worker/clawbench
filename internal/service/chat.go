@@ -555,6 +555,9 @@ func PurgeDeletedData(sessionIDs []string) (sessionsPurged int64, messagesPurged
 	}
 	messagesPurged, _ = result.RowsAffected()
 
+	// Delete task_executions for purged scheduled sessions
+	_, _ = tx.Exec("DELETE FROM task_executions WHERE session_id IN ("+placeholders+")", args...)
+
 	// Delete the session records
 	result, err = tx.Exec("DELETE FROM chat_sessions WHERE id IN ("+placeholders+") AND deleted = 1", args...)
 	if err != nil {

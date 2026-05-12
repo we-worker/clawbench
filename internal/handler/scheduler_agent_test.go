@@ -438,8 +438,12 @@ func TestServeTaskByID_Executions(t *testing.T) {
 	}
 	s.AddTask(task)
 
-	// Create an execution record directly
-	service.AddTaskExecution(task.ID, `{"blocks":[{"type":"text","text":"result"}]}`, "manual")
+	// Create a scheduled session + messages + task_execution
+	sessionID, err := service.CreateSession(env.ProjectDir, "claude", "Exec Task", "coder", "", "default", "scheduled")
+	assert.NoError(t, err)
+	service.AddChatMessage(env.ProjectDir, "claude", sessionID, "user", "test prompt", nil, false, "Exec Task")
+	service.AddChatMessage(env.ProjectDir, "claude", sessionID, "assistant", "test response", nil, false, "Exec Task")
+	service.AddTaskExecution(task.ID, sessionID, "manual")
 
 	// Get executions
 	req := newRequest(t, http.MethodGet, "/api/tasks/"+task.ID+"/executions", nil)
@@ -450,6 +454,11 @@ func TestServeTaskByID_Executions(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &result)
 	executions := result["executions"].([]interface{})
 	assert.Len(t, executions, 1)
+
+	exec := executions[0].(map[string]interface{})
+	assert.Equal(t, sessionID, exec["sessionId"])
+	assert.Equal(t, "manual", exec["triggerType"])
+	assert.Equal(t, "completed", exec["status"])
 }
 
 func TestServeTaskByID_ExecutionsTaskNotFound(t *testing.T) {

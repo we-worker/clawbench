@@ -76,9 +76,10 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 **Scheduled task system:**
 1. Frontend sends POST to `/api/tasks` with cron expression, agent ID, prompt, repeat mode (once/limited/unlimited)
 2. `service.Scheduler` registers cron job via `robfig/cron/v3`
-3. On trigger, scheduler calls the agent's `AIBackend.ExecuteStream()` and persists results as chat messages with `scheduledTask` metadata. `CLAWBENCH_SCHEDULED=1` env var is injected for anti-recursion protection.
-4. Frontend manages tasks via `/api/tasks` CRUD endpoints
+3. On trigger, scheduler creates a `chat_session` (`session_type='scheduled'`), writes a `role='user'` message (task prompt), executes the AI backend, and writes a `role='assistant'` message. A thin `task_executions` row links the task to the session. Cancelled executions are marked with `status='cancelled'` (no assistant message). `CLAWBENCH_SCHEDULED=1` env var is injected for anti-recursion protection.
+4. Frontend manages tasks via `/api/tasks` CRUD endpoints. `GET /api/tasks/{id}/executions` JOINs `task_executions` with `chat_history` to fetch execution content.
 5. AI agents can also manage tasks via `clawbench task` CLI subcommands (create/update/delete/pause/resume/trigger/list/get), which is the preferred method for AI-driven task creation. The `list` and `get` subcommands allow agents to inspect existing tasks. The `--prompt` flag supports `@path` syntax to read prompt text from a file. The old `<schedule-proposal>` passive tag detection system has been removed.
+6. One-time migration from old schema (content in `task_executions`) to new schema (content in `chat_history`) is available via `clawbench migrate` subcommand.
 
 **SSH tunnel / port forwarding:**
 1. SSH server listens on `port+1` (or configured port)
@@ -107,7 +108,7 @@ npx vitest run web/src/components/__tests__/gitGraphUtils.test.ts  # Single test
 2. User-facing queries filter `AND deleted = 0`; RAG-specific queries (`GetMessageByID`, `GetMessagesBySessionID`, `GetUnindexedMessages`) intentionally skip the filter so deleted content remains searchable
 3. `DeleteSession` also sets `updated_at = CURRENT_TIMESTAMP` to track deletion time
 4. `AddChatMessage` rejects inserts into deleted sessions as a defensive guard
-5. `CleanupWorker` (always runs, regardless of `rag.enabled`) periodically purges soft-deleted data older than `rag.retention_days` (default: 90). Cascade order: DuckDB `chat_chunks` → SQLite `ai_raw_responses` → `chat_history` → `chat_sessions`
+5. `CleanupWorker` (always runs, regardless of `rag.enabled`) periodically purges soft-deleted data older than `rag.retention_days` (default: 90). Cascade order: DuckDB `chat_chunks` → SQLite `ai_raw_responses` → `chat_history` → `task_executions` → `chat_sessions`
 
 **Session runtime management** (`session_runtime.go`):
 - Mutex-protected active session tracking, stream channels via `sync.Map`
