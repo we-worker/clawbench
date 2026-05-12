@@ -1,5 +1,4 @@
-import { ref } from 'vue'
-import { apiGet, apiPost, apiPut, apiDelete } from '@/utils/api'
+import { useCrudList } from './useCrudList'
 
 export interface QuickSendItem {
   id: number
@@ -8,78 +7,20 @@ export interface QuickSendItem {
   sort_order: number
 }
 
-// Module-level singleton state
-const items = ref<QuickSendItem[]>([])
-const loaded = ref(false)
-const showEditDialog = ref(false)
-
 export function useQuickSend() {
-  async function fetchItems(force = false) {
-    if (loaded.value && !force) return
-    try {
-      const data = await apiGet<QuickSendItem[]>('/api/chat/quick-send')
-      items.value = data || []
-      loaded.value = true
-    } catch {
-      // Silently fail on initial load
-    }
-  }
-
-  async function addItem(item: { label: string; command: string }): Promise<boolean> {
-    try {
-      await apiPost('/api/chat/quick-send', item)
-      await fetchItems(true)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  async function updateItem(id: number, item: { label: string; command: string }): Promise<boolean> {
-    try {
-      await apiPut(`/api/chat/quick-send/${id}`, item)
-      await fetchItems(true)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  async function deleteItem(id: number): Promise<boolean> {
-    try {
-      await apiDelete(`/api/chat/quick-send/${id}`)
-      await fetchItems(true)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  async function reorderItems(ids: number[]): Promise<boolean> {
-    const oldItems = [...items.value]
-    // Optimistic reorder
-    const reordered = ids.map((id, i) => {
-      const item = items.value.find(it => it.id === id)
-      return item ? { ...item, sort_order: i } : null
-    }).filter(Boolean) as QuickSendItem[]
-    items.value = reordered
-    try {
-      await apiPut('/api/chat/quick-send/reorder', { ids })
-      return true
-    } catch {
-      items.value = oldItems // Rollback
-      return false
-    }
-  }
+  const { items, loaded, showEditDialog, fetchItems, addItem, updateItem, deleteItem, reorderItems } =
+    useCrudList<QuickSendItem>({
+      apiPrefix: '/api/chat/quick-send',
+    })
 
   return {
-    items,
+    items: items as ReturnType<typeof useCrudList<QuickSendItem>>['items'],
+    loaded,
+    showEditDialog,
     fetchItems,
     addItem,
     updateItem,
     deleteItem,
     reorderItems,
-    showEditDialog,
-    loaded,
   }
 }
