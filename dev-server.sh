@@ -17,13 +17,18 @@ DEV_BACKEND_PID_FILE="/tmp/${NAME}-backend.pid"
 DEV_PID_FILE="/tmp/${NAME}-vite.pid"
 AUTO_PW_FILE=".clawbench/auto-password"
 
+# Load shared shell utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/scripts/common.sh"
+
 get_watch_dir() {
     grep "^watch_dir:" "config/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"' || echo ""
 }
 
 show_auto_password() {
     if [[ -f "$AUTO_PW_FILE" ]]; then
-        local pw=$(cat "$AUTO_PW_FILE")
+        local pw
+        pw=$(cat "$AUTO_PW_FILE")
         echo "  Password: $pw (auto-generated)"
     fi
 }
@@ -31,12 +36,14 @@ show_auto_password() {
 get_dev_port() {
     local key="$1"
     local default="$2"
-    local val=$(sed -n '/^dev:/,/^[a-z]/{/^  '"$key"':/p}' "config/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"' || echo "")
+    local val
+    val=$(sed -n '/^dev:/,/^[a-z]/{/^  '"$key"':/p}' "config/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"' || echo "")
     echo "${val:-$default}"
 }
 
 get_dev_host() {
-    local host=$(sed -n '/^dev:/,/^[a-z]/{/^  host:/p}' "config/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"' || echo "")
+    local host
+    host=$(sed -n '/^dev:/,/^[a-z]/{/^  host:/p}' "config/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"' || echo "")
     echo "${host:-localhost}"
 }
 
@@ -45,22 +52,11 @@ DEV_BACKEND_PORT=$(get_dev_port "port" 20002)
 DEV_FRONTEND_PORT=$(get_dev_port "frontend_port" 20001)
 DEV_HOST=$(get_dev_host)
 
-check_binary() {
-    if [[ ! -f "$BIN" ]]; then
-        echo "Binary not found, building..."
-        if command -v go >/dev/null 2>&1; then
-            go build -o "$BIN" ./cmd/server
-        else
-            echo "Error: Go not found and binary missing." >&2
-            exit 1
-        fi
-    fi
-}
-
 _stop_dev() {
     for pfile in "$DEV_BACKEND_PID_FILE" "$DEV_PID_FILE"; do
         if [[ -f "$pfile" ]]; then
-            local pid=$(cat "$pfile")
+            local pid
+            pid=$(cat "$pfile")
             if kill -0 "$pid" 2>/dev/null; then
                 echo "Stopping $([[ "$pfile" == *backend* ]] && echo backend || echo Vite) (PID $pid)..."
                 kill "$pid"
@@ -71,7 +67,8 @@ _stop_dev() {
 
     # Fallback: kill by port
     for port in $DEV_BACKEND_PORT $DEV_FRONTEND_PORT; do
-        local pids=$(lsof -ti :$port 2>/dev/null)
+        local pids
+        pids=$(lsof -ti :$port 2>/dev/null)
         if [[ -n "$pids" ]]; then
             echo "Killing orphan process on port $port (PIDs: $pids)..."
             echo "$pids" | xargs kill -9 2>/dev/null || true
@@ -84,9 +81,10 @@ start_dev() {
     _stop_dev
     sleep 0.5
 
-    check_binary
+    check_binary "$BIN"
 
-    local WATCH_DIR=$(get_watch_dir)
+    local WATCH_DIR
+    WATCH_DIR=$(get_watch_dir)
     echo "=== Starting $NAME (dev mode) ==="
     echo "  Binary:   $BIN"
     echo "  Backend:  http://$DEV_HOST:$DEV_BACKEND_PORT"

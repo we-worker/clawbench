@@ -18,6 +18,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// FindConfigPath searches for config.yaml in priority order:
+//  1. <BinDir>/config/config.yaml (green portable: next to binary)
+//  2. config/config.yaml (CWD-relative, standard layout)
+//  3. <BinDir>/config.yaml (legacy: next to binary)
+//  4. config.yaml (legacy: CWD root)
+func FindConfigPath(binDir string) string {
+	configPath := filepath.Join(binDir, "config", "config.yaml")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		configPath = filepath.Join("config", "config.yaml")
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			configPath = filepath.Join(binDir, "config.yaml")
+			if _, err := os.Stat(configPath); os.IsNotExist(err) {
+				configPath = "config.yaml"
+			}
+		}
+	}
+	return configPath
+}
+
 // loadConfig loads the YAML config file and applies defaults.
 // It is safe to call multiple times — subsequent calls are no-ops
 // once model.ConfigInstance is populated.
@@ -31,16 +50,7 @@ func loadConfig() {
 
 	var cfg model.Config
 	var presence map[string]bool
-	configPath := filepath.Join(model.BinDir, "config", "config.yaml")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		configPath = filepath.Join("config", "config.yaml")
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			configPath = filepath.Join(model.BinDir, "config.yaml")
-			if _, err := os.Stat(configPath); os.IsNotExist(err) {
-				configPath = "config.yaml"
-			}
-		}
-	}
+	configPath := FindConfigPath(model.BinDir)
 
 	data, err := os.ReadFile(configPath)
 	if err == nil {

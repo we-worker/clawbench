@@ -18,52 +18,13 @@ AUTO_PW_FILE=".clawbench/auto-password"
 
 RELEASE_PORT=20000
 
-get_watch_dir() {
-    grep "^watch_dir:" "$CONFIG" 2>/dev/null | awk '{print $2}' | tr -d '"' || echo ""
-}
+# Load shared shell utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/scripts/common.sh"
 
-show_auto_password() {
-    if [[ -f "$AUTO_PW_FILE" ]]; then
-        local pw=$(cat "$AUTO_PW_FILE")
-        echo "  Password: $pw (auto-generated, saved in $AUTO_PW_FILE)"
-    fi
-}
-
-check_binary() {
-    if [[ ! -f "$BIN" ]]; then
-        echo "Binary not found, building..."
-        if command -v go >/dev/null 2>&1; then
-            go build -o "$BIN" ./cmd/server
-        else
-            echo "Error: Go not found and binary missing." >&2
-            exit 1
-        fi
-    fi
-}
-
+# Stop release backend (calls shared _stop_servers then cleans up DuckDB lock)
 _stop_release() {
-    if [[ -f "$PID_FILE" ]]; then
-        local pid=$(cat "$PID_FILE")
-        if kill -0 "$pid" 2>/dev/null; then
-            echo "Stopping release backend (PID $pid)..."
-            kill "$pid"
-            sleep 1
-            # Force kill if still alive
-            if kill -0 "$pid" 2>/dev/null; then
-                kill -9 "$pid" 2>/dev/null
-                sleep 1
-            fi
-        fi
-        rm -f "$PID_FILE"
-    fi
-
-    # Fallback: kill by port
-    local pids=$(lsof -ti :${PORT:-$RELEASE_PORT} 2>/dev/null)
-    if [[ -n "$pids" ]]; then
-        echo "Killing orphan process on port ${PORT:-$RELEASE_PORT} (PIDs: $pids)..."
-        echo "$pids" | xargs kill 2>/dev/null || true
-        sleep 1
-    fi
+    _stop_servers "$PID_FILE" "${PORT:-$RELEASE_PORT}" "release backend"
 
     # Clear stale DuckDB lock files to resolve RAG lock conflicts
     local lock_file="/home/xulongzhe/projects/clawbench/.clawbench/rag.duckdb"
@@ -71,28 +32,22 @@ _stop_release() {
         echo "Removing stale DuckDB lock..."
         rm -f "${lock_file}.lock"
     fi
-
-    # Wait for port to be fully released
-    local waited=0
-    while lsof -ti :${PORT:-$RELEASE_PORT} 2>/dev/null && [[ $waited -lt 5 ]]; do
-        sleep 0.5
-        waited=$((waited + 1))
-    done
 }
 
 start_release() {
     _stop_release
     sleep 0.3
 
-    check_binary
+    check_binary "$BIN"
 
-    local WATCH_DIR=$(get_watch_dir)
+    local WATCH_DIR
+    WATCH_DIR=$(get_watch_dir "$CONFIG")
     echo "=== Starting $NAME (release) ==="
     echo "  Binary:   $BIN"
     echo "  Config:   $CONFIG"
     echo "  Port:     ${PORT:-$RELEASE_PORT}"
     echo "  Watch:    ${WATCH_DIR:-default}"
-    show_auto_password
+    show_auto_password "$AUTO_PW_FILE"
     echo ""
 
     if [[ -n "$FOREGROUND" ]]; then

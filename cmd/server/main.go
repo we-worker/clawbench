@@ -131,17 +131,7 @@ func main() {
 	// 2. config/config.yaml (CWD-relative, standard layout)
 	// 3. <BinDir>/config.yaml (legacy: next to binary)
 	// 4. config.yaml (legacy: CWD root)
-	configPath := filepath.Join(model.BinDir, "config", "config.yaml")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		configPath = filepath.Join("config", "config.yaml")
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			// Fallback to legacy paths
-			configPath = filepath.Join(model.BinDir, "config.yaml")
-			if _, err := os.Stat(configPath); os.IsNotExist(err) {
-				configPath = "config.yaml"
-			}
-		}
-	}
+	configPath := cli.FindConfigPath(model.BinDir)
 
 	data, err := os.ReadFile(configPath)
 	if err == nil {
