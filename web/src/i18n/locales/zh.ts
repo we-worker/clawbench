@@ -331,6 +331,9 @@ export default {
       alreadyRunning: '任务正在执行中',
       alreadyFinished: '执行已结束',
       detail: '执行详情',
+      statusCancelled: '已取消',
+      statusFailed: '失败',
+      cancelledNotice: '此执行已被取消，无输出内容',
     },
   },
   file: {

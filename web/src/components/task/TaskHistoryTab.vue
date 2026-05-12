@@ -36,6 +36,8 @@
               <span v-if="exec.isUnread" class="exec-unread-dot"></span>
               <span v-if="exec.triggerType === 'manual'" class="exec-trigger-type manual">{{ t('task.exec.manual') }}</span>
               <span v-else class="exec-trigger-type auto">{{ t('task.exec.auto') }}</span>
+              <span v-if="exec.status === 'cancelled'" class="exec-status-badge cancelled">{{ t('task.exec.statusCancelled') }}</span>
+              <span v-else-if="exec.status === 'failed'" class="exec-status-badge failed">{{ t('task.exec.statusFailed') }}</span>
             </div>
             <div class="exec-summary-row">
               <div v-if="exec.summary" class="exec-summary">{{ exec.summary }}</div>
@@ -99,7 +101,7 @@ function formatAbsoluteTime(createdAt) {
 }
 
 function extractSummary(exec) {
-  const { blocks } = chatRender.parseAssistantContent(exec.content)
+  const { blocks } = chatRender.parseAssistantContent(exec.content || '{}')
   for (const block of blocks) {
     if (block.type === 'text' && block.text) {
       const clean = block.text
@@ -356,6 +358,22 @@ onUnmounted(() => {
 .exec-trigger-type.auto {
   background: rgba(34, 197, 94, 0.12);
   color: #22c55e;
+}
+
+/* ── Status badges ── */
+.exec-status-badge {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+}
+.exec-status-badge.cancelled {
+  background: var(--color-bg-3, #f0f0f0);
+  color: var(--color-text-3, #999);
+}
+.exec-status-badge.failed {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
 }
 
 /* ── Summary ── */

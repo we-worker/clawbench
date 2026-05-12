@@ -331,6 +331,9 @@ export default {
       alreadyRunning: 'Task is already running',
       alreadyFinished: 'Execution already finished',
       detail: 'Execution detail',
+      statusCancelled: 'Cancelled',
+      statusFailed: 'Failed',
+      cancelledNotice: 'This execution was cancelled. No output available.',
     },
   },
   file: {

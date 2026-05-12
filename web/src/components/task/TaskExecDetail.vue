@@ -20,6 +20,7 @@
         @show-metadata="showMetadata"
         @task-card-click="() => {}"
       />
+      <div v-else-if="execDetail?.status === 'cancelled'" class="exec-cancelled-notice">{{ t('task.exec.cancelledNotice') }}</div>
       <div v-else class="exec-detail-empty">{{ t('task.exec.noTextOutput') }}</div>
     </div>
 
@@ -101,8 +102,8 @@ provide('layoutRefreshKey', ref(0))
 
 // ── Build a synthetic message object for ChatMessageItem ──
 const msgData = computed(() => {
-  if (!props.execDetail?.content) return null
-  const { blocks } = chatRender.parseAssistantContent(props.execDetail.content)
+  if (!props.execDetail?.content && props.execDetail?.status !== 'cancelled') return null
+  const { blocks } = chatRender.parseAssistantContent(props.execDetail.content || '{}')
   if (!blocks || blocks.length === 0) return null
   return {
     id: props.execDetail.id || 'exec',
@@ -244,5 +245,12 @@ onUnmounted(() => {
   padding: 40px 12px;
   color: var(--text-muted, #999);
   font-size: 13px;
+}
+
+.exec-cancelled-notice {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--color-text-3, #999);
+  font-style: italic;
 }
 </style>
