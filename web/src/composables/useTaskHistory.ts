@@ -40,6 +40,12 @@ export function useTaskHistory(options: UseTaskHistoryOptions) {
   // Track previous running count to detect completions
   let prevRunningCount = 0
 
+  // Track just-completed execution IDs for entry animation
+  const justCompletedIds = reactive(new Set<string>())
+
+  // Timers for auto-clearing just-completed IDs
+  const justCompletedTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
   // ISS-015: Track locally-read execution IDs to prevent unread flash-back
   const locallyReadIds = reactive(new Set<number>())
 
@@ -55,10 +61,22 @@ export function useTaskHistory(options: UseTaskHistoryOptions) {
     abortController.abort()
     abortController = new AbortController()
     prevRunningCount = 0
+    // Clear just-completed tracking
+    for (const timer of justCompletedTimers.values()) {
+      clearTimeout(timer)
+    }
+    justCompletedTimers.clear()
+    justCompletedIds.clear()
   }
 
   function isUnreadDisplay(exec: any): boolean {
     return exec.isUnread && !locallyReadIds.has(exec.id)
+  }
+
+  function isJustCompleted(exec: any): boolean {
+    // Running executions use 'id' (session ID), completed use 'sessionId'
+    const sessionId = exec.sessionId || exec.id
+    return !!sessionId && justCompletedIds.has(sessionId)
   }
 
   async function loadExecutions(): Promise<void> {
@@ -96,6 +114,19 @@ export function useTaskHistory(options: UseTaskHistoryOptions) {
       const newCount = newRunning.length
       // When running count decreases, an execution just completed — refresh the completed list
       if (prevRunningCount > 0 && newCount < prevRunningCount) {
+        // Mark previous running executions as just-completed for entry animation
+        for (const exec of runningExecutions.value) {
+          const execId = exec.id || exec.ID
+          if (execId && !justCompletedIds.has(execId)) {
+            justCompletedIds.add(execId)
+            // Auto-clear after 3s
+            const timer = setTimeout(() => {
+              justCompletedIds.delete(execId)
+              justCompletedTimers.delete(execId)
+            }, 3000)
+            justCompletedTimers.set(execId, timer)
+          }
+        }
         loadExecutions()
       }
       prevRunningCount = newCount
@@ -202,6 +233,7 @@ export function useTaskHistory(options: UseTaskHistoryOptions) {
     runningExecutions,
     allExecutions,
     isRunning,
+    isJustCompleted,
     locallyReadIds,
     loadExecutions,
     loadRunningStatus,

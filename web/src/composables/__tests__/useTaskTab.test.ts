@@ -1,0 +1,325 @@
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+
+// ────────────────────────────────────────────────────────────
+// useTaskTab composable tests
+// Tests completion detection (runningCount drops to 0),
+// notification triggers, taskJustCompleted state, dedup logic
+// ────────────────────────────────────────────────────────────
+
+// Mock i18n
+vi.mock('@/i18n', () => ({
+  default: {
+    global: {
+      locale: { value: 'en' },
+      t: (key: string) => key,
+    },
+  },
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({ t: (key: string) => key }),
+}))
+
+// Mock notification sound
+const mockPlayNotificationSound = vi.fn()
+vi.mock('@/composables/useNotificationSound', () => ({
+  playNotificationSound: (...args: unknown[]) => mockPlayNotificationSound(...args),
+}))
+
+// Mock browser notification
+const mockShowBrowserNotification = vi.fn()
+vi.mock('@/composables/useNotification', () => ({
+  showBrowserNotification: (...args: unknown[]) => mockShowBrowserNotification(...args),
+}))
+
+// Mock toast
+const mockToastShow = vi.fn()
+vi.mock('@/composables/useToast.ts', () => ({
+  useToast: () => ({ show: mockToastShow }),
+}))
+
+// Mock fetch
+const mockFetch = vi.fn()
+vi.stubGlobal('fetch', mockFetch)
+
+// Import after mocks
+import { useTaskTab } from '@/composables/useTaskTab.ts'
+import { store } from '@/stores/app'
+
+beforeEach(() => {
+  mockPlayNotificationSound.mockReset()
+  mockShowBrowserNotification.mockReset()
+  mockToastShow.mockReset()
+  mockFetch.mockReset()
+  // Reset store state
+  store.state.taskRunning = false
+  store.state.taskUnread = false
+  store.state.taskJustCompleted = false
+  store.state.tasks = []
+})
+
+// ── Helper ──
+
+function mockTasksResponse(tasks: any[] = [], hasUnread = false) {
+  mockFetch.mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve({ tasks, hasUnread }),
+  })
+}
+
+function makeTask(overrides: any = {}) {
+  return {
+    id: 1,
+    name: 'Test Task',
+    status: 'active',
+    runningCount: 0,
+    unreadCount: 0,
+    runCount: 0,
+    ...overrides,
+  }
+}
+
+// ── Tests ──
+
+describe('useTaskTab', () => {
+  describe('loadTasks — basic', () => {
+    it('fetches /api/tasks and updates store', async () => {
+      const { loadTasks } = useTaskTab()
+      const tasks = [makeTask({ id: 1 }), makeTask({ id: 2 })]
+      mockTasksResponse(tasks, false)
+
+      await loadTasks()
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/tasks')
+      expect(store.state.tasks.length).toBe(2)
+      expect(store.state.taskRunning).toBe(false)
+      expect(store.state.taskUnread).toBe(false)
+    })
+
+    it('sets taskRunning when any task has runningCount > 0', async () => {
+      const { loadTasks } = useTaskTab()
+      mockTasksResponse([makeTask({ runningCount: 1 })])
+
+      await loadTasks()
+
+      expect(store.state.taskRunning).toBe(true)
+    })
+
+    it('sets taskUnread when hasUnread is true', async () => {
+      const { loadTasks } = useTaskTab()
+      mockTasksResponse([], true)
+
+      await loadTasks()
+
+      expect(store.state.taskUnread).toBe(true)
+    })
+
+    it('silently ignores fetch errors', async () => {
+      const { loadTasks } = useTaskTab()
+      mockFetch.mockRejectedValue(new Error('Network error'))
+
+      // Should not throw
+      await loadTasks()
+      expect(store.state.tasks).toEqual([])
+    })
+  })
+
+  describe('completion detection', () => {
+    it('detects task completion when runningCount drops to 0', async () => {
+      const { loadTasks } = useTaskTab()
+
+      // First poll: task is running
+      mockTasksResponse([makeTask({ runningCount: 1, runCount: 0 })])
+      await loadTasks()
+      expect(store.state.taskRunning).toBe(true)
+
+      // Second poll: task completed (runningCount = 0)
+      mockTasksResponse([makeTask({ runningCount: 0, runCount: 1 })])
+      await loadTasks()
+
+      // Completion effects should fire
+      expect(mockPlayNotificationSound).toHaveBeenCalledTimes(1)
+      expect(store.state.taskJustCompleted).toBe(true)
+    })
+
+    it('shows browser notification on completion', async () => {
+      const { loadTasks } = useTaskTab()
+
+      // First: running
+      mockTasksResponse([makeTask({ runningCount: 1 })])
+      await loadTasks()
+
+      // Second: completed
+      mockTasksResponse([makeTask({ runningCount: 0, runCount: 1 })])
+      await loadTasks()
+
+      expect(mockShowBrowserNotification).toHaveBeenCalledWith(
+        'Test Task',
+        expect.objectContaining({
+          body: expect.any(String),
+          tag: 'task-completed-1',
+        }),
+      )
+    })
+
+    it('shows toast on completion with task name', async () => {
+      const { loadTasks } = useTaskTab()
+
+      // First: running
+      mockTasksResponse([makeTask({ runningCount: 1 })])
+      await loadTasks()
+
+      // Second: completed
+      mockTasksResponse([makeTask({ runningCount: 0, runCount: 1 })])
+      await loadTasks()
+
+      expect(mockToastShow).toHaveBeenCalledWith(
+        expect.stringContaining('Test Task'),
+        expect.objectContaining({ type: 'success' }),
+      )
+    })
+
+    it('sets taskJustCompleted flag on completion', async () => {
+      const { loadTasks } = useTaskTab()
+
+      mockTasksResponse([makeTask({ runningCount: 1 })])
+      await loadTasks()
+
+      mockTasksResponse([makeTask({ runningCount: 0 })])
+      await loadTasks()
+
+      expect(store.state.taskJustCompleted).toBe(true)
+    })
+
+    it('auto-clears taskJustCompleted after 2s', async () => {
+      vi.useFakeTimers()
+      const { loadTasks } = useTaskTab()
+
+      mockTasksResponse([makeTask({ runningCount: 1 })])
+      await loadTasks()
+
+      mockTasksResponse([makeTask({ runningCount: 0 })])
+      await loadTasks()
+
+      expect(store.state.taskJustCompleted).toBe(true)
+
+      vi.advanceTimersByTime(2000)
+      expect(store.state.taskJustCompleted).toBe(false)
+
+      vi.useRealTimers()
+    })
+  })
+
+  describe('dedup — no double notification', () => {
+    it('does not re-notify on subsequent polls after completion', async () => {
+      const { loadTasks } = useTaskTab()
+
+      // First: running
+      mockTasksResponse([makeTask({ runningCount: 1 })])
+      await loadTasks()
+
+      // Second: completed — should notify
+      mockTasksResponse([makeTask({ runningCount: 0, runCount: 1 })])
+      await loadTasks()
+
+      expect(mockPlayNotificationSound).toHaveBeenCalledTimes(1)
+
+      // Third: still not running — should NOT re-notify
+      mockTasksResponse([makeTask({ runningCount: 0, runCount: 1 })])
+      await loadTasks()
+
+      expect(mockPlayNotificationSound).toHaveBeenCalledTimes(1)
+    })
+
+    it('re-notifies if task starts running again then completes again', async () => {
+      const { loadTasks } = useTaskTab()
+
+      // First execution: running → completed
+      mockTasksResponse([makeTask({ runningCount: 1, runCount: 0 })])
+      await loadTasks()
+      mockTasksResponse([makeTask({ runningCount: 0, runCount: 1 })])
+      await loadTasks()
+      expect(mockPlayNotificationSound).toHaveBeenCalledTimes(1)
+
+      // Second execution: running → completed
+      mockTasksResponse([makeTask({ runningCount: 1, runCount: 1 })])
+      await loadTasks()
+      mockTasksResponse([makeTask({ runningCount: 0, runCount: 2 })])
+      await loadTasks()
+      expect(mockPlayNotificationSound).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe('multiple tasks', () => {
+    it('notifies for each task that completes', async () => {
+      const { loadTasks } = useTaskTab()
+
+      // Both running
+      mockTasksResponse([
+        makeTask({ id: 1, runningCount: 1 }),
+        makeTask({ id: 2, runningCount: 1 }),
+      ])
+      await loadTasks()
+
+      // Only task 1 completes
+      mockTasksResponse([
+        makeTask({ id: 1, runningCount: 0, runCount: 1 }),
+        makeTask({ id: 2, runningCount: 1 }),
+      ])
+      await loadTasks()
+
+      expect(mockPlayNotificationSound).toHaveBeenCalledTimes(1)
+      expect(mockShowBrowserNotification).toHaveBeenCalledWith(
+        'Test Task',
+        expect.objectContaining({ tag: 'task-completed-1' }),
+      )
+
+      // Task 2 also completes
+      mockTasksResponse([
+        makeTask({ id: 1, runningCount: 0, runCount: 1 }),
+        makeTask({ id: 2, runningCount: 0, runCount: 1 }),
+      ])
+      await loadTasks()
+
+      expect(mockPlayNotificationSound).toHaveBeenCalledTimes(2)
+      expect(mockShowBrowserNotification).toHaveBeenCalledWith(
+        'Test Task',
+        expect.objectContaining({ tag: 'task-completed-2' }),
+      )
+    })
+  })
+
+  describe('polling', () => {
+    it('startTaskPolling starts interval-based polling', () => {
+      vi.useFakeTimers()
+      const { startTaskPolling, stopTaskPolling } = useTaskTab()
+      mockTasksResponse([])
+
+      startTaskPolling()
+      expect(mockFetch).toHaveBeenCalledTimes(1) // immediate load
+
+      vi.advanceTimersByTime(2000)
+      expect(mockFetch).toHaveBeenCalledTimes(2) // first interval
+
+      vi.advanceTimersByTime(2000)
+      expect(mockFetch).toHaveBeenCalledTimes(3) // second interval
+
+      stopTaskPolling()
+      vi.useRealTimers()
+    })
+
+    it('stopTaskPolling stops the interval', () => {
+      vi.useFakeTimers()
+      const { startTaskPolling, stopTaskPolling } = useTaskTab()
+      mockTasksResponse([])
+
+      startTaskPolling()
+      stopTaskPolling()
+
+      vi.advanceTimersByTime(6000)
+      expect(mockFetch).toHaveBeenCalledTimes(1) // only the initial load
+
+      vi.useRealTimers()
+    })
+  })
+})

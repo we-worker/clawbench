@@ -55,6 +55,9 @@ interface AppState {
     // Task running indicator (scheduled task is executing)
     taskRunning: boolean
 
+    // Task just completed (brief flash for dock button animation)
+    taskJustCompleted: boolean
+
     // Task list (kept in sync by global polling)
     tasks: any[]
 
@@ -96,6 +99,7 @@ const state = reactive<AppState>({
     chatRunning: false,
     taskUnread: false,
     taskRunning: false,
+    taskJustCompleted: false,
     tasks: [],
 
     // File browser

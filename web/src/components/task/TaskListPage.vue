@@ -21,7 +21,7 @@
           v-for="task in tasks"
           :key="task.id"
           class="task-item"
-          :class="[task.status, { 'has-unread': task.unreadCount > 0 }]"
+          :class="[task.status, { 'has-unread': task.unreadCount > 0, 'is-running': task.runningCount > 0 }]"
           @click="$emit('select', task.id)"
         >
           <div class="task-item-main">
@@ -48,7 +48,6 @@
               <span>{{ t('task.nextRun', { time: formatDateTime(task.nextRunAt) }) }}</span>
             </div>
           </div>
-          <ChevronRight :size="16" class="task-item-chevron" />
         </div>
       </div>
     </div>
@@ -56,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { Plus, ChevronRight, Loader2, CalendarX, Clock, Repeat, CalendarClock } from 'lucide-vue-next'
+import { Plus, Loader2, CalendarX, Clock, Repeat, CalendarClock } from 'lucide-vue-next'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskTab } from '@/composables/useTaskTab'
@@ -288,17 +287,26 @@ onMounted(refresh)
 }
 
 .task-item-running-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: #22c55e;
   flex-shrink: 0;
-  animation: task-running-pulse 1.5s ease-in-out infinite;
+  animation: task-running-pulse 0.8s ease-in-out infinite;
 }
 
 @keyframes task-running-pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
-  50% { opacity: 0.8; box-shadow: 0 0 8px 3px rgba(34, 197, 94, 0.2); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); }
+  50% { opacity: 0.7; box-shadow: 0 0 10px 4px rgba(34, 197, 94, 0.3); }
+}
+
+.task-item.is-running {
+  animation: task-card-running 2s ease-in-out infinite;
+}
+
+@keyframes task-card-running {
+  0%, 100% { border-color: var(--border-color, #e5e5e5); }
+  50% { border-color: rgba(34, 197, 94, 0.35); }
 }
 
 .task-item-meta {
@@ -345,19 +353,5 @@ onMounted(refresh)
   border-radius: 4px;
   border: 1px solid var(--border-color, #e5e5e5);
   width: fit-content;
-}
-
-.task-item-chevron {
-  color: var(--text-muted, #cbd5e1);
-  flex-shrink: 0;
-  margin-left: 8px;
-  transition: transform 0.2s;
-}
-
-@media (hover: hover) {
-  .task-item:hover .task-item-chevron {
-    transform: translateX(2px);
-    color: var(--accent-color, #0066cc);
-  }
 }
 </style>

@@ -246,12 +246,12 @@ const renderedPrompt = computed(() => {
 .status-dot.completed { background: #6b7280; }
 .status-dot.running {
   background: #16a34a;
-  animation: task-running-pulse 1.5s ease-in-out infinite;
+  animation: task-running-pulse 0.8s ease-in-out infinite;
 }
 
 @keyframes task-running-pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
-  50% { opacity: 0.8; box-shadow: 0 0 6px 2px rgba(34, 197, 94, 0.2); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); }
+  50% { opacity: 0.7; box-shadow: 0 0 8px 3px rgba(34, 197, 94, 0.3); }
 }
 
 .task-meta-row {

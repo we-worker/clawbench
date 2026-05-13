@@ -1,5 +1,9 @@
 import { ref, type Ref } from 'vue'
 import { store } from '@/stores/app'
+import { playNotificationSound } from '@/composables/useNotificationSound'
+import { showBrowserNotification } from '@/composables/useNotification'
+import { useToast } from '@/composables/useToast'
+import { gt } from '@/composables/useLocale'
 
 // Module-level singleton refs (shared across all consumers)
 const currentView = ref<'list' | 'settings' | 'history'>('list')
@@ -16,6 +20,16 @@ let pollingTimer: ReturnType<typeof setInterval> | null = null
 // Guard: when markAllTasksRead is in progress, suppress loadTasks
 // from overwriting taskUnread back to true (race condition fix)
 let markingReadInProgress = false
+
+// Track per-task running counts to detect completion transitions
+const prevRunningCounts = new Map<number, number>()
+
+// Dedup: track task IDs that have already fired completion notification
+// to avoid repeated sound/notification on subsequent polls
+const notifiedTaskCompletions = new Set<string>()
+
+// Timer for clearing taskJustCompleted flag
+let justCompletedTimer: ReturnType<typeof setTimeout> | null = null
 
 export function useTaskTab() {
     // --- Navigation methods ---
@@ -98,6 +112,38 @@ export function useTaskTab() {
             // Derive running state from runningCount
             const hasRunning = newTasks.some((t: any) => t.runningCount > 0)
             store.state.taskRunning = hasRunning
+
+            // ── Detect task completion (runningCount dropped to 0) ──
+            for (const task of newTasks) {
+                const id: number = task.id
+                const prevCount = prevRunningCounts.get(id) || 0
+                const currCount = task.runningCount || 0
+                // Completion: was running, now stopped, and has new unread results
+                if (prevCount > 0 && currCount === 0) {
+                    const dedupKey = `${id}-${task.runCount}`
+                    if (!notifiedTaskCompletions.has(dedupKey)) {
+                        notifiedTaskCompletions.add(dedupKey)
+                        // Trigger completion effects
+                        onTaskCompleted(task)
+                    }
+                }
+                prevRunningCounts.set(id, currCount)
+            }
+            // Clean up dedup set for deleted tasks
+            const currentIds = new Set(newTasks.map((t: any) => t.id))
+            for (const key of prevRunningCounts.keys()) {
+                if (!currentIds.has(key)) prevRunningCounts.delete(key)
+            }
+            // Clean up notifiedTaskCompletions for tasks no longer running
+            // (they will be re-added if the task runs again)
+            for (const key of [...notifiedTaskCompletions]) {
+                const taskId = parseInt(key.split('-')[0])
+                const task = newTasks.find((t: any) => t.id === taskId)
+                if (task && task.runningCount === 0) {
+                    notifiedTaskCompletions.delete(key)
+                }
+            }
+
             // Diff-check to avoid unnecessary watcher triggers
             if (
                 store.state.tasks.length !== newTasks.length ||
@@ -115,6 +161,38 @@ export function useTaskTab() {
         } catch {
             // Silently ignore fetch errors (network down, server restart, etc.)
         }
+    }
+
+    /** Called when a task execution completes (runningCount drops to 0) */
+    function onTaskCompleted(task: any) {
+        // Sound + haptic
+        playNotificationSound()
+        // Browser push notification (only when page not focused)
+        try {
+            showBrowserNotification(task.name || gt('task.title'), {
+                body: gt('task.exec.completed'),
+                tag: `task-completed-${task.id}`,
+            })
+        } catch {
+            // Non-critical
+        }
+        // Toast — include task name for clarity
+        try {
+            const taskName = task.name || gt('task.title')
+            useToast().show(`${taskName} — ${gt('task.exec.completed')}`, {
+                type: 'success',
+                duration: 5000,
+            })
+        } catch {
+            // Non-critical
+        }
+        // Set just-completed flag for dock flash animation
+        store.state.taskJustCompleted = true
+        if (justCompletedTimer) clearTimeout(justCompletedTimer)
+        justCompletedTimer = setTimeout(() => {
+            store.state.taskJustCompleted = false
+            justCompletedTimer = null
+        }, 2000)
     }
 
     async function markAllTasksRead() {

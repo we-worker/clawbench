@@ -351,6 +351,7 @@ export default {
       confirmDeleteAll: 'Clear all execution records? This cannot be undone.',
       allExecutionsDeleted: 'All execution records cleared',
       clearAll: 'Clear all',
+      completed: 'Execution completed',
     },
   },
   file: {

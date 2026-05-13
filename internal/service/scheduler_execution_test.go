@@ -162,3 +162,78 @@ func TestScheduler_CancelAllExecutions(t *testing.T) {
 	s.runningExecutions.Delete("exec-2")
 	s.runningExecutions.Delete("exec-3")
 }
+
+// ── Completion transition (runningCount drops to 0) ──
+
+func TestScheduler_CompletionTransition(t *testing.T) {
+	s := NewScheduler()
+
+	// Task 1 starts running
+	s.runningExecutions.Store("exec-1", &RunningExecution{
+		ID: "exec-1", TaskID: 1, CancelFunc: func() {}, StartedAt: time.Now(), TriggerType: "auto",
+	})
+
+	// Before completion: runningCount > 0
+	counts := s.GetRunningCounts()
+	assert.Equal(t, 1, counts[1], "task 1 should have running count 1")
+	assert.True(t, s.HasRunningExecutions(1))
+
+	// Task 1 completes (backend deletes from sync.Map)
+	s.runningExecutions.Delete("exec-1")
+
+	// After completion: runningCount = 0
+	counts = s.GetRunningCounts()
+	_, exists := counts[1]
+	assert.False(t, exists, "task 1 should have no running count after completion")
+	assert.False(t, s.HasRunningExecutions(1), "HasRunningExecutions should be false")
+}
+
+func TestScheduler_MultipleTasksPartialCompletion(t *testing.T) {
+	s := NewScheduler()
+
+	// Two tasks running
+	s.runningExecutions.Store("exec-1", &RunningExecution{
+		ID: "exec-1", TaskID: 1, CancelFunc: func() {}, StartedAt: time.Now(), TriggerType: "auto",
+	})
+	s.runningExecutions.Store("exec-2", &RunningExecution{
+		ID: "exec-2", TaskID: 2, CancelFunc: func() {}, StartedAt: time.Now(), TriggerType: "auto",
+	})
+
+	counts := s.GetRunningCounts()
+	assert.Equal(t, 1, counts[1])
+	assert.Equal(t, 1, counts[2])
+
+	// Only task 1 completes
+	s.runningExecutions.Delete("exec-1")
+
+	counts = s.GetRunningCounts()
+	_, exists1 := counts[1]
+	assert.False(t, exists1, "completed task should not appear in counts")
+	assert.Equal(t, 1, counts[2], "still-running task should keep its count")
+}
+
+func TestScheduler_SameTaskMultipleExecutions(t *testing.T) {
+	s := NewScheduler()
+
+	// Task 1 has two concurrent executions
+	s.runningExecutions.Store("exec-1a", &RunningExecution{
+		ID: "exec-1a", TaskID: 1, CancelFunc: func() {}, StartedAt: time.Now(), TriggerType: "auto",
+	})
+	s.runningExecutions.Store("exec-1b", &RunningExecution{
+		ID: "exec-1b", TaskID: 1, CancelFunc: func() {}, StartedAt: time.Now(), TriggerType: "manual",
+	})
+
+	counts := s.GetRunningCounts()
+	assert.Equal(t, 2, counts[1], "should count both executions")
+
+	// One completes
+	s.runningExecutions.Delete("exec-1a")
+	counts = s.GetRunningCounts()
+	assert.Equal(t, 1, counts[1], "should still have 1 running after one completes")
+
+	// Both complete
+	s.runningExecutions.Delete("exec-1b")
+	counts = s.GetRunningCounts()
+	_, exists := counts[1]
+	assert.False(t, exists, "should have no running after both complete")
+}

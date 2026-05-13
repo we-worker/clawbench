@@ -1131,3 +1131,136 @@ func TestDeleteAllTaskExecutions_NoExecutions(t *testing.T) {
 	err = service.DeleteAllTaskExecutions(taskID)
 	assert.NoError(t, err)
 }
+
+// ── HasUnreadTasks ──
+
+func TestHasUnreadTasks_NoTasks(t *testing.T) {
+	_, cleanup := setupScheduler(t)
+	defer cleanup()
+
+	hasUnread, err := service.HasUnreadTasks("/proj")
+	assert.NoError(t, err)
+	assert.False(t, hasUnread, "should be false when no tasks exist")
+}
+
+func TestHasUnreadTasks_NoExecutions(t *testing.T) {
+	_, cleanup := setupScheduler(t)
+	defer cleanup()
+
+	now := time.Now()
+	_, err := service.DB.Exec(
+		"INSERT INTO scheduled_tasks (project_path, name, cron_expr, agent_id, prompt, status, repeat_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"/proj", "Task", "0 * * * *", "agent1", "p", "active", "unlimited", now, now,
+	)
+	assert.NoError(t, err)
+
+	hasUnread, err := service.HasUnreadTasks("/proj")
+	assert.NoError(t, err)
+	assert.False(t, hasUnread, "should be false when no executions exist")
+}
+
+func TestHasUnreadTasks_UnreadExecution(t *testing.T) {
+	_, cleanup := setupScheduler(t)
+	defer cleanup()
+
+	now := time.Now()
+	result, err := service.DB.Exec(
+		"INSERT INTO scheduled_tasks (project_path, name, cron_expr, agent_id, prompt, status, repeat_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"/proj", "Task", "0 * * * *", "agent1", "p", "active", "unlimited", now, now,
+	)
+	assert.NoError(t, err)
+	taskID, _ := result.LastInsertId()
+
+	// Add execution with read_at = NULL (unread)
+	_, err = service.DB.Exec(
+		"INSERT INTO task_executions (task_id, session_id, trigger_type, status, created_at) VALUES (?, ?, ?, ?, ?)",
+		taskID, "session-1", "auto", "completed", now,
+	)
+	assert.NoError(t, err)
+
+	hasUnread, err := service.HasUnreadTasks("/proj")
+	assert.NoError(t, err)
+	assert.True(t, hasUnread, "should be true when unread execution exists")
+}
+
+func TestHasUnreadTasks_ReadExecution(t *testing.T) {
+	_, cleanup := setupScheduler(t)
+	defer cleanup()
+
+	now := time.Now()
+	result, err := service.DB.Exec(
+		"INSERT INTO scheduled_tasks (project_path, name, cron_expr, agent_id, prompt, status, repeat_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"/proj", "Task", "0 * * * *", "agent1", "p", "active", "unlimited", now, now,
+	)
+	assert.NoError(t, err)
+	taskID, _ := result.LastInsertId()
+
+	// Add execution with read_at set (read)
+	_, err = service.DB.Exec(
+		"INSERT INTO task_executions (task_id, session_id, trigger_type, status, read_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+		taskID, "session-1", "auto", "completed", now, now,
+	)
+	assert.NoError(t, err)
+
+	hasUnread, err := service.HasUnreadTasks("/proj")
+	assert.NoError(t, err)
+	assert.False(t, hasUnread, "should be false when all executions are read")
+}
+
+func TestHasUnreadTasks_ScopedByProjectPath(t *testing.T) {
+	_, cleanup := setupScheduler(t)
+	defer cleanup()
+
+	now := time.Now()
+	// Task in /proj-a with unread execution
+	resultA, err := service.DB.Exec(
+		"INSERT INTO scheduled_tasks (project_path, name, cron_expr, agent_id, prompt, status, repeat_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"/proj-a", "Task A", "0 * * * *", "agent1", "p", "active", "unlimited", now, now,
+	)
+	assert.NoError(t, err)
+	taskIDA, _ := resultA.LastInsertId()
+	_, err = service.DB.Exec(
+		"INSERT INTO task_executions (task_id, session_id, trigger_type, status, created_at) VALUES (?, ?, ?, ?, ?)",
+		taskIDA, "session-a1", "auto", "completed", now,
+	)
+	assert.NoError(t, err)
+
+	// Task in /proj-b with no executions
+	_, err = service.DB.Exec(
+		"INSERT INTO scheduled_tasks (project_path, name, cron_expr, agent_id, prompt, status, repeat_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"/proj-b", "Task B", "0 * * * *", "agent1", "p", "active", "unlimited", now, now,
+	)
+	assert.NoError(t, err)
+
+	hasUnreadA, err := service.HasUnreadTasks("/proj-a")
+	assert.NoError(t, err)
+	assert.True(t, hasUnreadA, "/proj-a should have unread")
+
+	hasUnreadB, err := service.HasUnreadTasks("/proj-b")
+	assert.NoError(t, err)
+	assert.False(t, hasUnreadB, "/proj-b should not have unread")
+}
+
+func TestHasUnreadTasks_EmptyProjectPath(t *testing.T) {
+	_, cleanup := setupScheduler(t)
+	defer cleanup()
+
+	now := time.Now()
+	result, err := service.DB.Exec(
+		"INSERT INTO scheduled_tasks (project_path, name, cron_expr, agent_id, prompt, status, repeat_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"/proj", "Task", "0 * * * *", "agent1", "p", "active", "unlimited", now, now,
+	)
+	assert.NoError(t, err)
+	taskID, _ := result.LastInsertId()
+
+	_, err = service.DB.Exec(
+		"INSERT INTO task_executions (task_id, session_id, trigger_type, status, created_at) VALUES (?, ?, ?, ?, ?)",
+		taskID, "session-1", "auto", "completed", now,
+	)
+	assert.NoError(t, err)
+
+	// Empty project path should check all projects
+	hasUnread, err := service.HasUnreadTasks("")
+	assert.NoError(t, err)
+	assert.True(t, hasUnread, "empty project path should find unread across all projects")
+}

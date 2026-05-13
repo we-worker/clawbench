@@ -181,7 +181,7 @@
             <button class="dock-btn" :class="{ active: activeTab === 'viewer' }" @click.stop="switchTab('viewer')" :title="t('nav.fileViewer')">
               <FileText />
             </button>
-            <button class="dock-btn" :class="{ active: activeTab === 'tasks', 'has-unread': store.state.taskUnread && activeTab !== 'tasks', 'has-running': store.state.taskRunning && activeTab !== 'tasks' && !store.state.taskUnread }" @click.stop="switchTab('tasks')" :title="t('nav.tasks')">
+            <button class="dock-btn" :class="{ active: activeTab === 'tasks', 'has-unread': store.state.taskUnread && activeTab !== 'tasks', 'just-completed': store.state.taskJustCompleted && activeTab !== 'tasks' && !store.state.taskUnread, 'has-running': store.state.taskRunning && activeTab !== 'tasks' && !store.state.taskUnread && !store.state.taskJustCompleted }" @click.stop="switchTab('tasks')" :title="t('nav.tasks')">
               <CalendarDays />
             </button>
             <div class="dock-overflow-wrapper">
@@ -766,6 +766,17 @@ onUnmounted(() => {
 
 @keyframes dock-spin-light {
     to { transform: rotate(360deg); }
+}
+
+.dock-btn.just-completed {
+    animation: dock-completed-flash 0.5s ease-out;
+}
+
+@keyframes dock-completed-flash {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-color, #0066cc) 0%, transparent); }
+    30% { transform: scale(1.2); box-shadow: 0 0 12px 4px color-mix(in srgb, var(--accent-color, #0066cc) 50%, transparent); }
+    60% { transform: scale(1.1); box-shadow: 0 0 8px 2px color-mix(in srgb, var(--accent-color, #0066cc) 30%, transparent); }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-color, #0066cc) 0%, transparent); }
 }
 
 .dock-btn.quote-emit-receive {

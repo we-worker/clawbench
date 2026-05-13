@@ -4,6 +4,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 // useTaskHistory composable tests
 // Tests ISS-011 (raw fetch → apiGet/apiPut), ISS-015 (locallyReadIds
 // to prevent unread flash-back), ISS-016 (AbortController on task change)
+// Completion tracking: justCompletedIds, isJustCompleted()
 // ────────────────────────────────────────────────────────────
 
 // Mock i18n
@@ -232,6 +233,116 @@ describe('useTaskHistory', () => {
 
       const signal2 = history.getSignal()
       expect(signal1).not.toBe(signal2)
+    })
+  })
+
+  describe('completion tracking — justCompletedIds', () => {
+    it('tracks just-completed execution IDs when running count decreases', async () => {
+      const { history } = createHistory()
+
+      // First poll: 1 running execution
+      mockApiGet.mockResolvedValue({
+        runningExecutions: [{ id: 'session-abc', startedAt: '2026-01-01T00:00:00Z', triggerType: 'auto' }],
+      })
+      await history.loadRunningStatus()
+      expect(history.runningExecutions.value.length).toBe(1)
+
+      // Second poll: 0 running — execution completed
+      mockApiGet.mockResolvedValue({ runningExecutions: [] })
+      // Also mock loadExecutions so the completion-triggered refresh doesn't fail
+      mockApiGet.mockImplementation((url: string) => {
+        if (url.includes('/executions')) return Promise.resolve({ executions: [] })
+        return Promise.resolve({ runningExecutions: [] })
+      })
+      await history.loadRunningStatus()
+
+      // isJustCompleted should match the session ID of the just-completed execution
+      expect(history.isJustCompleted({ sessionId: 'session-abc' })).toBe(true)
+      expect(history.isJustCompleted({ sessionId: 'other-session' })).toBe(false)
+    })
+
+    it('auto-clears just-completed IDs after 3 seconds', async () => {
+      vi.useFakeTimers()
+      const { history } = createHistory()
+
+      // First poll: running
+      mockApiGet.mockResolvedValue({
+        runningExecutions: [{ id: 'session-abc', startedAt: '2026-01-01T00:00:00Z', triggerType: 'auto' }],
+      })
+      await history.loadRunningStatus()
+
+      // Second poll: completed
+      mockApiGet.mockImplementation((url: string) => {
+        if (url.includes('/executions')) return Promise.resolve({ executions: [] })
+        return Promise.resolve({ runningExecutions: [] })
+      })
+      await history.loadRunningStatus()
+
+      expect(history.isJustCompleted({ sessionId: 'session-abc' })).toBe(true)
+
+      // Advance past 3s auto-clear
+      vi.advanceTimersByTime(3000)
+      expect(history.isJustCompleted({ sessionId: 'session-abc' })).toBe(false)
+
+      vi.useRealTimers()
+    })
+
+    it('clears just-completed IDs on task change', async () => {
+      const { history, task } = createHistory()
+
+      // First poll: running
+      mockApiGet.mockResolvedValue({
+        runningExecutions: [{ id: 'session-abc', startedAt: '2026-01-01T00:00:00Z', triggerType: 'auto' }],
+      })
+      await history.loadRunningStatus()
+
+      // Second poll: completed
+      mockApiGet.mockImplementation((url: string) => {
+        if (url.includes('/executions')) return Promise.resolve({ executions: [] })
+        return Promise.resolve({ runningExecutions: [] })
+      })
+      await history.loadRunningStatus()
+
+      expect(history.isJustCompleted({ sessionId: 'session-abc' })).toBe(true)
+
+      // Switch task
+      task.value = { id: 'task-2' }
+      history.onTaskChange()
+
+      expect(history.isJustCompleted({ sessionId: 'session-abc' })).toBe(false)
+    })
+
+    it('matches using running execution id field', async () => {
+      const { history } = createHistory()
+
+      // Running execution uses 'id' field (session ID)
+      mockApiGet.mockResolvedValue({
+        runningExecutions: [{ id: 'session-xyz', startedAt: '2026-01-01T00:00:00Z', triggerType: 'manual' }],
+      })
+      await history.loadRunningStatus()
+
+      // Completed: same session ID
+      mockApiGet.mockImplementation((url: string) => {
+        if (url.includes('/executions')) return Promise.resolve({ executions: [] })
+        return Promise.resolve({ runningExecutions: [] })
+      })
+      await history.loadRunningStatus()
+
+      // Running exec id='session-xyz' should match completed exec sessionId='session-xyz'
+      expect(history.isJustCompleted({ id: 'session-xyz' })).toBe(true)
+    })
+
+    it('does not fire just-completed for running executions', async () => {
+      const { history } = createHistory()
+
+      // Still running
+      mockApiGet.mockResolvedValue({
+        runningExecutions: [{ id: 'session-abc', startedAt: '2026-01-01T00:00:00Z', triggerType: 'auto' }],
+      })
+      await history.loadRunningStatus()
+
+      // Running execution is not "just completed"
+      expect(history.isJustCompleted({ sessionId: 'session-abc', status: 'running' })).toBe(false)
     })
   })
 })

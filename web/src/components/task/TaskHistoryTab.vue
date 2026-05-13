@@ -18,7 +18,7 @@
       <div v-if="executions.length > 0" class="clear-all-row">
         <button class="clear-all-btn" @click="deleteAllExecutions">{{ t('task.exec.clearAll') }}</button>
       </div>
-      <div v-for="exec in allExecutions" :key="exec.id" class="execution-item" :class="{ running: isRunning(exec), unread: !isRunning(exec) && isUnreadDisplay(exec) }" @click="!isRunning(exec) && openDetail(exec)">
+      <div v-for="exec in allExecutions" :key="exec.id" class="execution-item" :class="{ running: isRunning(exec), unread: !isRunning(exec) && isUnreadDisplay(exec), 'just-completed': isJustCompleted(exec) }" @click="!isRunning(exec) && openDetail(exec)">
         <div class="execution-row">
           <div class="execution-info">
             <div class="execution-time-row">
@@ -61,7 +61,6 @@
             <button class="delete-exec-btn" @click.stop="deleteExecution(exec.id)" :title="t('task.delete')">
               <Trash2 :size="14" />
             </button>
-            <ChevronRight :size="16" class="exec-chevron" />
           </template>
         </div>
       </div>
@@ -73,7 +72,7 @@
 <script setup>
 import { ref, watch, onUnmounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, Square, Loader2, History, Trash2 } from 'lucide-vue-next'
+import { Square, Loader2, History, Trash2 } from 'lucide-vue-next'
 import TaskBreadcrumb from '@/components/task/TaskBreadcrumb.vue'
 import { useTaskHistory } from '@/composables/useTaskHistory.ts'
 import { formatDuration, formatRelativeTime } from '@/utils/format.ts'
@@ -92,6 +91,7 @@ const {
   allExecutions,
   executions,
   isRunning,
+  isJustCompleted,
   locallyReadIds,
   loadExecutions,
   loadRunningStatus,
@@ -236,6 +236,12 @@ onUnmounted(() => {
 .execution-item.running {
   background: color-mix(in srgb, var(--success-color, #16a34a) 5%, var(--bg-secondary, #f8f9fa));
   border-color: color-mix(in srgb, var(--success-color, #16a34a) 30%, transparent);
+  animation: exec-card-running 2s ease-in-out infinite;
+}
+
+@keyframes exec-card-running {
+  0%, 100% { border-color: color-mix(in srgb, var(--success-color, #16a34a) 30%, transparent); }
+  50% { border-color: color-mix(in srgb, var(--success-color, #16a34a) 55%, transparent); }
 }
 
 .execution-row {
@@ -389,34 +395,29 @@ onUnmounted(() => {
   border-color: rgba(0, 102, 204, 0.1);
 }
 
-/* ── Chevron ── */
-.exec-chevron {
-  flex-shrink: 0;
-  color: var(--text-muted, #cbd5e1);
-  margin-left: 4px;
-  transition: transform 0.2s, color 0.2s;
-}
-
-@media (hover: hover) {
-  .execution-item:not(.running):hover .exec-chevron {
-    transform: translateX(2px);
-    color: var(--accent-color, #0066cc);
-  }
-}
-
 /* ── Running execution indicator ── */
 .exec-running-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: #16a34a;
   flex-shrink: 0;
-  animation: exec-running-pulse 1.5s ease-in-out infinite;
+  animation: exec-running-pulse 0.8s ease-in-out infinite;
 }
 
 @keyframes exec-running-pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.4); }
-  50% { opacity: 0.8; box-shadow: 0 0 8px 3px rgba(22, 163, 74, 0.2); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.5); }
+  50% { opacity: 0.7; box-shadow: 0 0 10px 4px rgba(22, 163, 74, 0.3); }
+}
+
+/* ── Just-completed execution flash ── */
+.execution-item.just-completed {
+  animation: exec-just-completed 0.6s ease-out forwards;
+}
+
+@keyframes exec-just-completed {
+  0% { background: color-mix(in srgb, var(--accent-color, #0066cc) 15%, var(--bg-secondary, #f8f9fa)); transform: translateX(8px); opacity: 0.7; }
+  100% { background: var(--bg-secondary, #f8f9fa); transform: translateX(0); opacity: 1; }
 }
 
 .exec-running-label {
