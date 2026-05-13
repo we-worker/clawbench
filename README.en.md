@@ -183,6 +183,17 @@ Each `.yaml.example` file contains complete configuration fields and description
 - **Auto Resume**: Automatically sends "continue" after Claude/CodeBuddy/Qoder/DeepSeek/Pi exits Plan Mode
 - **Message Queue**: Messages queue when AI is busy, sent sequentially
 
+### ⏰ Scheduled Tasks
+- **Cron Scheduling**: AI creates Cron schedules via CLI subcommands, executes automatically
+- **Independent Tab Management**: 4-level breadcrumb navigation, quickly switch between task lists
+- **Frequency Presets**: Hourly / Daily / Weekly / Monthly — one-click selection of common frequencies
+- **Custom Cron Expressions**: Full 5-field Cron syntax support, flexibly customize execution timing
+- **Task Cards**: Embedded chat message preview, at-a-glance task content and recent execution results
+- **Execution Tracking**: Per-execution read status tracking, unread message badge alerts
+- **TTS Playback**: Auto-summarize after task completion with voice playback, listen while reviewing
+- **Instant Trigger**: Support immediate manual execution without affecting next scheduled time
+- **Lifecycle Management**: Pause / Resume / Delete — flexibly control task state
+
 ### 🤖 AI Conversation
 - **Tool Call Visualization**: Name, parameters, execution results displayed in real time with success/error status
 - **Extended Thinking**: Complex tasks auto-trigger extended thinking, reasoning visible in real time
