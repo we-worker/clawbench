@@ -503,7 +503,7 @@ func executeStreamRun(
 			// Persist immediately so that if the stream is cancelled before
 			// step_finish/turn.completed, the ID is already saved for resumption.
 			if event.Type == "session_capture" {
-				if (backendName == "opencode" || backendName == "codex") && event.Content != "" {
+				if (backendName == "opencode" || backendName == "codex" || backendName == "deepseek") && event.Content != "" {
 					existingExtID := service.GetExternalSessionID(sessionID)
 					if existingExtID == "" {
 						if err := service.UpdateExternalSessionID(sessionID, event.Content); err != nil {
@@ -573,7 +573,7 @@ func executeStreamRun(
 			if event.Type == "metadata" && event.Meta != nil {
 				responseMetadata = event.Meta
 				// Capture external session ID on first response (OpenCode/Codex)
-				if (backendName == "opencode" || backendName == "codex") && event.Meta.SessionID != "" {
+				if (backendName == "opencode" || backendName == "codex" || backendName == "deepseek") && event.Meta.SessionID != "" {
 					existingExtID := service.GetExternalSessionID(sessionID)
 					if existingExtID == "" {
 						if err := service.UpdateExternalSessionID(sessionID, event.Meta.SessionID); err != nil {
@@ -769,17 +769,18 @@ func buildChatRequest(prompt, sessionID, projectPath, backendName, agentID, mode
 		}
 	}
 
-	// For OpenCode/Codex backends, resolve external session ID when resuming
+	// For OpenCode/Codex/DeepSeek backends, resolve external session ID when resuming
 	effectiveSessionID := sessionID
 	resume := service.SessionHasAssistant(sessionID)
-	if (backendName == "opencode" || backendName == "codex") && resume {
+	if (backendName == "opencode" || backendName == "codex" || backendName == "deepseek") && resume {
 		extID := service.GetExternalSessionID(sessionID)
 		if extID != "" {
 			effectiveSessionID = extID
 		} else {
 			// No external session ID available — don't pass the invalid ClawBench UUID
-			// to OpenCode/Codex. They don't recognize it and would silently fail
-			// (stdout empty, exit 0), resulting in "AI returned no content".
+			// to OpenCode/Codex/DeepSeek. They don't recognize it and would fail
+			// (stdout empty or error), resulting in "AI returned no content" or
+			// "could not load session" errors.
 			// Let them start a fresh session instead.
 			effectiveSessionID = ""
 		}
