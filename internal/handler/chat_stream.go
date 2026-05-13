@@ -58,6 +58,12 @@ func AIChatStream(w http.ResponseWriter, r *http.Request) {
 
 	flusher, canFlush := w.(http.Flusher)
 
+	// Heartbeat: send SSE comment lines to keep the connection alive through
+	// reverse proxies and mobile networks during quiet periods (e.g., long-running
+	// tool execution). Proxies typically drop idle connections after 30-60s.
+	heartbeatTicker := time.NewTicker(15 * time.Second)
+	defer heartbeatTicker.Stop()
+
 	// Periodically check if session is still running.
 	checkTicker := time.NewTicker(2 * time.Second)
 	defer checkTicker.Stop()
@@ -172,6 +178,15 @@ func AIChatStream(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "event: queue_done\ndata: {}\n\n")
 			}
 
+			if canFlush {
+				flusher.Flush()
+			}
+
+		case <-heartbeatTicker.C:
+			// SSE comment lines (`: ...\n\n`) are ignored by EventSource but keep
+			// the TCP connection alive through proxies, load balancers, and
+			// mobile networks that drop idle connections.
+			fmt.Fprintf(w, ": heartbeat %d\n\n", time.Now().UnixMilli())
 			if canFlush {
 				flusher.Flush()
 			}

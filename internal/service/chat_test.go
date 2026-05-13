@@ -1075,11 +1075,11 @@ func TestSendSessionEvent_NoStream(t *testing.T) {
 func TestSendSessionEvent_FullChannel(t *testing.T) {
 	setupDB(t)
 	sid := "full-channel-test"
-	// Register stream with small buffer (64 is the default)
+	// Register stream (capacity is 256)
 	ch := service.RegisterSessionStream(sid)
 
 	// Fill the channel buffer
-	for i := 0; i < 64; i++ {
+	for i := 0; i < 256; i++ {
 		ok := service.SendSessionEvent(sid, ai.StreamEvent{Type: "content", Content: fmt.Sprintf("msg-%d", i)})
 		assert.True(t, ok)
 	}
@@ -1089,7 +1089,7 @@ func TestSendSessionEvent_FullChannel(t *testing.T) {
 	assert.False(t, ok)
 
 	// Drain the channel to clean up
-	for i := 0; i < 64; i++ {
+	for i := 0; i < 256; i++ {
 		<-ch
 	}
 	service.UnregisterSessionStream(sid)

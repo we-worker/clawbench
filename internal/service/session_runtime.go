@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"clawbench/internal/ai"
@@ -130,7 +131,7 @@ func ForceCancelSession(sessionID string) {
 
 // RegisterSessionStream creates and registers a stream channel for a session
 func RegisterSessionStream(sessionID string) chan ai.StreamEvent {
-	ch := make(chan ai.StreamEvent, 64)
+	ch := make(chan ai.StreamEvent, 256)
 	sessionStreams.Store(sessionID, ch)
 	return ch
 }
@@ -166,6 +167,10 @@ func SendSessionEvent(sessionID string, event ai.StreamEvent) bool {
 			case ch <- event:
 				return true
 			default:
+				slog.Warn("session stream channel full, dropping event",
+					slog.String("session_id", sessionID),
+					slog.String("event_type", event.Type),
+				)
 			}
 		}
 	}

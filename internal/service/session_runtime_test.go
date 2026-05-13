@@ -219,8 +219,8 @@ func TestSendSessionEvent_FullChannel(t *testing.T) {
 
 	RegisterSessionStream("session-full")
 
-	// Fill the channel buffer (capacity is 64)
-	for i := 0; i < 64; i++ {
+	// Fill the channel buffer (capacity is 256)
+	for i := 0; i < 256; i++ {
 		sent := SendSessionEvent("session-full", ai.StreamEvent{Type: "content", Content: "x"})
 		assert.True(t, sent)
 	}

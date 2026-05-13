@@ -54,11 +54,11 @@ export function useChatStream(options: UseChatStreamOptions) {
   // Track tool_use timeout timers so we can clean them up
   const toolUseTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map()
 
-  const STREAM_TIMEOUT_MS = 60000 // 60 seconds without any SSE event = try reconnect
+  const STREAM_TIMEOUT_MS = 30000 // 30 seconds without any SSE event = try reconnect
   const TOOL_USE_TIMEOUT_MS = 30000 // 30 seconds without 'done' event = mark as done
 
   const reconnect = useReconnect({
-    maxAttempts: 3,
+    maxAttempts: 1,
     baseDelay: 2000,
     onReconnect: () => connectStream(currentSessionId.value),
   })
@@ -146,19 +146,22 @@ export function useChatStream(options: UseChatStreamOptions) {
           console.error('Polling: invalid JSON response')
           return
         }
+        // Parse messages from server response
+        const latestMsgs = (data.messages || []).map(msg => {
+          if (msg.role === 'assistant') {
+            const { blocks, metadata, cancelled } = onParseAssistantContent(msg.content)
+            msg.blocks = blocks
+            if (metadata) msg.metadata = metadata
+            if (cancelled) msg.cancelled = cancelled
+          } else if (msg.role === 'user' && !msg.blocks) {
+            msg.blocks = msg.content ? [{ type: 'text', text: msg.content }] : []
+          }
+          return msg
+        })
+
         if (!data.running) {
           stopPolling()
-          messages.value = (data.messages || []).map(msg => {
-            if (msg.role === 'assistant') {
-              const { blocks, metadata, cancelled } = onParseAssistantContent(msg.content)
-              msg.blocks = blocks
-              if (metadata) msg.metadata = metadata
-              if (cancelled) msg.cancelled = cancelled
-            } else if (msg.role === 'user' && !msg.blocks) {
-              msg.blocks = msg.content ? [{ type: 'text', text: msg.content }] : []
-            }
-            return msg
-          })
+          messages.value = latestMsgs
           currentSessionId.value = data.sessionId || currentSessionId.value
           onRenderNeeded(true)
           loading.value = false
@@ -177,6 +180,16 @@ export function useChatStream(options: UseChatStreamOptions) {
           }
           return
         }
+        // Session still running — update the streaming message with latest content
+        // so the user sees progress even while polling (not stuck on stale content)
+        const lastAssistant = latestMsgs.findLast(m => m.role === 'assistant')
+        if (lastAssistant) {
+          lastAssistant.streaming = true
+        }
+        messages.value = latestMsgs
+        currentSessionId.value = data.sessionId || currentSessionId.value
+        onRenderNeeded(true)
+        onScrollBottom()
       } catch (err) {
         console.error('Polling error:', err)
         stopPolling()
@@ -488,11 +501,27 @@ export function useChatStream(options: UseChatStreamOptions) {
     }
   }
 
+  // Network recovery: when the browser regains connectivity after a temporary
+  // loss (e.g., WiFi→cellular, tunnel), the SSE connection may be silently dead.
+  // The 'online' event lets us reconnect immediately instead of waiting for timeout.
+  function handleOnline() {
+    if (!loading.value || !currentSessionId.value) return
+    // Only reconnect if we have an active EventSource that might be stale
+    if (eventSource) {
+      console.info('Network recovered, reconnecting SSE stream')
+      disconnectStream()
+      reconnect.reset()
+      connectStream(currentSessionId.value)
+    }
+  }
+  window.addEventListener('online', handleOnline)
+
   // Cleanup on unmount
   onUnmounted(() => {
     disconnectStream()
     stopPolling()
     clearToolUseTimeouts()
+    window.removeEventListener('online', handleOnline)
   })
 
   return {
