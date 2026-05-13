@@ -106,6 +106,7 @@ tts:
   #   "codex"     — Codex CLI / 使用 Codex CLI
   #   "qoder"     — Qoder CLI (Alibaba) / 使用 Qoder CLI（阿里编码智能体）
   #   "vecli"     — VeCLI (Volcengine Doubao) / 使用 VeCLI（火山引擎 Doubao）
+  #   "deepseek"  — DeepSeek TUI (requires v0.8.33+) / 使用 DeepSeek TUI（需 v0.8.33+）
   summarize_backend: "simple"
   summarize_model: "MiniMax-M2.7"                        # Summarization model (leave empty for backend default)
                                                           # 总结模型（留空则使用后端默认）

@@ -14,7 +14,7 @@
 
 
 - **支持平台**：浏览器（PC / 平板 / 手机）、Android App、PWA
-- **AI 后端**：CodeBuddy、Claude Code、OpenCode、Gemini CLI、Codex、Qoder CLI、VeCLI
+- **AI 后端**：CodeBuddy、Claude Code、OpenCode、Gemini CLI、Codex、Qoder CLI、VeCLI、DeepSeek TUI
 
 ---
 
@@ -85,6 +85,7 @@ graph LR
     Server -->|CLI 调用 · 流式输出| CX["🤖 Codex CLI"]
     Server -->|CLI 调用 · 流式输出| QR["🤖 Qoder CLI"]
     Server -->|CLI 调用 · 流式输出| VC["🤖 VeCLI"]
+    Server -->|CLI 调用 · 流式输出| DS["🔍 DeepSeek TUI"]
     Server -->|读写| DB[("💾 SQLite\n会话 · 历史 · 定时任务")]
     CB -->|原生支持| Tools["🔧 工具调用"]
     CB -->|原生支持| Think["🧠 深度思考"]
@@ -108,7 +109,7 @@ graph LR
 
 ### 前置准备
 
-- **一台 PC（Linux / macOS / Windows）**：用于运行 ClawBench 服务端，需已安装至少一种 AI 编程智能体 CLI（CodeBuddy、Claude Code、OpenCode、Gemini CLI、Codex、Qoder CLI、VeCLI 均可）
+- **一台 PC（Linux / macOS / Windows）**：用于运行 ClawBench 服务端，需已安装至少一种 AI 编程智能体 CLI（CodeBuddy、Claude Code、OpenCode、Gemini CLI、Codex、Qoder CLI、VeCLI、DeepSeek TUI 均可）
 - **一台手机**：安装 [ClawBench Android App](https://github.com/xulongzhe/clawbench/releases)，或使用手机浏览器（推荐 Chrome）访问服务端地址
 
 ### 下载与启动
