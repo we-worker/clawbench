@@ -388,6 +388,7 @@ provide('layoutRefreshKey', layoutRefreshKey)
 watch(() => props.active, async (val) => {
   if (!val) {
     session.sessionDrawerOpen.value = false
+    toolDetailOverlay.value.show = false
   } else {
     // Open/Re-open: load history (with overlay) and fix stale layout state from v-show display:none
     await session.loadHistory(false, true)

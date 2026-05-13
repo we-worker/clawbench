@@ -7,7 +7,7 @@
       :class="{ 'bs-leaving': leaving, 'bs-instant': instant }"
       @click.self="handleClose"
     >
-      <div class="bs-panel" :class="{ 'bs-leaving': leaving, 'bs-instant': instant, 'bs-compact': compact }">
+      <div class="bs-panel" :class="{ 'bs-leaving': leaving, 'bs-instant': instant, 'bs-compact': compact, 'bs-auto': auto }">
         <!-- Header -->
         <div v-if="!noHeader" class="bs-header" @click="handleClose">
           <slot name="header">
@@ -38,6 +38,7 @@ const props = defineProps({
   },
   instant: Boolean,  // 立即关闭，无动画
   compact: Boolean,  // 紧凑模式，高度自适应内容，最大50%，无圆角
+  auto: Boolean,     // 自适应模式，高度按内容需要，最大全屏
   noHeader: Boolean, // 隐藏Header
 })
 
@@ -216,6 +217,23 @@ defineExpose({
 /* Compact mode body - flex container for sticky tab bar */
 .bs-panel.bs-compact .bs-body {
   overflow-y: hidden;
+}
+
+/* Auto mode - auto height based on content, max full screen, no border-radius */
+.bs-panel.bs-auto {
+  top: auto;
+  height: auto;
+  max-height: 100%;
+  border-radius: 0;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.bs-panel.bs-auto .bs-header {
+  border-radius: 0;
+}
+
+.bs-panel.bs-auto .bs-body {
+  overflow-y: auto;
 }
 
 /* ── Footer ── */
