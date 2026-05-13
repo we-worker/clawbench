@@ -1399,6 +1399,166 @@ func TestIntegration_VeCLI_SystemPromptInjection(t *testing.T) {
 	}
 }
 
+// --- DeepSeek Integration Tests ---
+
+func TestIntegration_DeepSeek_NewSession(t *testing.T) {
+	requireCLIAvailable(t, "deepseek")
+	backend, err := NewBackend("deepseek")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	ch, err := backend.ExecuteStream(ctx, ChatRequest{
+		Prompt:  "说一个字：好",
+		WorkDir: testWorkDir(),
+	})
+	require.NoError(t, err)
+
+	events := collectEvents(t, ch, 150*time.Second)
+
+	requireEventSequence(t, events, "content", "metadata")
+	content := concatContent(events)
+	assert.NotEmpty(t, content, "should receive content from deepseek")
+
+	metaEvents := findEvents(events, "metadata")
+	require.NotEmpty(t, metaEvents, "should have metadata event")
+	assert.NotEmpty(t, metaEvents[0].Meta.Model, "metadata should contain model name")
+
+	// DeepSeek TUI sends session_capture before content
+	sessionCaptureEvents := findEvents(events, "session_capture")
+	assert.NotEmpty(t, sessionCaptureEvents, "should have session_capture event")
+
+	// AutoResumeBackend forwards the "done" event
+	doneEvents := findEvents(events, "done")
+	assert.NotEmpty(t, doneEvents, "should receive 'done' event from AutoResumeBackend")
+
+	errorEvents := findEvents(events, "error")
+	assert.Empty(t, errorEvents, "should not have error events")
+}
+
+func TestIntegration_DeepSeek_StreamEvents(t *testing.T) {
+	requireCLIAvailable(t, "deepseek")
+	backend, err := NewBackend("deepseek")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	ch, err := backend.ExecuteStream(ctx, ChatRequest{
+		Prompt:  "1+1等于几？只回答数字",
+		WorkDir: testWorkDir(),
+	})
+	require.NoError(t, err)
+
+	events := collectEvents(t, ch, 150*time.Second)
+
+	contentEvents := findEvents(events, "content")
+	assert.NotEmpty(t, contentEvents, "should have content events")
+
+	metaEvents := findEvents(events, "metadata")
+	require.NotEmpty(t, metaEvents, "should have metadata event")
+	assert.NotEmpty(t, metaEvents[0].Meta.Model, "metadata should contain model name")
+	assert.NotEmpty(t, metaEvents[0].Meta.SessionID, "metadata should contain session ID")
+
+	// DeepSeek TUI sends session_capture early
+	sessionCaptureEvents := findEvents(events, "session_capture")
+	assert.NotEmpty(t, sessionCaptureEvents, "should have session_capture event")
+}
+
+func TestIntegration_DeepSeek_ResumeSession(t *testing.T) {
+	requireCLIAvailable(t, "deepseek")
+	backend, err := NewBackend("deepseek")
+	require.NoError(t, err)
+
+	// Phase 1: new session — capture session ID from session_capture event
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel1()
+
+	ch1, err := backend.ExecuteStream(ctx1, ChatRequest{
+		Prompt:  "记住数字42，稍后我会问你。只回复OK",
+		WorkDir: testWorkDir(),
+	})
+	require.NoError(t, err)
+
+	events1 := collectEvents(t, ch1, 150*time.Second)
+	sessionID := extractSessionID(events1)
+	require.NotEmpty(t, sessionID, "should capture DeepSeek session ID from session_capture event")
+
+	doneEvents1 := findEvents(events1, "metadata")
+	require.NotEmpty(t, doneEvents1, "first conversation should complete with metadata event")
+
+	// Phase 2: resume session using captured session ID
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel2()
+
+	ch2, err := backend.ExecuteStream(ctx2, ChatRequest{
+		Prompt:    "我之前让你记住的数字是什么？只回答数字",
+		SessionID: sessionID,
+		WorkDir:   testWorkDir(),
+		Resume:    true,
+	})
+	require.NoError(t, err)
+
+	events2 := collectEvents(t, ch2, 150*time.Second)
+	requireEventSequence(t, events2, "content", "metadata")
+	content := concatContent(events2)
+	assert.NotEmpty(t, content, "should receive content in resumed session")
+
+	doneEvents2 := findEvents(events2, "done")
+	assert.NotEmpty(t, doneEvents2, "should receive 'done' event in resumed session")
+}
+
+func TestIntegration_DeepSeek_CancelMidStream(t *testing.T) {
+	requireCLIAvailable(t, "deepseek")
+	backend, err := NewBackend("deepseek")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	ch, err := backend.ExecuteStream(ctx, ChatRequest{
+		Prompt:  "写一篇500字的文章，主题是春天的花园",
+		WorkDir: testWorkDir(),
+	})
+	require.NoError(t, err)
+
+	events := cancelOnFirstContent(t, ch, cancel)
+	contentEvents := findEvents(events, "content")
+	assert.NotEmpty(t, contentEvents, "should have received at least one content before cancel")
+}
+
+func TestIntegration_DeepSeek_SystemPromptInjection(t *testing.T) {
+	requireCLIAvailable(t, "deepseek")
+	backend, err := NewBackend("deepseek")
+	require.NoError(t, err)
+
+	// DeepSeek TUI supports --system-prompt flag natively
+	const marker = "INTEGRATION_TEST_MARKER_D5K9"
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	ch, err := backend.ExecuteStream(ctx, ChatRequest{
+		Prompt:       "请重复以下标记：" + marker,
+		WorkDir:      testWorkDir(),
+		SystemPrompt: "你必须在你回复的开头包含标记 " + marker + "，这是系统级要求",
+	})
+	require.NoError(t, err)
+
+	events := collectEvents(t, ch, 150*time.Second)
+	requireEventSequence(t, events, "content", "metadata")
+
+	// Verify the stream completed successfully with metadata (which means CLI args were valid)
+	metaEvents := findEvents(events, "metadata")
+	require.NotEmpty(t, metaEvents, "should have metadata event")
+
+	// Best-effort check — AI compliance is non-deterministic
+	content := concatContent(events)
+	if !strings.Contains(content, marker) {
+		t.Logf("deepseek did not include marker %q in response — AI compliance is non-deterministic; content: %s", marker, truncate(content, 200))
+	}
+}
+
 // --- Helpers ---
 
 // truncate returns the first n chars of s with "..." appended if longer.
