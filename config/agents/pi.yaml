@@ -4,25 +4,11 @@ icon: 🥧
 specialty: 极简编程智能体 — 4 工具核心 + 多模型支持
 backend: pi
 models:
-  # Anthropic (via MiniMax proxy)
-  - id: anthropic/claude-sonnet-4-6
-    name: Claude Sonnet 4.6
-    default: true
-  - id: anthropic/claude-opus-4-7
-    name: Claude Opus 4.7
-  - id: anthropic/claude-haiku-4-5
-    name: Claude Haiku 4.5
   # MiniMax
-  - id: minimax/MiniMax-M2.7
+  - id: minimax-cn/MiniMax-M2.7
     name: MiniMax M2.7
-  - id: minimax/MiniMax-M2.7-highspeed
-    name: MiniMax M2.7 高速
-  # GitHub Copilot
-  - id: github-copilot/claude-sonnet-4.6
-    name: Copilot · Sonnet 4.6
-  - id: github-copilot/gpt-5.5
-    name: Copilot · GPT-5.5
-  - id: github-copilot/gemini-3.1-pro-preview
-    name: Copilot · Gemini 3.1 Pro
+    default: true
+  - id: minimax-cn/MiniMax-2.5-highspeed
+    name: MiniMax 2.5 高速
 system_prompt: |
   You are a versatile assistant powered by Pi, capable of handling code, documentation, operations, research, and various tasks.

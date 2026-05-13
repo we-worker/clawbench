@@ -24,24 +24,26 @@ var piBackend = &CLIBackend{
 //
 // Working directory is set via cmd.Dir (CLIBackend sets cmd.Dir = req.WorkDir),
 // not via a CLI flag — Pi does not have a --add-dir option.
-//
-// API key configuration is handled by Pi's models.json (~/.pi/agent/models.json).
-// The models.json supports:
-//   - "apiKey": "ENV_VAR_NAME" — reads the API key from an environment variable
-//   - "apiKey": "!command"     — executes a shell command to get the key
-//   - "apiKey": "literal-key"  — uses the literal string as the key
-//   - "baseUrl"                — custom API endpoint (e.g., MiniMax proxy)
-//   - "headers"                — custom HTTP headers
 func buildPiStreamArgs(req ChatRequest) []string {
 	args := []string{"-p", "--mode", "json"}
 
 	// Session management
 	if req.Resume && req.SessionID != "" {
+		// Resume a specific session by its Pi-assigned ID (captured via
+		// external_session_id). This allows conversation continuity.
 		args = append(args, "--session", req.SessionID)
 	} else if req.Resume {
+		// Resume without a known session ID — continue the most recent session.
 		args = append(args, "--continue")
-	} else {
+	} else if req.ScheduledExecution {
+		// Scheduled tasks are independent executions — no need to persist sessions.
 		args = append(args, "--no-session")
+	} else {
+		// New interactive session: don't pass any session flag. Pi will
+		// create a persistent session and emit its ID in a "session" event,
+		// which we capture as external_session_id for future resumption.
+		// Using --no-session here would make the session ephemeral, so the
+		// captured ID would be unusable for --session resume later.
 	}
 
 	// Skip AGENTS.md / CLAUDE.md discovery — ClawBench injects its own rules

@@ -21,8 +21,10 @@ func TestBuildPiStreamArgs_NewSession(t *testing.T) {
 	assert.Equal(t, "--mode", args[1])
 	assert.Equal(t, "json", args[2])
 
-	// New session → --no-session
-	assert.Contains(t, args, "--no-session")
+	// New interactive session → no session flag (Pi creates persistent session)
+	assert.NotContains(t, args, "--no-session")
+	assert.NotContains(t, args, "--session")
+	assert.NotContains(t, args, "--continue")
 
 	// Skip AGENTS.md discovery
 	assert.Contains(t, args, "--no-context-files")
@@ -140,8 +142,7 @@ func TestPiBackendDefinition(t *testing.T) {
 	_, ok := parser.(*PiStreamParser)
 	assert.True(t, ok, "expected *PiStreamParser, got %T", parser)
 
-	// filterLine and preStart should be nil — API key configuration
-	// is handled by Pi's models.json, not by injecting env vars.
+	// filterLine and preStart should be nil
 	assert.Nil(t, piBackend.filterLine)
 	assert.Nil(t, piBackend.preStart)
 }
