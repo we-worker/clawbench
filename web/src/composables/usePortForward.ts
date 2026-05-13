@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { apiGet, apiPost, apiDelete } from '@/utils/api.ts'
 import { useAppMode } from './useAppMode.ts'
 import { gt } from '@/composables/useLocale'
+import { tunnelStatusFromPorts as tunnelStatusFromPortsUtil, buildPortUrl } from '@/utils/portForwardUtils.ts'
 
 interface ForwardedPort {
   port: number
@@ -55,15 +56,10 @@ function hasActivePorts(): boolean {
 }
 
 /**
- * Determines tunnel status from port state.
- * `hasPorts` indicates whether there are any registered ports.
- * When there are ports but none are active, the tunnel is degraded.
- * When there are no ports, or at least one is active, the tunnel is OK.
+ * Determines tunnel status from port state (delegates to pure utility).
  */
 function tunnelStatusFromPorts(hasPorts: boolean): 'ok' | 'degraded' {
-  const anyActive = hasActivePorts()
-  if (hasPorts && !anyActive) return 'degraded'
-  return 'ok'
+  return tunnelStatusFromPortsUtil(ports.value)
 }
 
 /**
@@ -287,30 +283,28 @@ export function usePortForward() {
 
   /** Open a forwarded port — in app mode opens sandbox browser, otherwise window.open */
   function openPort(targetPort: number, protocol?: string) {
-    const scheme = protocol === 'https' ? 'https' : 'http'
     if (isAppMode.value) {
       const native = (window as any).AndroidNative
       // Prefer sandbox browser (isolated process), fall back to external browser
       if (native?.openInSandbox) {
-        native.openInSandbox(targetPort, scheme)
+        native.openInSandbox(targetPort, protocol === 'https' ? 'https' : 'http')
       } else if (native?.openInBrowser) {
-        native.openInBrowser(targetPort, scheme)
+        native.openInBrowser(targetPort, protocol === 'https' ? 'https' : 'http')
       }
     } else {
-      window.open(`${scheme}://localhost:${targetPort}`, '_blank')
+      window.open(buildPortUrl(targetPort, protocol), '_blank')
     }
   }
 
   /** Open a forwarded port in external/system browser */
   function openInExternalBrowser(targetPort: number, protocol?: string) {
-    const scheme = protocol === 'https' ? 'https' : 'http'
     if (isAppMode.value) {
       const native = (window as any).AndroidNative
       if (native?.openInBrowser) {
-        native.openInBrowser(targetPort, scheme)
+        native.openInBrowser(targetPort, protocol === 'https' ? 'https' : 'http')
       }
     } else {
-      window.open(`${scheme}://localhost:${targetPort}`, '_blank')
+      window.open(buildPortUrl(targetPort, protocol), '_blank')
     }
   }
 

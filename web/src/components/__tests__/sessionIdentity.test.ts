@@ -161,12 +161,16 @@ describe('action delegation', () => {
 })
 
 describe('identity refs', () => {
-  it('returns reactive refs from the singleton', () => {
-    const { currentSessionId, currentBackend, runningSessions } = useSessionIdentity()
-    // These should be Vue refs
-    expect(currentSessionId.value).toBeDefined()
-    expect(currentBackend.value).toBeDefined()
-    expect(runningSessions.value).toBeDefined()
+  it('returns reactive refs from the singleton with correct initial values', () => {
+    const { currentSessionId, currentBackend, runningSessions, currentAgentId, currentModelId, currentModelName } = useSessionIdentity()
+    // Initial values should be empty strings/sets
+    expect(currentSessionId.value).toBe('')
+    expect(currentBackend.value).toBe('')
+    expect(currentAgentId.value).toBe('')
+    expect(currentModelId.value).toBe('')
+    expect(currentModelName.value).toBe('')
+    expect(runningSessions.value).toBeInstanceOf(Set)
+    expect(runningSessions.value.size).toBe(0)
   })
 
   it('runningSessions can track active sessions', () => {
@@ -192,5 +196,16 @@ describe('identity refs', () => {
     expect(completed).toEqual(['session-2'])
     // Clean up
     runningSessions.value = new Set()
+  })
+
+  it('currentSessionId is writable and shared across instances', () => {
+    const instance1 = useSessionIdentity()
+    const instance2 = useSessionIdentity()
+
+    instance1.currentSessionId.value = 'test-session-123'
+    expect(instance2.currentSessionId.value).toBe('test-session-123')
+
+    // Clean up
+    instance1.currentSessionId.value = ''
   })
 })

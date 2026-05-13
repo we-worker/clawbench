@@ -2,6 +2,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useSessionIdentity } from '@/composables/useSessionIdentity.ts'
 import { useToast } from '@/composables/useToast.ts'
 import { gt } from '@/composables/useLocale'
+import { buildQuoteMessage } from '@/utils/doubleClickUtils.ts'
 
 export interface QuoteData {
   text: string           // selected text
@@ -156,15 +157,7 @@ export function useQuoteQuestion() {
     if (!quoteData.value || !userMessage.trim()) return
 
     const q = quoteData.value
-    let langPrefix = q.language ? `${q.language}:` : ':'
-    let lineSuffix = ''
-    if (q.startLine && q.endLine && q.startLine !== q.endLine) {
-      lineSuffix = `:${q.startLine}-${q.endLine}`
-    } else if (q.startLine) {
-      lineSuffix = `:${q.startLine}`
-    }
-
-    const message = `${userMessage.trim()}\n\n\`\`\`${langPrefix}${q.filePath}${lineSuffix}\n${q.text}\n\`\`\``
+    const message = buildQuoteMessage(userMessage, q.text, q.filePath, q.language, q.startLine, q.endLine)
 
     // Pass the quoted file as a file attachment so the backend builds
     // the [当前文件: ...] prompt prefix and sets the CLI work_dir.

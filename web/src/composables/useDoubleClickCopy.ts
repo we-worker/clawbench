@@ -1,6 +1,7 @@
 import { inject } from 'vue'
 import { copyText } from '@/utils/clipboard.ts'
 import { gt } from '@/composables/useLocale'
+import { isExternalLink, isAnchorLink, slugifyForHeading, stripLeadingNumbering } from '@/utils/doubleClickUtils.ts'
 
 const BLOCK_SELECTORS = 'p, h1, h2, h3, h4, h5, h6, li, pre, blockquote, table, .mermaid'
 
@@ -74,19 +75,19 @@ export function useDoubleClickCopy(options?: DoubleClickCopyOptions) {
     function handleAnchorClick(event: MouseEvent, onOpenFile?: LinkHandler): boolean {
         const target = event.target as HTMLElement
         const anchor = target.closest<HTMLAnchorElement>('a[href]')
-        
+
         if (!anchor) return false
 
         const href = anchor.getAttribute('href')
         if (!href) return false
 
         // 处理锚点链接 (#xxx)
-        if (href.startsWith('#')) {
+        if (isAnchorLink(href)) {
             return handleHashLink(event, href, anchor)
         }
 
         // 处理相对路径链接 (非 http/https 链接)
-        if (!/^(https?:|\/\/|mailto:|tel:)/i.test(href) && onOpenFile) {
+        if (!isExternalLink(href) && onOpenFile) {
             event.preventDefault()
             onOpenFile(href)
             return true
@@ -108,10 +109,7 @@ export function useDoubleClickCopy(options?: DoubleClickCopyOptions) {
         
         // 如果找不到,尝试用 slugify 转换后查找
         if (!targetElement) {
-            const slugifiedId = targetId
-                .toLowerCase()
-                .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
-                .replace(/^-+|-+$/g, '')
+            const slugifiedId = slugifyForHeading(targetId)
             targetElement = document.querySelector(`[id="${CSS.escape(slugifiedId)}"]`)
         }
         
@@ -130,7 +128,7 @@ export function useDoubleClickCopy(options?: DoubleClickCopyOptions) {
             // 如果精确匹配失败,尝试去除序号后的匹配
             if (!targetElement) {
                 // 去除开头的数字和标点,如 "5. 第四部分" -> "第四部分"
-                const cleanLinkText = linkText.replace(/^[\d\s.、:：]+/, '').trim()
+                const cleanLinkText = stripLeadingNumbering(linkText)
                 for (const heading of allHeadings) {
                     const headingText = heading.textContent?.trim() || ''
                     if (headingText === cleanLinkText || headingText.includes(cleanLinkText)) {

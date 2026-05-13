@@ -1,0 +1,241 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { extractSpeakableText } from '@/composables/useAutoSpeech'
+
+// Mock useToast since it's used at module level
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ show: vi.fn() }),
+}))
+
+// Mock useLocale
+vi.mock('@/composables/useLocale', () => ({
+  gt: (key: string) => key,
+}))
+
+describe('extractSpeakableText', () => {
+  it('extracts text from text blocks', () => {
+    const blocks = [
+      { type: 'text', text: 'Hello world' },
+    ]
+    expect(extractSpeakableText(blocks)).toBe('Hello world')
+  })
+
+  it('extracts text from multiple text blocks', () => {
+    const blocks = [
+      { type: 'text', text: 'Hello' },
+      { type: 'text', text: 'world' },
+    ]
+    expect(extractSpeakableText(blocks)).toBe('Hello\nworld')
+  })
+
+  it('skips empty text blocks', () => {
+    const blocks = [
+      { type: 'text', text: 'Hello' },
+      { type: 'text', text: '  ' },
+      { type: 'text', text: 'world' },
+    ]
+    expect(extractSpeakableText(blocks)).toBe('Hello\nworld')
+  })
+
+  it('extracts questions from AskUserQuestion tool_use blocks', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [
+            {
+              question: 'Which approach do you prefer?',
+              header: 'Approach',
+              options: [
+                { label: 'Option A', description: 'Fast but less safe' },
+                { label: 'Option B', description: 'Safe but slower' },
+              ],
+            },
+          ],
+        },
+      },
+    ]
+    const result = extractSpeakableText(blocks)
+    expect(result).toContain('Which approach do you prefer?')
+    expect(result).toContain('(Approach)')
+    expect(result).toContain('Option A — Fast but less safe')
+    expect(result).toContain('Option B — Safe but slower')
+  })
+
+  it('handles string options in AskUserQuestion', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [
+            {
+              question: 'Choose a color',
+              options: ['Red', 'Blue', 'Green'],
+            },
+          ],
+        },
+      },
+    ]
+    const result = extractSpeakableText(blocks)
+    expect(result).toContain('Choose a color')
+    expect(result).toContain('Red, Blue, Green')
+  })
+
+  it('skips options with same label and description', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [
+            {
+              question: 'Continue?',
+              options: [
+                { label: 'Yes', description: 'Yes' },
+              ],
+            },
+          ],
+        },
+      },
+    ]
+    const result = extractSpeakableText(blocks)
+    // When label === description, only label should be shown
+    expect(result).toContain('Yes')
+    expect(result).not.toContain('Yes — Yes')
+  })
+
+  it('ignores non-AskUserQuestion tool_use blocks', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        name: 'Read',
+        input: { file_path: '/some/file.go' },
+      },
+    ]
+    expect(extractSpeakableText(blocks)).toBe('')
+  })
+
+  it('ignores tool_result blocks', () => {
+    const blocks = [
+      { type: 'tool_result', content: 'some output' },
+    ]
+    expect(extractSpeakableText(blocks)).toBe('')
+  })
+
+  it('handles questions without header', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [
+            { question: 'What is your name?' },
+          ],
+        },
+      },
+    ]
+    const result = extractSpeakableText(blocks)
+    expect(result).toBe('What is your name?')
+  })
+
+  it('handles questions without options', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [
+            { question: 'Please confirm?' },
+          ],
+        },
+      },
+    ]
+    const result = extractSpeakableText(blocks)
+    expect(result).toBe('Please confirm?')
+  })
+
+  it('mixes text and question blocks', () => {
+    const blocks = [
+      { type: 'text', text: 'Here is a question:' },
+      {
+        type: 'tool_use',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [
+            { question: 'Continue?', options: ['Yes', 'No'] },
+          ],
+        },
+      },
+    ]
+    const result = extractSpeakableText(blocks)
+    expect(result).toContain('Here is a question:')
+    expect(result).toContain('Continue?')
+    expect(result).toContain('Yes, No')
+  })
+
+  it('returns empty string for empty blocks', () => {
+    expect(extractSpeakableText([])).toBe('')
+  })
+
+  it('handles blocks with missing text property', () => {
+    const blocks = [
+      { type: 'text' },
+    ]
+    expect(extractSpeakableText(blocks)).toBe('')
+  })
+
+  it('handles AskUserQuestion with missing input.questions', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        name: 'AskUserQuestion',
+        input: {},
+      },
+    ]
+    expect(extractSpeakableText(blocks)).toBe('')
+  })
+
+  it('handles AskUserQuestion with empty options array', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [
+            { question: 'Proceed?', options: [] },
+          ],
+        },
+      },
+    ]
+    const result = extractSpeakableText(blocks)
+    expect(result).toBe('Proceed?')
+  })
+
+  it('handles object options without description', () => {
+    const blocks = [
+      {
+        type: 'tool_use',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [
+            {
+              question: 'Choose:',
+              options: [{ label: 'OK' }],
+            },
+          ],
+        },
+      },
+    ]
+    const result = extractSpeakableText(blocks)
+    expect(result).toContain('OK')
+  })
+
+  it('trims final result', () => {
+    const blocks = [
+      { type: 'text', text: '  Hello  ' },
+    ]
+    const result = extractSpeakableText(blocks)
+    expect(result).toBe('Hello')
+  })
+})
