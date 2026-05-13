@@ -54,7 +54,7 @@ watch(() => props.open, (val) => {
     // Close triggered externally while animating — cancel animation, hide now
     leaving.value = false
   }
-})
+}, { immediate: true })
 
 function handleClose() {
   if (leaving.value) return

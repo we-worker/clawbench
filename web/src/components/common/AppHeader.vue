@@ -73,7 +73,7 @@ import { Projector, ChevronDown, Search, Moon, Sun, Settings, Check } from 'luci
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocale } from '@/composables/useLocale'
-import { baseName } from '@/utils/path.ts'
+import { baseName, toRelativePath } from '@/utils/path.ts'
 import PopupMenu from '@/components/common/PopupMenu.vue'
 
 const { t } = useI18n()
@@ -123,9 +123,7 @@ const recentItems = ref([])
 let watchBase = ''
 
 function toRelative(absPath) {
-    if (!watchBase) return absPath
-    const rel = absPath.slice(watchBase.length).replace(/^\//, '')
-    return rel || '/'
+    return toRelativePath(absPath, watchBase)
 }
 
 function toggleDropdown() {

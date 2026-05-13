@@ -22,3 +22,14 @@ export function dirName(path: string): string {
     if (/^[A-Za-z]:$/.test(result)) return result + '\\'
     return result
 }
+
+/**
+ * Convert an absolute path to a relative path based on a base path.
+ * Returns the original path if base is empty.
+ * Returns '/' if the result would be empty (i.e., the path equals the base).
+ */
+export function toRelativePath(absPath: string, basePath: string): string {
+    if (!basePath) return absPath
+    const rel = absPath.slice(basePath.length).replace(/^\//, '')
+    return rel || '/'
+}

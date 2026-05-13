@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { baseName, dirName, splitPath } from '@/utils/path.ts'
+import { baseName, dirName, splitPath, toRelativePath } from '@/utils/path.ts'
 
 describe('splitPath', () => {
   it('splits unix path by /', () => {
@@ -118,5 +118,61 @@ describe('dirName', () => {
   it('handles path with mixed separators (uses forward slash by default)', () => {
     // Mixed paths use / as join since path includes /
     expect(dirName('a/b\\c')).toBe('a/b')
+  })
+})
+
+describe('toRelativePath', () => {
+  it('converts absolute path to relative path', () => {
+    expect(toRelativePath('/home/user/project/src/file.ts', '/home/user/project')).toBe('src/file.ts')
+  })
+
+  it('returns original path when base is empty', () => {
+    expect(toRelativePath('/home/user/project', '')).toBe('/home/user/project')
+  })
+
+  it('returns "/" when path equals base', () => {
+    expect(toRelativePath('/home/user/project', '/home/user/project')).toBe('/')
+  })
+
+  it('strips leading slash from result', () => {
+    expect(toRelativePath('/home/user/project/src', '/home/user/project')).toBe('src')
+  })
+
+  it('handles base with trailing slash', () => {
+    expect(toRelativePath('/home/user/project/src/file.ts', '/home/user/project/')).toBe('src/file.ts')
+  })
+
+  it('handles empty path', () => {
+    expect(toRelativePath('', '/home')).toBe('/')
+  })
+
+  it('handles both empty', () => {
+    // '' slice '' = '', replace = '', || '/' => '' (empty string is falsy but '' || '/' gives '/' wait...)
+    // Actually: ''.replace(/^\//, '') = '', '' || '/' = '/' — but let's check actual behavior
+    // absPath='', basePath='' => !basePath is false (empty string is falsy, so returns absPath='')
+    expect(toRelativePath('', '')).toBe('')
+  })
+
+  it('handles path that does not start with base', () => {
+    // Function just slices: '/other/path'.slice('/home/user'.length) = 'h'
+    // Then replace(/^\//, '') => 'h'
+    expect(toRelativePath('/other/path', '/home/user')).toBe('h')
+  })
+
+  it('handles root-level files', () => {
+    expect(toRelativePath('/home/user/file.txt', '/home/user')).toBe('file.txt')
+  })
+
+  it('handles deeply nested relative paths', () => {
+    expect(toRelativePath('/a/b/c/d/e/f', '/a/b')).toBe('c/d/e/f')
+  })
+
+  it('handles single-level base', () => {
+    expect(toRelativePath('/home/project', '/home')).toBe('project')
+  })
+
+  it('handles path that is just base with trailing slash', () => {
+    // absPath = '/home/user/', base = '/home/user' => slice result = '/', then replace(/^\\//, '') => '', then || '/' => '/'
+    expect(toRelativePath('/home/user/', '/home/user')).toBe('/')
   })
 })

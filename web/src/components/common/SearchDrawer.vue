@@ -42,8 +42,7 @@ import BottomSheet from './BottomSheet.vue'
 import HeaderMarquee from './HeaderMarquee.vue'
 import SearchInput from './SearchInput.vue'
 import { escapeHtml } from '@/utils/html.ts'
-import { getFileType } from '@/utils/fileType.ts'
-import { hljs } from '@/utils/globals.ts'
+import { searchRawContent, highlightText, BLOCK_TAGS } from '@/utils/searchUtils.ts'
 
 const { t } = useI18n()
 
@@ -73,38 +72,9 @@ function handleClose() {
   emit('close')
 }
 
-function highlightText(text, q) {
-  if (!q) return escapeHtml(text)
-  const escaped = escapeHtml(text)
-  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
-  return escaped.replace(re, '<mark>$&</mark>')
-}
-
-function highlightLineSyntax(line, lang) {
-  try {
-    let h = hljs.highlight(line, { language: lang, ignoreIllegals: true }).value
-    h = h.replace(/^<span class="line">/, '').replace(/<\/span>\s*$/, '')
-    return h
-  } catch {
-    return escapeHtml(line)
-  }
-}
-
-function markInHighlighted(highlightedHtml, q) {
-  if (!q) return highlightedHtml
-  // Split into HTML tags and text segments, only mark inside text
-  const segments = highlightedHtml.split(/(<[^>]+>)/)
-  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const re = new RegExp(escaped, 'g')
-  return segments.map(seg => {
-    if (seg.startsWith('<')) return seg // HTML tag, leave as-is
-    return seg.replace(re, '<mark>$&</mark>')
-  }).join('')
-}
-
 // --- Rendered mode: search DOM text ---
 
-const BLOCK_TAGS = new Set(['P', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'TD', 'TH', 'DT', 'DD', 'PRE', 'FIGCAPTION', 'DIV'])
+// BLOCK_TAGS is imported from searchUtils
 
 function findBlockAncestor(node) {
   let el = node.parentElement
@@ -151,25 +121,7 @@ function searchRenderedContent(q) {
 }
 
 // --- Raw mode: search source lines ---
-
-function searchRawContent(q) {
-  const content = props.file?.content
-  if (!content) return []
-  const lang = getFileType(props.file?.name || '')?.lang || 'plaintext'
-  const lines = content.split('\n')
-  const out = []
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes(q)) {
-      const highlighted = markInHighlighted(highlightLineSyntax(lines[i], lang), q)
-      out.push({
-        line: i + 1,
-        text: lines[i],
-        highlighted,
-      })
-    }
-  }
-  return out
-}
+// searchRawContent is imported from searchUtils
 
 const results = computed(() => {
   if (!props.file?.content || !query.value.trim()) return []
@@ -177,7 +129,7 @@ const results = computed(() => {
   if (props.viewMode === 'rendered') {
     return searchRenderedContent(q)
   }
-  return searchRawContent(q)
+  return searchRawContent(q, props.file.content, props.file.name || '')
 })
 
 function jumpTo(result) {

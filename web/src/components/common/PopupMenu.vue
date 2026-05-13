@@ -10,6 +10,7 @@
 
 <script setup>
 import { computed, watch, onBeforeUnmount } from 'vue'
+import { computeMenuStyle } from '@/utils/popupMenuPosition'
 
 const props = defineProps({
   show: Boolean,
@@ -27,64 +28,13 @@ const emit = defineEmits(['update:show'])
 const menuStyle = computed(() => {
   if (!props.targetElement) return {}
   const rect = props.targetElement.getBoundingClientRect()
-  const { maxWidth, maxHeight, edgeMargin, anchor, menuItemsCount } = props
-  let left, bottom
-
-  if (anchor === 'right') {
-    // Right-aligned: use right instead of left
-    let right = window.innerWidth - rect.right
-    if (right + maxWidth + edgeMargin > window.innerWidth) {
-      right = window.innerWidth - maxWidth - edgeMargin
-    }
-    right = Math.max(edgeMargin, right)
-
-    // Vertical: position above anchor, flip below if not enough space
-    bottom = window.innerHeight - rect.top + 4
-    const estMenuHeight = 36 + menuItemsCount * 28
-    if (window.innerHeight - bottom < edgeMargin) {
-      bottom = window.innerHeight - rect.bottom - 4 - estMenuHeight
-      if (window.innerHeight - bottom - estMenuHeight < edgeMargin) {
-        bottom = window.innerHeight - estMenuHeight - edgeMargin
-      }
-    }
-
-    return {
-      position: 'fixed',
-      bottom: `${bottom}px`,
-      right: `${right}px`,
-      maxWidth: `${maxWidth}px`,
-      maxHeight: `min(${maxHeight}px, calc(100vh - ${edgeMargin * 2}px))`,
-      overflowY: 'auto',
-    }
-  } else {
-    // Left-aligned (default)
-    left = rect.left
-    if (left + maxWidth + edgeMargin > window.innerWidth) {
-      left = window.innerWidth - maxWidth - edgeMargin
-    }
-    left = Math.max(edgeMargin, left)
-
-    // Vertical: position above anchor, flip below if not enough space
-    bottom = window.innerHeight - rect.top + 4
-    const estMenuHeight = 36 + menuItemsCount * 28 // estimate
-    if (window.innerHeight - bottom < edgeMargin) {
-      // Flip below anchor
-      bottom = window.innerHeight - rect.bottom - 4 - estMenuHeight
-      if (window.innerHeight - bottom - estMenuHeight < edgeMargin) {
-        // Clamp to top edge
-        bottom = window.innerHeight - estMenuHeight - edgeMargin
-      }
-    }
-
-    return {
-      position: 'fixed',
-      bottom: `${bottom}px`,
-      left: `${left}px`,
-      maxWidth: `${maxWidth}px`,
-      maxHeight: `min(${maxHeight}px, calc(100vh - ${edgeMargin * 2}px))`,
-      overflowY: 'auto',
-    }
-  }
+  return computeMenuStyle(rect, {
+    anchor: props.anchor,
+    maxWidth: props.maxWidth,
+    maxHeight: props.maxHeight,
+    edgeMargin: props.edgeMargin,
+    menuItemsCount: props.menuItemsCount,
+  })
 })
 
 // Close on outside click
