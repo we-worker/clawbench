@@ -91,10 +91,12 @@ _stop_dev() {
         fi
     done
 
-    # Fallback: kill by port
+    # Fallback: kill by port (use ss instead of lsof which can block)
     for port in $DEV_BACKEND_PORT $DEV_FRONTEND_PORT; do
-        local pids
-        pids=$(lsof -ti :$port 2>/dev/null)
+        local pids=""
+        if command -v ss >/dev/null 2>&1; then
+            pids=$(ss -tlnp 2>/dev/null | grep ":$port" | grep -oP 'pid=\K[0-9]+' | sort -u | tr '\n' ' ')
+        fi
         if [[ -n "$pids" ]]; then
             echo "Killing orphan process on port $port (PIDs: $pids)..."
             echo "$pids" | xargs kill -9 2>/dev/null || true

@@ -70,26 +70,39 @@ _stop_servers() {
         rm -f "$pid_file"
     fi
 
-    # Fallback: kill by port
+    # Fallback: kill by port (use ss/netstat — never block like lsof can)
     if [[ -n "$port" ]]; then
-        local pids
-        pids=$(lsof -ti :$port 2>/dev/null)
+        local pids=""
+        if command -v ss >/dev/null 2>&1; then
+            pids=$(ss -tlnp 2>/dev/null | grep ":$port" | grep -oP 'pid=\K[0-9]+' | sort -u | tr '\n' ' ')
+        elif command -v netstat >/dev/null 2>&1; then
+            pids=$(netstat -tlnp 2>/dev/null | grep ":$port" | grep -oP '\s[0-9]+/' | grep -oP '[0-9]+' | sort -u | tr '\n' ' ')
+        fi
         if [[ -n "$pids" ]]; then
             echo "Killing orphan process on port $port (PIDs: $pids)..."
             echo "$pids" | xargs kill 2>/dev/null || true
             sleep 1
             # Force kill if still alive
-            local remaining
-            remaining=$(lsof -ti :$port 2>/dev/null)
-            if [[ -n "$remaining" ]]; then
-                echo "$remaining" | xargs kill -9 2>/dev/null || true
-                sleep 1
+            if command -v ss >/dev/null 2>&1; then
+                local remaining
+                remaining=$(ss -tlnp 2>/dev/null | grep ":$port" | grep -oP 'pid=\K[0-9]+' | sort -u | tr '\n' ' ')
+                if [[ -n "$remaining" ]]; then
+                    echo "$remaining" | xargs kill -9 2>/dev/null || true
+                    sleep 1
+                fi
             fi
         fi
 
         # Wait for port to be fully released
         local waited=0
-        while lsof -ti :$port 2>/dev/null && [[ $waited -lt 5 ]]; do
+        while [[ $waited -lt 5 ]]; do
+            local bound=""
+            if command -v ss >/dev/null 2>&1; then
+                bound=$(ss -tlnp 2>/dev/null | grep ":$port") || true
+            fi
+            if [[ -z "$bound" ]]; then
+                break
+            fi
             sleep 0.5
             waited=$((waited + 1))
         done
