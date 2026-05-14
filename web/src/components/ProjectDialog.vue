@@ -8,14 +8,14 @@
     <div class="dialog-nav">
       <div class="dialog-toolbar-row">
         <button class="toolbar-btn" @click="doNewFolder" :title="t('projectDialog.newFolder')">
-          <FolderPlus :size="14" />
+          <FolderPlus :size="16" />
         </button>
         <button class="toolbar-btn" @click="showHidden = !showHidden" :title="showHidden ? t('projectDialog.hideHiddenFiles') : t('projectDialog.showHiddenFiles')">
-          <EyeOff v-if="!showHidden" :size="14" />
-          <Eye v-else :size="14" />
+          <EyeOff v-if="!showHidden" :size="16" />
+          <Eye v-else :size="16" />
         </button>
         <button class="toolbar-btn" @click="loadBrowse" :title="t('nav.refresh')">
-          <RotateCw :size="14" />
+          <RotateCw :size="16" />
         </button>
         <SearchInput v-model="searchQuery" :placeholder="t('projectDialog.search')" />
       </div>
@@ -251,8 +251,8 @@ async function confirm() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: none;
   border-radius: 50%;
@@ -260,6 +260,11 @@ async function confirm() {
   color: var(--text-secondary, #666);
   cursor: pointer;
   transition: all 0.15s;
+  flex-shrink: 0;
+}
+.toolbar-btn svg {
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 .toolbar-btn:hover {
