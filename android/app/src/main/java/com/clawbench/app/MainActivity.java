@@ -22,6 +22,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
+import android.widget.FrameLayout;
 import android.webkit.DownloadListener;
 import android.webkit.JavascriptInterface;
 import android.webkit.SslErrorHandler;
@@ -131,6 +132,11 @@ public class MainActivity extends AppCompatActivity {
     // Volume key interception mode: when true, volume up/down are forwarded to WebView
     // as JS calls instead of adjusting system volume. Controlled by the terminal panel.
     private volatile boolean volumeKeyMode = false;
+
+    // Fullscreen video state: managed by WebChromeClient.onShowCustomView/onHideCustomView
+    private View customView;
+    private WebChromeClient.CustomViewCallback customViewCallback;
+    private int originalOrientation;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -275,6 +281,67 @@ public class MainActivity extends AppCompatActivity {
                     return false;
                 }
                 return true;
+            }
+
+            @Override
+            public void onShowCustomView(View view, CustomViewCallback callback) {
+                // If already in fullscreen, dismiss the previous one first
+                if (customView != null) {
+                    onHideCustomView();
+                    return;
+                }
+                customView = view;
+                customViewCallback = callback;
+
+                // Save current orientation and switch to landscape for video
+                originalOrientation = getRequestedOrientation();
+                setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+
+                // Hide the WebView and show the custom fullscreen view
+                webView.setVisibility(View.GONE);
+                FrameLayout container = findViewById(R.id.webView).getParent() instanceof FrameLayout
+                        ? (FrameLayout) findViewById(R.id.webView).getParent() : null;
+                if (container != null) {
+                    container.addView(view, new FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT));
+                }
+
+                // Hide system UI for immersive fullscreen
+                getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+            }
+
+            @Override
+            public void onHideCustomView() {
+                if (customView == null) return;
+
+                // Remove the custom view
+                FrameLayout container = customView.getParent() instanceof FrameLayout
+                        ? (FrameLayout) customView.getParent() : null;
+                if (container != null) {
+                    container.removeView(customView);
+                }
+                customView = null;
+
+                // Restore orientation
+                setRequestedOrientation(originalOrientation);
+
+                // Show the WebView again
+                webView.setVisibility(View.VISIBLE);
+
+                if (customViewCallback != null) {
+                    customViewCallback.onCustomViewHidden();
+                    customViewCallback = null;
+                }
+
+                // Restore system UI
+                getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
             }
         });
 
@@ -435,6 +502,14 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
+        // If in fullscreen video mode, exit fullscreen first
+        if (customView != null) {
+            WebChromeClient client = webView.getWebChromeClient();
+            if (client != null) {
+                client.onHideCustomView();
+            }
+            return;
+        }
         if (webView.canGoBack()) {
             webView.goBack();
         } else {
