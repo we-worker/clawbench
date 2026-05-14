@@ -60,23 +60,29 @@ func NewPiperProvider() *PiperProvider {
 			if resolved, err := filepath.EvalSymlinks(cliPath); err == nil {
 				piperDir = filepath.Dir(resolved)
 			}
+			// Preserve any env vars previously set via opts.Env (cmd.Env may already
+			// be populated by CLISpeechProvider.Synthesize). Fall back to os.Environ()
+			// only if cmd.Env is nil (no prior env configuration).
+			if cmd.Env == nil {
+				cmd.Env = os.Environ()
+			}
 			switch runtime.GOOS {
 			case "darwin":
 				existing := os.Getenv("DYLD_LIBRARY_PATH")
 				if existing == "" {
-					cmd.Env = append(os.Environ(), "DYLD_LIBRARY_PATH="+piperDir)
+					cmd.Env = append(cmd.Env, "DYLD_LIBRARY_PATH="+piperDir)
 				} else {
-					cmd.Env = append(os.Environ(), "DYLD_LIBRARY_PATH="+piperDir+":"+existing)
+					cmd.Env = append(cmd.Env, "DYLD_LIBRARY_PATH="+piperDir+":"+existing)
 				}
 			case "windows":
 				existing := os.Getenv("PATH")
-				cmd.Env = append(os.Environ(), "PATH="+piperDir+";"+existing)
+				cmd.Env = append(cmd.Env, "PATH="+piperDir+";"+existing)
 			default: // linux and other unix-like systems
 				existing := os.Getenv("LD_LIBRARY_PATH")
 				if existing == "" {
-					cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH="+piperDir)
+					cmd.Env = append(cmd.Env, "LD_LIBRARY_PATH="+piperDir)
 				} else {
-					cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH="+piperDir+":"+existing)
+					cmd.Env = append(cmd.Env, "LD_LIBRARY_PATH="+piperDir+":"+existing)
 				}
 			}
 		},
