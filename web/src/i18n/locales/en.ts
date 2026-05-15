@@ -518,7 +518,7 @@ export default {
     gotIt: 'Got it',
   },
   projectDialog: {
-    title: 'Browse Projects',
+    title: 'Select Project Directory',
     newFolder: 'New folder',
     hideHiddenFiles: 'Hide hidden files',
     showHiddenFiles: 'Show hidden files',

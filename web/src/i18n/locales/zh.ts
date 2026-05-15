@@ -518,7 +518,7 @@ export default {
     gotIt: '知道了',
   },
   projectDialog: {
-    title: '浏览项目',
+    title: '选择项目目录',
     newFolder: '新建文件夹',
     hideHiddenFiles: '隐藏隐藏文件',
     showHiddenFiles: '显示隐藏文件',
