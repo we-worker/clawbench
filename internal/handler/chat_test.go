@@ -1190,7 +1190,7 @@ func TestAccumulateBlock_InterleavedToolUse(t *testing.T) {
 	}
 }
 
-func TestRemoveFailedAskUserQuestionBlocks(t *testing.T) {
+func TestRemoveRejectedToolBlocks(t *testing.T) {
 	tests := []struct {
 		name   string
 		blocks []model.ContentBlock
@@ -1215,7 +1215,16 @@ func TestRemoveFailedAskUserQuestionBlocks(t *testing.T) {
 			want: 2,
 		},
 		{
-			name: "keeps non-AskUserQuestion error tool_use blocks",
+			name: "removes rejected /commit tool_use and matching warning",
+			blocks: []model.ContentBlock{
+				{Type: "text", Text: "Let me commit this"},
+				{Type: "tool_use", Name: "/commit", ID: "toolu_commit", Status: "error", Output: "Tool /commit not found in agent cli.", Done: true},
+				{Type: "warning", Text: "Tool /commit not found in agent cli."},
+			},
+			want: 1, // text only
+		},
+		{
+			name: "keeps non-rejected error tool_use blocks",
 			blocks: []model.ContentBlock{
 				{Type: "tool_use", Name: "Bash", ID: "toolu_xyz", Status: "error", Output: "command failed", Done: true},
 				{Type: "warning", Text: "command failed"},
@@ -1231,20 +1240,36 @@ func TestRemoveFailedAskUserQuestionBlocks(t *testing.T) {
 			want: 2,
 		},
 		{
-			name: "removes only failed AskUserQuestion, not successful ones",
+			name: "removes only failed tools, not successful ones",
 			blocks: []model.ContentBlock{
-				{Type: "tool_use", Name: "AskUserQuestion", ID: "toolu_fail", Status: "error", Output: "Tool AskUserQuestion not found", Done: true},
+				{Type: "tool_use", Name: "AskUserQuestion", ID: "toolu_fail", Status: "error", Output: "Tool AskUserQuestion not found in agent cli.", Done: true},
 				{Type: "tool_use", Name: "AskUserQuestion", ID: "ask-ok", Status: "", Done: true},
 			},
 			want: 1,
+		},
+		{
+			name: "removes multiple rejected tools",
+			blocks: []model.ContentBlock{
+				{Type: "tool_use", Name: "/commit", ID: "t1", Status: "error", Output: "Tool /commit not found in agent cli.", Done: true},
+				{Type: "text", Text: "some text"},
+				{Type: "tool_use", Name: "/review", ID: "t2", Status: "error", Output: "Tool /review not found in agent cli.", Done: true},
+				{Type: "warning", Text: "Tool /commit not found in agent cli."},
+				{Type: "warning", Text: "Tool /review not found in agent cli."},
+			},
+			want: 1, // only the text block remains
+		},
+		{
+			name:   "no rejected tools leaves blocks unchanged",
+			blocks: []model.ContentBlock{{Type: "text", Text: "hello"}, {Type: "tool_use", Name: "Bash", Status: "", Done: true}},
+			want:   2,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := removeFailedAskUserQuestionBlocks(tt.blocks)
+			got := removeRejectedToolBlocks(tt.blocks)
 			if len(got) != tt.want {
-				t.Errorf("removeFailedAskUserQuestionBlocks() returned %d blocks, want %d", len(got), tt.want)
+				t.Errorf("removeRejectedToolBlocks() returned %d blocks, want %d", len(got), tt.want)
 				for i, b := range got {
 					t.Logf("  block[%d]: type=%s name=%s status=%s", i, b.Type, b.Name, b.Status)
 				}

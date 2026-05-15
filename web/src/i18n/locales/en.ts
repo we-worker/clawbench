@@ -388,6 +388,7 @@ export default {
       newFolderInDir: 'New folder in {name}',
       openAsProject: 'Open as project',
       openTerminal: 'Open terminal here',
+      archiveDir: 'Pack & download',
     },
     multiSelect: {
       enter: 'Select',
@@ -399,6 +400,7 @@ export default {
       confirmDelete: 'Delete {n} items?',
       allCopied: '{n} items copied',
       allCut: '{n} items cut',
+      archive: 'Pack & download',
     },
     toast: {
       copied: 'Copied',
@@ -412,6 +414,10 @@ export default {
       switchProjectFailed: 'Switch project failed: {error}',
       switchProjectFailedShort: 'Switch project failed',
       dirLoadFailed: 'Directory not found or inaccessible',
+      archiving: 'Packing {n} items...',
+      archiveDone: 'Download ready',
+      archiveFailed: 'Pack failed',
+      archiveFailedDetail: 'Pack failed: {error}',
     },
     prompt: {
       fileName: 'Enter file name:',

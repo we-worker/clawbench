@@ -190,6 +190,10 @@
         <Scissors :size="14" />
         {{ t('file.context.cut') }}
       </button>
+      <button class="ms-action-btn" @click="doBatchArchive">
+        <Package :size="14" />
+        {{ t('file.multiSelect.archive') }}
+      </button>
       <button class="ms-action-btn ms-danger" @click="doBatchDelete">
         <Trash2 :size="14" />
         {{ t('common.delete') }}
@@ -235,6 +239,10 @@
             <Download :size="14" />
             {{ t('common.download') }}
           </div>
+          <div class="context-menu-item" v-if="ctxMenu.entry.type === 'dir'" @click.stop="doArchiveDir">
+            <Package :size="14" />
+            {{ t('file.context.archiveDir') }}
+          </div>
           <div class="context-menu-item danger" @click.stop="doDelete">
             <Trash2 :size="14" />
             {{ t('common.delete') }}
@@ -259,7 +267,7 @@
 <script setup>
 import { ref, computed, reactive, inject, nextTick, onMounted, onUnmounted, Teleport, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Folder, ArrowDownAz, ArrowUpZa, ChevronDown, ChevronUp, Clock, FileText, Eye, EyeOff, ArrowRightLeft, Loader, FileImage, FileMusic, ChevronRight, Copy, Scissors, ClipboardPaste, FilePlus, FolderPlus, Pencil, Download, Trash2, FolderOpen, RotateCw, Terminal as TerminalIcon, CheckSquare, Check, X, LayoutList, LayoutGrid, FileVideo } from 'lucide-vue-next'
+import { Folder, ArrowDownAz, ArrowUpZa, ChevronDown, ChevronUp, Clock, FileText, Eye, EyeOff, ArrowRightLeft, Loader, FileImage, FileMusic, ChevronRight, Copy, Scissors, ClipboardPaste, FilePlus, FolderPlus, Pencil, Download, Trash2, FolderOpen, RotateCw, Terminal as TerminalIcon, CheckSquare, Check, X, LayoutList, LayoutGrid, FileVideo, Package } from 'lucide-vue-next'
 import { getFileType } from '@/utils/fileType.ts'
 import { dirName } from '@/utils/path.ts'
 import { store } from '@/stores/app.ts'
@@ -303,9 +311,9 @@ function thumbUrl(entry) {
 function onThumbError(entry) {
     thumbErrors.add(entry.name)
 }
-// Extensions that the backend thumbnail API can decode (Go stdlib: png, jpg, gif, bmp, tiff).
-// SVG, WebP, AVIF, PDF are excluded — they'll cause a 404 round-trip if attempted.
-const THUMBABLE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.tif'])
+// Extensions that the backend thumbnail API can decode (Go stdlib: png, jpg, gif).
+// SVG, WebP, AVIF, PDF, BMP, TIFF are excluded — they'll cause a 404 round-trip if attempted.
+const THUMBABLE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif'])
 
 function isThumbable(entry) {
     if (entry.type !== 'image' && entry.type !== 'file') return false
@@ -777,6 +785,53 @@ function doDownload() {
         a.click()
         document.body.removeChild(a)
     }
+}
+
+// ── Archive download (zip) ──
+async function doArchive(paths, zipName) {
+    if (!paths.length) return
+    if (toast) toast.show(t('file.toast.archiving', { n: paths.length }), { icon: '📦', type: 'info', duration: 0 })
+    try {
+        const resp = await fetch('/api/file/archive', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paths }),
+        })
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ error: 'Unknown error' }))
+            if (toast) toast.show(t('file.toast.archiveFailedDetail', { error: err.error || '' }), { icon: '❌', type: 'error', duration: 3000 })
+            return
+        }
+        const blob = await resp.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = zipName || 'archive.zip'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        if (toast) toast.show(t('file.toast.archiveDone'), { icon: '✅', type: 'success', duration: 1500 })
+    } catch (err) {
+        if (toast) toast.show(t('file.toast.archiveFailed'), { icon: '❌', type: 'error', duration: 2000 })
+    }
+}
+
+function doArchiveDir() {
+    if (!ctxMenu.entry || ctxMenu.entry.type !== 'dir') return
+    ctxMenu.visible = false
+    const zipName = ctxMenu.entry.name + '.zip'
+    doArchive([ctxMenu.entry.path], zipName)
+}
+
+function doBatchArchive() {
+    const paths = [...multiSelect.selected]
+    if (!paths.length) return
+    const zipName = paths.length === 1
+        ? paths[0].split('/').pop() + '.zip'
+        : 'archive.zip'
+    doArchive(paths, zipName)
+    exitMultiSelect()
 }
 
 function doDelete() {

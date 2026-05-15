@@ -388,6 +388,7 @@ export default {
       newFolderInDir: '在 {name} 内新建文件夹',
       openAsProject: '打开为项目',
       openTerminal: '在此打开终端',
+      archiveDir: '打包下载',
     },
     multiSelect: {
       enter: '多选',
@@ -399,6 +400,7 @@ export default {
       confirmDelete: '确认删除 {n} 个文件？',
       allCopied: '已复制 {n} 项',
       allCut: '已剪切 {n} 项',
+      archive: '打包下载',
     },
     toast: {
       copied: '已复制',
@@ -412,6 +414,10 @@ export default {
       switchProjectFailed: '切换项目失败: {error}',
       switchProjectFailedShort: '切换项目失败',
       dirLoadFailed: '目录不存在或无法访问',
+      archiving: '正在打包 {n} 个文件...',
+      archiveDone: '打包下载完成',
+      archiveFailed: '打包失败',
+      archiveFailedDetail: '打包失败: {error}',
     },
     prompt: {
       fileName: '输入文件名：',

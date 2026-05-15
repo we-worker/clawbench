@@ -3,7 +3,9 @@ package handler
 import (
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,8 +14,24 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type encoderFunc func(w io.Writer, m image.Image) error
+
 // createTestPNG creates a real PNG file of the given dimensions at relPath under projectDir.
 func createTestPNG(t *testing.T, projectDir, relPath string, width, height int) {
+	t.Helper()
+	createTestImage(t, projectDir, relPath, width, height, png.Encode)
+}
+
+// createTestJPG creates a real JPEG file of the given dimensions at relPath under projectDir.
+func createTestJPG(t *testing.T, projectDir, relPath string, width, height int) {
+	t.Helper()
+	encode := func(w io.Writer, m image.Image) error {
+		return jpeg.Encode(w, m, &jpeg.Options{Quality: 90})
+	}
+	createTestImage(t, projectDir, relPath, width, height, encode)
+}
+
+func createTestImage(t *testing.T, projectDir, relPath string, width, height int, encode encoderFunc) {
 	t.Helper()
 	fullPath := filepath.Join(projectDir, relPath)
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
@@ -26,14 +44,13 @@ func createTestPNG(t *testing.T, projectDir, relPath string, width, height int) 
 	defer f.Close()
 
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	// Fill with a solid color so it's not zero-value
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			img.Set(x, y, color.RGBA{R: 255, G: 100, B: 50, A: 255})
 		}
 	}
-	if err := png.Encode(f, img); err != nil {
-		t.Fatalf("failed to encode PNG: %v", err)
+	if err := encode(f, img); err != nil {
+		t.Fatalf("failed to encode image: %v", err)
 	}
 }
 
@@ -99,6 +116,34 @@ func TestFileThumb(t *testing.T) {
 		createTestFile(t, env.ProjectDir, "readme.md", "# Hello")
 
 		req := newRequest(t, http.MethodGet, "/api/file/thumb?path=readme.md", nil)
+		withProjectCookie(req, env.ProjectDir)
+
+		w := callHandler(FileThumb, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("JPGImage_ReturnsJPEG", func(t *testing.T) {
+		env, teardown := setupTestEnv(t)
+		defer teardown()
+
+		createTestJPG(t, env.ProjectDir, "photo.jpg", 200, 150)
+
+		req := newRequest(t, http.MethodGet, "/api/file/thumb?path=photo.jpg", nil)
+		withProjectCookie(req, env.ProjectDir)
+
+		w := callHandler(FileThumb, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "image/jpeg", w.Header().Get("Content-Type"))
+		assert.Greater(t, w.Body.Len(), 0)
+	})
+
+	t.Run("SVGImage_Returns404", func(t *testing.T) {
+		env, teardown := setupTestEnv(t)
+		defer teardown()
+
+		createTestFile(t, env.ProjectDir, "logo.svg", `<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>`)
+
+		req := newRequest(t, http.MethodGet, "/api/file/thumb?path=logo.svg", nil)
 		withProjectCookie(req, env.ProjectDir)
 
 		w := callHandler(FileThumb, req)

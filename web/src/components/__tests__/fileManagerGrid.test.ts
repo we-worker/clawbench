@@ -115,7 +115,7 @@ describe('view mode persistence', () => {
 })
 
 // ─── Thumbnail eligibility (mirrors FileManagerContent.isThumbable) ───
-const THUMBABLE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.tif'])
+const THUMBABLE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif'])
 
 function isThumbable(entry: { type: string; name: string }): boolean {
   if (entry.type !== 'image' && entry.type !== 'file') return false

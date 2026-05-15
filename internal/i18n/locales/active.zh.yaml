@@ -49,6 +49,7 @@ MissingPath: 缺少路径
 MissingName: 缺少名称
 FileAlreadyExists: 文件已存在
 MissingPathOrDest: 缺少路径或目标
+ArchiveFailed: 打包失败
 MissingShaOrPath: 缺少sha或路径
 MissingSha: 缺少sha
 AlreadyGitRepo: 已经是Git仓库

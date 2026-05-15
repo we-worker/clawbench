@@ -12,6 +12,10 @@ import (
 	"strings"
 
 	"clawbench/internal/model"
+
+	// Register image decoders for image.Decode (init() side-effects)
+	_ "image/gif"
+	_ "image/png"
 )
 
 const (
@@ -23,10 +27,10 @@ const (
 )
 
 // thumbDecodeExts lists extensions that Go's image.Decode can handle
-// (standard library: png, jpeg, gif, bmp, tiff; webp needs golang.org/x/image).
+// (standard library: png, jpeg, gif). BMP and TIFF require golang.org/x/image.
 // SVG is explicitly excluded because it's vector, not raster.
 var thumbDecodeExts = []string{
-	".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".tif",
+	".png", ".jpg", ".jpeg", ".gif",
 }
 
 // FileThumb handles GET /api/file/thumb?path=<path>&w=<width>

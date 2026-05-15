@@ -1,0 +1,136 @@
+package handler
+
+import (
+	"archive/zip"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// ServeFileArchive handles POST /api/file/archive
+// Accepts { paths: ["rel/path1", "rel/path2"] } and streams a zip archive.
+// Paths can be files or directories; each is walked and added to the zip.
+func ServeFileArchive(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	var req struct {
+		Paths []string `json:"paths"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if len(req.Paths) == 0 {
+		writeLocalizedErrorf(w, r, http.StatusBadRequest, "MissingPath")
+		return
+	}
+
+	// Resolve all paths to absolute, validate access
+	type absEntry struct {
+		absPath string
+		relPath string // original relative path for zip entry prefix
+	}
+	var entries []absEntry
+	for _, p := range req.Paths {
+		absPath, ok := resolveAbsPath(w, r, p)
+		if !ok {
+			return
+		}
+		entries = append(entries, absEntry{absPath: absPath, relPath: p})
+	}
+
+	// Compute a friendly zip filename from the first entry
+	zipName := "archive.zip"
+	if len(entries) == 1 {
+		base := filepath.Base(entries[0].relPath)
+		base = strings.TrimRight(base, "/")
+		if base != "" && base != "." {
+			zipName = base + ".zip"
+		}
+	}
+
+	// Set response headers before writing any data
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, zipName))
+	w.Header().Set("Cache-Control", "no-store")
+
+	// Stream zip directly to response writer
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	written := 0
+	for _, entry := range entries {
+		info, err := os.Stat(entry.absPath)
+		if err != nil {
+			slog.Warn("archive: skip missing path", "path", entry.absPath, "err", err)
+			continue
+		}
+
+		if info.IsDir() {
+			err := filepath.Walk(entry.absPath, func(path string, fi os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				rel, err := filepath.Rel(filepath.Dir(entry.absPath), path)
+				if err != nil {
+					return err
+				}
+				rel = filepath.ToSlash(rel)
+
+				if fi.IsDir() {
+					_, err = zw.Create(rel + "/")
+					return err
+				}
+				return addFileToZip(zw, path, rel, fi)
+			})
+			if err != nil {
+				slog.Warn("archive: walk error", "dir", entry.absPath, "err", err)
+			}
+		} else {
+			rel := filepath.Base(entry.absPath)
+			if len(entries) > 1 {
+				parentRel := filepath.Dir(entry.relPath)
+				if parentRel != "." {
+					rel = filepath.ToSlash(parentRel) + "/" + filepath.Base(entry.absPath)
+				}
+			}
+			if err := addFileToZip(zw, entry.absPath, rel, info); err != nil {
+				slog.Warn("archive: add file error", "path", entry.absPath, "err", err)
+			}
+		}
+		written++
+	}
+
+	if written == 0 {
+		slog.Warn("archive: no files written")
+	}
+}
+
+// addFileToZip adds a single file to the zip writer.
+func addFileToZip(zw *zip.Writer, absPath, zipRelPath string, fi os.FileInfo) error {
+	fh, err := zip.FileInfoHeader(fi)
+	if err != nil {
+		return err
+	}
+	fh.Name = zipRelPath
+	fh.Method = zip.Deflate
+
+	w, err := zw.CreateHeader(fh)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Open(absPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = io.Copy(w, f)
+	return err
+}

@@ -639,6 +639,11 @@ func finalizeStreamRun(
 		blocks = convertAskQuestionBlocks(blocks)
 	}
 
+	// Remove tool_use blocks for tool names rejected by the CLI ("not found in agent cli").
+	// This covers both AskUserQuestion (when XML tags are used instead) and hallucinated
+	// tool names like "/commit" (model confuses slash commands with tools).
+	blocks = removeRejectedToolBlocks(blocks)
+
 	// Compute wall-clock duration and inject into metadata
 	wallMs := int(time.Since(wallStart).Milliseconds())
 	if responseMetadata == nil {
@@ -1104,37 +1109,60 @@ func convertAskQuestionBlocks(blocks []model.ContentBlock) []model.ContentBlock 
 		}
 	}
 
-	// Remove failed AskUserQuestion tool_use blocks (Status=="error") that were
-	// rejected by the CLI ("Tool AskUserQuestion not found in agent cli").
-	// When the AI model outputs both a direct tool call AND <ask-question> XML tags,
-	// the CLI rejects the tool call while the XML conversion succeeds — the failed
-	// block is redundant and confusing, so we strip it along with its warning.
-	if len(conversions) > 0 {
-		blocks = removeFailedAskUserQuestionBlocks(blocks)
-	}
+	// Remove tool_use blocks for rejected tool calls (CLI "not found" errors).
+	// These occur when the AI model hallucinates tool names (e.g. "/commit" as a
+	// slash command, or "AskUserQuestion" alongside <ask-question> XML tags).
+	// Must run AFTER convertAskQuestionBlocks so AskUserQuestion conversions
+	// are in place before we strip the rejected originals.
+	blocks = removeRejectedToolBlocks(blocks)
 
 	return blocks
 }
 
-// removeFailedAskUserQuestionBlocks strips AskUserQuestion tool_use blocks that
-// failed (Status=="error") — these are CLI-rejected tool calls that duplicate the
-// <ask-question> XML tag conversion. Also removes warning blocks containing the
-// "not found" error message for AskUserQuestion.
-func removeFailedAskUserQuestionBlocks(blocks []model.ContentBlock) []model.ContentBlock {
+// removeRejectedToolBlocks strips tool_use blocks that were rejected by the CLI
+// (Status=="error" and output contains "not found in agent cli"). These occur when
+// the AI model hallucinates tool names (e.g. "/commit" as a slash command, or
+// "AskUserQuestion" when <ask-question> XML tags are also emitted). The rejected
+// tool_use block and its matching warning are confusing noise for the user.
+// Also removes warning blocks containing the "Tool <name> not found in agent cli" pattern.
+func removeRejectedToolBlocks(blocks []model.ContentBlock) []model.ContentBlock {
+	// Collect names of rejected tools from failed tool_use blocks
+	rejectedNames := make(map[string]bool)
+	for _, block := range blocks {
+		if block.Type == "tool_use" && block.Status == "error" && strings.Contains(block.Output, "not found in agent cli") {
+			rejectedNames[block.Name] = true
+		}
+	}
+	if len(rejectedNames) == 0 {
+		return blocks
+	}
+
 	filtered := make([]model.ContentBlock, 0, len(blocks))
 	for _, block := range blocks {
-		if block.Type == "tool_use" && block.Name == "AskUserQuestion" && block.Status == "error" {
-			slog.Info("removing failed AskUserQuestion tool_use block from CLI",
+		// Remove failed tool_use blocks for rejected tool names
+		if block.Type == "tool_use" && block.Status == "error" && rejectedNames[block.Name] {
+			slog.Info("removing rejected tool_use block from CLI",
+				slog.String("name", block.Name),
 				slog.String("id", block.ID),
 				slog.String("output", block.Output),
 			)
 			continue
 		}
-		if block.Type == "warning" && strings.Contains(block.Text, "AskUserQuestion") && strings.Contains(block.Text, "not found") {
-			slog.Info("removing AskUserQuestion not-found warning block",
-				slog.String("text", block.Text),
-			)
-			continue
+		// Remove warning blocks that reference the rejected tool name with "not found"
+		if block.Type == "warning" && strings.Contains(block.Text, "not found") {
+			matched := false
+			for name := range rejectedNames {
+				if strings.Contains(block.Text, name) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				slog.Info("removing rejected-tool warning block",
+					slog.String("text", block.Text),
+				)
+				continue
+			}
 		}
 		filtered = append(filtered, block)
 	}

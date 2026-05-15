@@ -251,6 +251,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 	register("/api/file/copy", middleware.Auth(ServeFileCopy))
 	register("/api/dir/create", middleware.Auth(ServeDirCreate))
 	register("/api/file/move", middleware.Auth(ServeFileMove))
+	register("/api/file/archive", middleware.Auth(ServeFileArchive))
 	register("/api/recent-projects", middleware.Auth(ServeRecentProjects))
 	register("/api/local-file/", middleware.Auth(ServeLocalFile))
 	register("/api/agents", middleware.Auth(ServeAgents))
