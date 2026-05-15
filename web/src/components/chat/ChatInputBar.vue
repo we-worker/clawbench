@@ -23,7 +23,7 @@
           <Trash2 :size="14" />
         </button>
       </div>
-      <button class="chat-action-btn" :class="{ active: autoSpeechEnabled }"
+      <button class="chat-action-btn auto-speech-btn" :class="{ active: autoSpeechEnabled }"
         @click="$emit('toggle-auto-speech')"
         :title="t('chat.actions.autoSpeech')">
         <Volume2 :size="14" />
@@ -32,7 +32,7 @@
       <button class="chat-action-btn model-chip" ref="modelChipRef"
         :class="{ clickable: isMultiModel(currentAgentId) }"
         @click.stop="toggleModelMenu"
-        :title="isMultiModel(currentAgentId) ? t('chat.actions.switchModel') : currentModelName">
+        :title="isMultiModel(currentAgentId) ? t('chat.actions.switchModel') + ' · ' + currentModelName : currentModelName">
         <Cpu :size="14" />
         <span class="chat-action-label">{{ currentModelName }}</span>
         <ChevronDown v-if="isMultiModel(currentAgentId)" :size="10" />
@@ -40,7 +40,7 @@
       <!-- Thinking effort chip (show only when agent supports it) -->
       <button v-if="thinkingEffortLevels.length > 0" class="chat-action-btn thinking-effort-chip" ref="thinkingEffortChipRef"
         @click.stop="toggleThinkingEffortMenu"
-        :title="t('chat.actions.switchThinkingEffort')">
+        :title="t('chat.actions.switchThinkingEffort') + (thinkingEffortDisplay ? ' · ' + thinkingEffortDisplay : '')">
         <Brain :size="14" />
         <span class="chat-action-label">{{ thinkingEffortDisplay }}</span>
         <ChevronDown :size="10" />
@@ -484,6 +484,7 @@ defineExpose({
   align-items: center;
   gap: 6px;
   padding: 2px 4px 6px;
+  overflow: hidden;
 }
 
 /* Session button group */
@@ -493,6 +494,12 @@ defineExpose({
   border-radius: 20px;
   overflow: hidden;
   border: 1px solid var(--border-color, #e5e5e5);
+  flex-shrink: 0;
+}
+
+/* Auto-speech toggle button */
+.auto-speech-btn {
+  flex-shrink: 0;
 }
 
 .chat-action-group .chat-action-btn {
@@ -972,6 +979,9 @@ defineExpose({
 .model-chip,
 .thinking-effort-chip {
   font-variant-numeric: tabular-nums;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .model-chip:not(.clickable),
@@ -992,7 +1002,6 @@ defineExpose({
 
 .model-chip .chat-action-label,
 .thinking-effort-chip .chat-action-label {
-  max-width: 80px;
   overflow-x: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
