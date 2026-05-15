@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -193,5 +194,83 @@ func TestFileThumb(t *testing.T) {
 
 		w := callHandler(FileThumb, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("TallImage_OutputIsSquareWithDominantColorPadding", func(t *testing.T) {
+		env, teardown := setupTestEnv(t)
+		defer teardown()
+
+		// Create a tall 100x400 image (2:1 height:width ratio)
+		// All pixels are the same solid color (R=255, G=100, B=50)
+		createTestPNG(t, env.ProjectDir, "tall.png", 100, 400)
+
+		req := newRequest(t, http.MethodGet, "/api/file/thumb?path=tall.png&w=50", nil)
+		withProjectCookie(req, env.ProjectDir)
+
+		w := callHandler(FileThumb, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Decode the JPEG response
+		thumb, err := jpeg.Decode(bytes.NewReader(w.Body.Bytes()))
+		assert.NoError(t, err)
+
+		// Thumbnail should be square (50x50) — image fits inside, padded with dominant color
+		bounds := thumb.Bounds()
+		assert.Equal(t, 50, bounds.Dx(), "thumbnail should be square (width)")
+		assert.Equal(t, 50, bounds.Dy(), "thumbnail should be square (height)")
+
+		// The top-left corner should be the dominant color (padding area)
+		paddingColor := thumb.At(0, 0)
+		r, g, _, _ := paddingColor.RGBA()
+		// Dominant color is RGB(255, 100, 50) — allow some JPEG compression tolerance
+		assert.Greater(t, r, uint32(60000), "padding red channel should be close to 255")
+		assert.Greater(t, g, uint32(20000), "padding green channel should be close to 100")
+		assert.Less(t, g, uint32(30000), "padding green channel should be close to 100")
+	})
+
+	t.Run("WideImage_OutputIsSquareWithDominantColorPadding", func(t *testing.T) {
+		env, teardown := setupTestEnv(t)
+		defer teardown()
+
+		// Create a wide 400x100 image
+		createTestPNG(t, env.ProjectDir, "wide.png", 400, 100)
+
+		req := newRequest(t, http.MethodGet, "/api/file/thumb?path=wide.png&w=50", nil)
+		withProjectCookie(req, env.ProjectDir)
+
+		w := callHandler(FileThumb, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		thumb, err := jpeg.Decode(bytes.NewReader(w.Body.Bytes()))
+		assert.NoError(t, err)
+
+		bounds := thumb.Bounds()
+		assert.Equal(t, 50, bounds.Dx(), "thumbnail should be square (width)")
+		assert.Equal(t, 50, bounds.Dy(), "thumbnail should be square (height)")
+
+		// Bottom area is padding with dominant color
+		paddingColor := thumb.At(25, 49)
+		r, _, _, _ := paddingColor.RGBA()
+		assert.Greater(t, r, uint32(60000), "padding red channel should be close to 255")
+	})
+
+	t.Run("SquareImage_OutputIsSquare_NoPaddingNeeded", func(t *testing.T) {
+		env, teardown := setupTestEnv(t)
+		defer teardown()
+
+		createTestPNG(t, env.ProjectDir, "square.png", 200, 200)
+
+		req := newRequest(t, http.MethodGet, "/api/file/thumb?path=square.png&w=50", nil)
+		withProjectCookie(req, env.ProjectDir)
+
+		w := callHandler(FileThumb, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		thumb, err := jpeg.Decode(bytes.NewReader(w.Body.Bytes()))
+		assert.NoError(t, err)
+
+		bounds := thumb.Bounds()
+		assert.Equal(t, 50, bounds.Dx())
+		assert.Equal(t, 50, bounds.Dy())
 	})
 }

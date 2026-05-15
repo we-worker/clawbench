@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"log/slog"
 	"net/http"
@@ -96,7 +97,7 @@ func FileThumb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resize maintaining aspect ratio
+	// Resize maintaining aspect ratio, fit inside a square canvas with dominant-color padding
 	bounds := img.Bounds()
 	srcW, srcH := bounds.Dx(), bounds.Dy()
 	if srcW <= 0 || srcH <= 0 {
@@ -104,21 +105,43 @@ func FileThumb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var dstW, dstH int
-	if srcW <= targetWidth {
-		// Image is already smaller than target — serve as-is
-		dstW, dstH = srcW, srcH
-	} else {
+	// Calculate scaled dimensions to fit within targetWidth × targetWidth square
+	var scaledW, scaledH int
+	if srcW >= srcH {
+		// Landscape or square: width fills the canvas, height is shorter
 		ratio := float64(targetWidth) / float64(srcW)
-		dstW = targetWidth
-		dstH = int(float64(srcH) * ratio)
-		if dstH < 1 {
-			dstH = 1
+		scaledW = targetWidth
+		scaledH = int(float64(srcH) * ratio)
+		if scaledH < 1 {
+			scaledH = 1
+		}
+	} else {
+		// Portrait: height fills the canvas, width is narrower
+		ratio := float64(targetWidth) / float64(srcH)
+		scaledH = targetWidth
+		scaledW = int(float64(srcW) * ratio)
+		if scaledW < 1 {
+			scaledW = 1
 		}
 	}
 
-	// Scale using nearest-neighbor (standard library only, no third-party deps)
-	dst := scaleImage(img, dstW, dstH)
+	// Scale image using nearest-neighbor
+	scaled := scaleImage(img, scaledW, scaledH)
+
+	// Extract dominant color (average of sampled pixels)
+	dominant := dominantColor(img)
+
+	// Create square canvas filled with dominant color, center the scaled image
+	dst := image.NewRGBA(image.Rect(0, 0, targetWidth, targetWidth))
+	drawDominant(dst, dominant)
+	// Center the scaled image on the canvas
+	offsetX := (targetWidth - scaledW) / 2
+	offsetY := (targetWidth - scaledH) / 2
+	for y := 0; y < scaledH; y++ {
+		for x := 0; x < scaledW; x++ {
+			dst.Set(offsetX+x, offsetY+y, scaled.At(x, y))
+		}
+	}
 
 	// Encode as JPEG to buffer first to avoid partial response on encode error
 	var buf bytes.Buffer
@@ -147,6 +170,56 @@ func scaleImage(src image.Image, dstW, dstH int) *image.RGBA {
 		}
 	}
 	return dst
+}
+
+// dominantColor samples pixels from the image and returns the average color.
+// Uses a grid sampling approach for performance (max ~400 samples).
+func dominantColor(src image.Image) color.RGBA {
+	bounds := src.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return color.RGBA{R: 128, G: 128, B: 128, A: 255}
+	}
+
+	// Sample on a grid — step size chosen so we get at most ~20 samples per axis
+	stepX := w / 20
+	stepY := h / 20
+	if stepX < 1 {
+		stepX = 1
+	}
+	if stepY < 1 {
+		stepY = 1
+	}
+
+	var rSum, gSum, bSum uint64
+	var count uint64
+	for y := bounds.Min.Y; y < bounds.Max.Y; y += stepY {
+		for x := bounds.Min.X; x < bounds.Max.X; x += stepX {
+			r, g, b, _ := src.At(x, y).RGBA()
+			rSum += uint64(r >> 8)
+			gSum += uint64(g >> 8)
+			bSum += uint64(b >> 8)
+			count++
+		}
+	}
+	if count == 0 {
+		return color.RGBA{R: 128, G: 128, B: 128, A: 255}
+	}
+	return color.RGBA{
+		R: uint8(rSum / count),
+		G: uint8(gSum / count),
+		B: uint8(bSum / count),
+		A: 255,
+	}
+}
+
+// drawDominant fills the destination image with the given color.
+func drawDominant(dst *image.RGBA, c color.RGBA) {
+	for y := 0; y < dst.Bounds().Dy(); y++ {
+		for x := 0; x < dst.Bounds().Dx(); x++ {
+			dst.SetRGBA(x, y, c)
+		}
+	}
 }
 
 // isThumbDecodable checks if the file extension is one we can decode with Go's

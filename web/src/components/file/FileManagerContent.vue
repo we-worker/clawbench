@@ -1238,8 +1238,7 @@ function doDelete() {
     width: 28px;
     height: 28px;
     border-radius: 4px;
-    object-fit: cover;
-    background: var(--bg-tertiary, #f5f5f5);
+    object-fit: contain;
 }
 
 .file-name {
@@ -1360,7 +1359,7 @@ function doDelete() {
 .grid-thumb img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
 }
 
