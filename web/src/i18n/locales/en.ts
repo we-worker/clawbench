@@ -247,6 +247,9 @@ export default {
       copy: 'Copy',
       copied: 'Copied',
     },
+    localhost: {
+      openFailed: 'Failed to open localhost URL',
+    },
   },
   session: {
     title: 'Sessions',

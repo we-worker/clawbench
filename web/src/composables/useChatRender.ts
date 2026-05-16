@@ -3,6 +3,7 @@ import { marked, DOMPurify } from '@/utils/globals.ts'
 import { formatToolInput } from '@/utils/renderToolDetail.ts'
 import { renderKatexInString, renderMermaidInElement } from '@/composables/useMarkdownRenderer.ts'
 import { useFilePathAnnotation } from '@/composables/useFilePathAnnotation.ts'
+import { useLocalhostAnnotation } from '@/composables/useLocalhostAnnotation.ts'
 import { store } from '@/stores/app.ts'
 import { apiGet } from '@/utils/api.ts'
 import { createTaskBlockStore } from '@/utils/taskBlockStore.ts'
@@ -27,6 +28,7 @@ import {
 export function useChatRender(options) {
   const { messages, theme, currentSessionId } = options
   const { annotateFilePaths, verifyFilePaths } = useFilePathAnnotation()
+  const { annotateLocalhostUrls } = useLocalhostAnnotation()
 
   const blockTasks = reactive({})
   const blockAskQuestions = reactive({})
@@ -128,7 +130,7 @@ export function useChatRender(options) {
       html = renderKatexInString(html)
     }
 
-    html = DOMPurify.sanitize(html, { ADD_TAGS: ['math', 'button'], ADD_ATTR: ['data-file-path', 'title'] })
+    html = DOMPurify.sanitize(html, { ADD_TAGS: ['math', 'button'], ADD_ATTR: ['data-file-path', 'data-url', 'data-port', 'data-protocol', 'title'] })
     html = html.replace(/<table>/g, '<div class="table-wrap"><table>').replace(/<\/table>/g, '</table></div>')
 
     if (!skipEnhancements) {
@@ -174,6 +176,8 @@ export function useChatRender(options) {
           if (el) verifyFilePaths(uniquePaths, el)
         })
       }
+      // Annotate localhost URLs (e.g. http://localhost:30080) with clickable tags
+      html = annotateLocalhostUrls(html)
     }
 
     return html

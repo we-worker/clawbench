@@ -352,6 +352,23 @@ export function usePortForward() {
     }
   }
 
+  /**
+   * Ensure a port is registered for forwarding, registering it if needed,
+   * and wait for it to appear in the ports list (max 5s).
+   * Used by localhost URL tag click handler to auto-setup port forwarding.
+   */
+  async function ensurePortRegistered(port: number, protocol: string): Promise<void> {
+    const exists = ports.value.some(p => p.port === port)
+    if (exists) return
+    await registerPort(port, '', protocol)
+    // Wait for port to appear in the list (max 5s, poll every 200ms)
+    for (let i = 0; i < 25; i++) {
+      await new Promise(r => setTimeout(r, 200))
+      if (ports.value.some(p => p.port === port)) return
+    }
+    throw new Error(`Port ${port} did not appear in forwarding list after 5s`)
+  }
+
   return {
     ports,
     detectedPorts,
@@ -372,5 +389,6 @@ export function usePortForward() {
     checkTunnelHealth,
     openPort,
     openInExternalBrowser,
+    ensurePortRegistered,
   }
 }

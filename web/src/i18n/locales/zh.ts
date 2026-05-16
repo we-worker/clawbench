@@ -247,6 +247,9 @@ export default {
       copy: '复制',
       copied: '已复制',
     },
+    localhost: {
+      openFailed: '打开本地地址失败',
+    },
   },
   session: {
     title: '会话',
