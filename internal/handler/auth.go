@@ -122,12 +122,27 @@ func extractIP(r *http.Request) string {
 	return host
 }
 
+// isLocalhost returns true if the request originates from the local machine.
+func isLocalhost(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
+}
+
 // --- Auth handlers ---
 
 // ServeAuthCheck returns 200 if the session cookie is valid, 401 otherwise.
+// Localhost requests are always considered authenticated (same as middleware.Auth).
 func ServeAuthCheck(w http.ResponseWriter, r *http.Request) {
 	if model.SessionToken == "" {
 		// No password set, always authenticated
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	// Localhost (CLI subcommands / local browser) — always allowed
+	if isLocalhost(r) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
