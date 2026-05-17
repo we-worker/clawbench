@@ -178,7 +178,7 @@ export function useAutoSpeech() {
         let errorMsg = gt('autoSpeech.generateFailed', { status: resp.status })
         try {
           const errData = await resp.json()
-          if (errData.error) errorMsg = errData.error
+          if (errData.error) errorMsg = gt('autoSpeech.generateFailedDetail', { error: errData.error })
         } catch { /* ignore parse error */ }
         throw new Error(errorMsg)
       }
@@ -256,7 +256,7 @@ export function useAutoSpeech() {
 
         // Handle synthesize failure
         if (result.synthesizeFailed) {
-          reportError(result.synthesizeError || gt('autoSpeech.synthesisFailed'))
+          reportError(result.synthesizeError ? gt('autoSpeech.synthesisFailedDetail', { error: result.synthesizeError }) : gt('autoSpeech.synthesisFailed'))
           activeId.value = ''
           playingSummary.value = ''
           state.value = 'idle'
@@ -273,7 +273,7 @@ export function useAutoSpeech() {
 
         // Warn if summarization failed (fell back to full text)
         if (result.summarizeFailed) {
-          toast.show(gt('autoSpeech.summaryFailed'), { icon: '🔊', type: 'info', duration: 3000 })
+          toast.show(gt('autoSpeech.summaryFailed'), { icon: '⚠️', type: 'error', duration: 3000 })
         }
 
         // Store the AI-generated summary for display
@@ -291,7 +291,7 @@ export function useAutoSpeech() {
       if (err?.name === 'NotAllowedError') {
         message = gt('autoSpeech.autoplayBlocked')
       } else if (err?.message) {
-        message = err.message
+        message = gt('autoSpeech.generateFailedDetail', { error: err.message })
       }
       reportError(message)
       activeId.value = ''

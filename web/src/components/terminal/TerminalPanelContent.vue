@@ -426,7 +426,7 @@ function initTerminal() {
       }
     },
     onExit: (code) => {
-      toast.show(t('terminal.ptyExited'))
+      toast.show(t('terminal.ptyExited'), { type: 'info' })
     },
     onError: (message, code) => {
       // Error displayed via overlay
@@ -648,7 +648,7 @@ function handleCopyOutput() {
   }
   const text = lines.filter(l => l.trim()).join('\n')
   navigator.clipboard.writeText(text).catch(() => {})
-  toast.show(t('common.copied') || 'Copied')
+  toast.show(t('common.copied'), { type: 'success', duration: 1500 })
   focusTerminal()
 }
 

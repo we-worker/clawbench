@@ -17,19 +17,19 @@ import { computeGraphData, LANE_WIDTH, GRAPH_LEFT_PADDING } from '@/utils/gitGra
 const ROW_HEIGHT = 64
 
 // ─── Coordinate helpers (mirrors gitGraph.ts) ───
-function laneCx(lane) {
+function laneCx(lane: number) {
   return lane * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PADDING
 }
 
-function rowCy(row) {
+function rowCy(row: number) {
   return row * ROW_HEIGHT + ROW_HEIGHT / 2
 }
 
 // ─── Helper: extract connection info from graph data ───
-function getGraphInfo(commits, rowHeight = ROW_HEIGHT, previousShaToLane) {
+function getGraphInfo(commits: any[], rowHeight = ROW_HEIGHT, previousShaToLane?: any) {
   const { nodes, lines, laneCount, graphWidth, shaToLane } = computeGraphData(
     commits, rowHeight, previousShaToLane
-  )
+  ) as { nodes: any[]; lines: any[]; laneCount: number; graphWidth: number; shaToLane: any }
 
   const nodeByRow = new Map()
   const nodeBySha = new Map()
@@ -84,15 +84,6 @@ function getGraphInfo(commits, rowHeight = ROW_HEIGHT, previousShaToLane) {
   }
 
   return { nodes, lines, laneCount, graphWidth, connections, nodeByRow, nodeBySha, shaToLane }
-}
-
-// ─── Find continuation lines for a given lane's bottommost node ───
-// Utility kept for documentation; disable eslint instead
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function _findContinuationLines(_lines: any[], _nodeLane: number, _nodeRow: number) {
-  const x = laneCx(nodeLane)
-  const y1 = rowCy(nodeRow) + 5
-  return lines.filter(l => l.fade && l.path.startsWith(`M${x},${y1}`))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -651,7 +642,7 @@ describe('full repos have zero continuation lines', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('every lane with unloaded parents has continuation lines', () => {
-  function verifyLanesHaveContinuations(commits) {
+  function verifyLanesHaveContinuations(commits: any[]) {
     const { nodes, lines } = getGraphInfo(commits)
     const svgBottom = commits.length * ROW_HEIGHT + ROW_HEIGHT
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ref, reactive, nextTick, computed, isReactive, toRaw } from 'vue'
+import { ref, nextTick, computed, isReactive, toRaw } from 'vue'
 import {
   FILE_MODIFYING_TOOLS,
   findLastBlockOfType,
@@ -392,7 +392,7 @@ describe('tool_result event handling', () => {
     const blocks: any[] = [
       { type: 'tool_use', name: 'Read', id: 'r4', input: { file_path: '/c.go' }, done: true, output: '', status: '' },
     ]
-    const data = { id: 'r4', status: 'success' }
+    const data: any = { id: 'r4', status: 'success' }
     const existing = blocks.find(b => b.type === 'tool_use' && b.id === data.id)
     if (existing) {
       if (data.output !== undefined) existing.output = data.output
@@ -406,7 +406,7 @@ describe('tool_result event handling', () => {
 // Test cancelled event handling
 describe('cancelled event handling', () => {
   it('marks message as cancelled and removes streaming', () => {
-    const msg = { role: 'assistant', content: '', blocks: [], streaming: true }
+    const msg: any = { role: 'assistant', content: '', blocks: [], streaming: true }
     msg.cancelled = true
     delete msg.streaming
     if (msg.blocks) {
@@ -430,7 +430,7 @@ describe('cancelled event handling', () => {
   })
 
   it('does not add error block when content exists', () => {
-    const msg = { role: 'assistant', content: '', blocks: [{ type: 'text', text: 'partial' }], streaming: true }
+    const msg: any = { role: 'assistant', content: '', blocks: [{ type: 'text', text: 'partial' }], streaming: true }
     if ((!msg.blocks || msg.blocks.length === 0) && !msg.content) {
       msg.blocks = [{ type: 'error', text: 'Cancelled' }]
     }
@@ -438,7 +438,7 @@ describe('cancelled event handling', () => {
   })
 
   it('marks unfinished tool_use blocks as done on cancel', () => {
-    const msg = {
+    const msg: any = {
       role: 'assistant',
       content: '',
       blocks: [

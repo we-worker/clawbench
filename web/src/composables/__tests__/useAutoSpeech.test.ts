@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { extractSpeakableText } from '@/composables/useAutoSpeech'
 
 // Mock useToast since it's used at module level

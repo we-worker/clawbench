@@ -27,7 +27,7 @@ import {
  * When streaming=true, only marked + DOMPurify + table-wrap runs.
  * When streaming=false, the full pipeline runs.
  */
-function renderTextBlockDeferred(text, _msgId, _blockIdx, streaming = false) {
+function renderTextBlockDeferred(text: string, _msgId: string, _blockIdx: number, streaming = false) {
   if (streaming) {
     // Streaming: pure markdown only, no structured detection
     // This is the fast path — marked + DOMPurify + table-wrap

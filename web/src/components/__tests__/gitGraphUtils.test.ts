@@ -4,8 +4,8 @@ import { computeGraphData, LANE_COLORS, refLabelWidth, refLabelText, refLabelBg 
 const ROW_HEIGHT = 64
 
 // ─── Helper: extract connection info from graph data ───
-function getConnections(commits, rowHeight = ROW_HEIGHT) {
-  const { nodes, lines, laneCount, graphWidth } = computeGraphData(commits, rowHeight)
+function getConnections(commits: any[], rowHeight = ROW_HEIGHT) {
+  const { nodes, lines, laneCount, graphWidth } = computeGraphData(commits, rowHeight, undefined)
 
   // Build node index by row
   const nodeByRow = new Map()
@@ -38,7 +38,7 @@ function getConnections(commits, rowHeight = ROW_HEIGHT) {
     }
   }
 
-  return { nodes, lines, laneCount, graphWidth, connections, nodeByRow }
+  return { nodes, lines, laneCount, graphWidth, connections: connections as any[], nodeByRow }
 }
 
 // ─── Test data: all 7 git-graph-repos ───
@@ -123,7 +123,7 @@ const OPEN_BRANCHES = [
 
 describe('computeGraphData', () => {
   it('returns empty data for empty input', () => {
-    const result = computeGraphData([], ROW_HEIGHT)
+    const result = computeGraphData([], ROW_HEIGHT, undefined) as any
     expect(result.nodes).toEqual([])
     expect(result.lines).toEqual([])
     expect(result.laneCount).toBe(0)
@@ -131,7 +131,7 @@ describe('computeGraphData', () => {
   })
 
   it('returns empty data for null input', () => {
-    const result = computeGraphData(null, ROW_HEIGHT)
+    const result = computeGraphData(null, ROW_HEIGHT, undefined) as any
     expect(result.nodes).toEqual([])
   })
 })
@@ -192,7 +192,7 @@ describe('02-single-merge', () => {
   })
 
   it('merge commit forks to feature branch', () => {
-    const fork = connections.find(c => c.type === 'FORK')
+    const fork = connections.find(c => c.type === 'FORK')!
     expect(fork.fromRow).toBe(1) // merge
     expect(fork.toRow).toBe(2)   // feature: commit 2
     expect(fork.fromLane).toBe(0)
@@ -200,7 +200,7 @@ describe('02-single-merge', () => {
   })
 
   it('feature branch merges back into main', () => {
-    const mergeIn = connections.find(c => c.type === 'MERGE-IN')
+    const mergeIn = connections.find(c => c.type === 'MERGE-IN')!
     expect(mergeIn.fromRow).toBe(3) // feature: commit 1
     expect(mergeIn.toRow).toBe(5)   // main: commit 2
     expect(mergeIn.fromLane).toBe(1)
@@ -208,7 +208,7 @@ describe('02-single-merge', () => {
   })
 
   it('generates correct number of lines (VERT=1 path, FORK=1 path, MERGE-IN=2 paths)', () => {
-    const { lines } = computeGraphData(SINGLE_MERGE, ROW_HEIGHT)
+    const { lines } = computeGraphData(SINGLE_MERGE, ROW_HEIGHT, undefined) as any
     // 5 VERT + 1 FORK + 2 MERGE-IN = 8 line paths
     expect(lines).toHaveLength(8)
   })
@@ -260,13 +260,13 @@ describe('03-multi-branch', () => {
   })
 
   it('feature-b merge-in spans from row 4 to row 9', () => {
-    const bMerge = connections.find(c => c.type === 'MERGE-IN' && c.fromLane === 1)
+    const bMerge = connections.find(c => c.type === 'MERGE-IN' && c.fromLane === 1)!
     expect(bMerge.fromRow).toBe(4)
     expect(bMerge.toRow).toBe(9)
   })
 
   it('feature-a merge-in spans from row 7 to row 9', () => {
-    const aMerge = connections.find(c => c.type === 'MERGE-IN' && c.fromLane === 2)
+    const aMerge = connections.find(c => c.type === 'MERGE-IN' && c.fromLane === 2)!
     expect(aMerge.fromRow).toBe(7)
     expect(aMerge.toRow).toBe(9)
   })
@@ -403,7 +403,7 @@ describe('WT (Working Tree) handling', () => {
       { sha: 'HEAD', parents: [], msg: '工作区变更', isWT: true },
       { sha: 'a1', parents: [], msg: 'commit 1' },
     ]
-    const { nodes } = computeGraphData(commits, ROW_HEIGHT)
+    const { nodes } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
     expect(nodes[0].lane).toBe(0)
     expect(nodes[0].isWT).toBe(true)
     expect(nodes[0].color).toBe('#f59e0b')
@@ -414,7 +414,7 @@ describe('WT (Working Tree) handling', () => {
       { sha: 'HEAD', parents: ['a1'], msg: '工作区变更', isWT: true },
       { sha: 'a1', parents: [], msg: 'commit 1' },
     ]
-    const { lines } = computeGraphData(commits, ROW_HEIGHT)
+    const { lines } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
     // WT is skipped in connection generation, so no lines
     expect(lines).toHaveLength(0)
   })
@@ -428,11 +428,11 @@ describe('node positioning', () => {
       { sha: 'b1', parents: [], msg: 'branch' },
       { sha: 'a3', parents: [], msg: 'root' },
     ]
-    const { nodes } = computeGraphData(commits, ROW_HEIGHT)
+    const { nodes }: any = computeGraphData(commits, ROW_HEIGHT, undefined)
     // Lane 0: x = 0*20 + 10 + 10 = 20
     // Lane 1: x = 1*20 + 10 + 10 = 40
-    const lane0Nodes = nodes.filter(n => n.lane === 0)
-    const lane1Nodes = nodes.filter(n => n.lane === 1)
+    const lane0Nodes: any[] = nodes.filter((n: any) => n.lane === 0)
+    const lane1Nodes: any[] = nodes.filter((n: any) => n.lane === 1)
     for (const n of lane0Nodes) {
       expect(n.cx).toBe(20)
     }
@@ -446,7 +446,7 @@ describe('node positioning', () => {
       { sha: 'a1', parents: [], msg: 'c1' },
       { sha: 'a2', parents: [], msg: 'c2' },
     ]
-    const { nodes } = computeGraphData(commits, ROW_HEIGHT)
+    const { nodes } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
     expect(nodes[0].cy).toBe(ROW_HEIGHT / 2)
     expect(nodes[1].cy).toBe(ROW_HEIGHT + ROW_HEIGHT / 2)
   })
@@ -457,7 +457,7 @@ describe('graph dimensions', () => {
     const commits = [
       { sha: 'a1', parents: [], msg: 'c1' },
     ]
-    const { graphWidth, laneCount } = computeGraphData(commits, ROW_HEIGHT)
+    const { graphWidth, laneCount } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
     expect(laneCount).toBe(1)
     // 1 * 20 + 10 * 2 = 40
     expect(graphWidth).toBe(40)
@@ -469,7 +469,7 @@ describe('graph dimensions', () => {
       { sha: 'b1', parents: [], msg: 'branch' },
       { sha: 'a2', parents: [], msg: 'root' },
     ]
-    const { graphWidth, laneCount } = computeGraphData(commits, ROW_HEIGHT)
+    const { graphWidth, laneCount } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
     expect(laneCount).toBeGreaterThanOrEqual(2)
     expect(graphWidth).toBeGreaterThanOrEqual(60)
   })
@@ -515,7 +515,7 @@ describe('octopus merge cascade fork rendering', () => {
       { sha: 'fa', parents: ['root'], msg: 'fa' },
       { sha: 'root', parents: [], msg: 'root' },
     ]
-    const { lines } = computeGraphData(commits, ROW_HEIGHT)
+    const { lines } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
 
     // The FORK from L0 to L3 (mrg -> fa) should use cascade, generating
     // more line segments than a simple bezier (1 path)
@@ -530,10 +530,10 @@ describe('octopus merge cascade fork rendering', () => {
   it('non-adjacent fork with short vertical distance uses simple bezier', () => {
     // 03-multi-branch: merge: feature-a (L0) -> feature-a: work 2 (L2)
     // Only 1 row gap - not enough space for cascade
-    const { lines } = computeGraphData(MULTI_BRANCH, ROW_HEIGHT)
+    const { lines }: any = computeGraphData(MULTI_BRANCH, ROW_HEIGHT, undefined)
 
     // Count bezier curves (paths with 'C' command) that start from L0
-    const forkBeziers = lines.filter(l => l.path.includes('C') && l.path.startsWith('M20,'))
+    const forkBeziers: any[] = lines.filter((l: any) => l.path.includes('C') && l.path.startsWith('M20,'))
     // The FORK from R5[L0] to R6[L2] should be a simple bezier, not cascade
     // A simple bezier is 1 line path, cascade would be multiple paths
     expect(forkBeziers.length).toBeGreaterThanOrEqual(1)
@@ -543,11 +543,11 @@ describe('octopus merge cascade fork rendering', () => {
 describe('merge-in endpoint offset', () => {
   it('multiple merge-ins arriving at same parent have offset endpoints', () => {
     // 07-open-branches: 2 merge-ins arrive at row 4 (main: second)
-    const { lines } = computeGraphData(OPEN_BRANCHES, ROW_HEIGHT)
+    const { lines }: any = computeGraphData(OPEN_BRANCHES, ROW_HEIGHT, undefined)
 
     // Find MERGE-IN bezier lines (paths with 'C' that end near row 4 center)
     const row4Cy = 4 * ROW_HEIGHT + ROW_HEIGHT / 2 // 207
-    const mergeInBeziers = lines.filter(l => {
+    const mergeInBeziers: any[] = lines.filter((l: any) => {
       if (!l.path.includes('C')) return false
       // Check if the path ends near the L0 x position at row 4
       return l.path.endsWith('20,' + row4Cy) || l.path.includes('20,2') // rough check
@@ -556,12 +556,12 @@ describe('merge-in endpoint offset', () => {
     // With 2 merge-ins, their bezier endpoints should be slightly different
     // (offset by ±4px from center)
     if (mergeInBeziers.length >= 2) {
-      const yValues = mergeInBeziers.map(l => {
+      const yValues: number[] = mergeInBeziers.map((l: any) => {
         const match = l.path.match(/(\d+\.\d+|\d+)$/)
         return match ? parseFloat(match[1]) : 0
       })
       // At least 2 different Y values (offset prevents overlap)
-      const uniqueYs = new Set(yValues.map(y => Math.round(y)))
+      const uniqueYs = new Set(yValues.map((y: number) => Math.round(y)))
       expect(uniqueYs.size).toBeGreaterThanOrEqual(1) // they may be close but not identical
     }
   })
@@ -576,7 +576,7 @@ describe('lazy-load lane stability (previousShaToLane)', () => {
       { sha: 'm2', parents: ['m3', 'f1'], msg: 'merge feature' },
       { sha: 'f1', parents: ['m3'], msg: 'feature: work' },
     ]
-    const { nodes: firstNodes, shaToLane: firstLaneMap } = computeGraphData(firstPage, ROW_HEIGHT)
+    const { nodes: firstNodes, shaToLane: firstLaneMap } = computeGraphData(firstPage, ROW_HEIGHT, undefined) as any
 
     // Record lane assignments from first page
     const m1Lane = firstNodes[0].lane
@@ -611,7 +611,7 @@ describe('lazy-load lane stability (previousShaToLane)', () => {
       { sha: 'm2', parents: ['m3', 'f1'], msg: 'merge feature' },
       { sha: 'f1', parents: ['m3'], msg: 'feature: work' },
     ]
-    const { nodes: firstNodes } = computeGraphData(firstPage, ROW_HEIGHT)
+    const { nodes: firstNodes } = computeGraphData(firstPage, ROW_HEIGHT, undefined) as any
 
     // f1 should be on a different lane from m2 (since m3 is not visible,
     // f1 doesn't connect to the main line through first-parent chain)
@@ -625,12 +625,12 @@ describe('lazy-load lane stability (previousShaToLane)', () => {
       { sha: 'f1', parents: ['m3'], msg: 'feature: work' },
       { sha: 'm3', parents: [], msg: 'root' },
     ]
-    computeGraphData(fullPage, ROW_HEIGHT)
+    computeGraphData(fullPage, ROW_HEIGHT, undefined) as any
 
     // Without previousShaToLane, f1 may now be on the same lane as m3 (main line)
     // This is the lane shift that causes visual splitting
     // We just verify that with previousShaToLane, it stays the same
-    const { shaToLane: firstLaneMap } = computeGraphData(firstPage, ROW_HEIGHT)
+    const { shaToLane: firstLaneMap } = computeGraphData(firstPage, ROW_HEIGHT, undefined) as any
     const { nodes: stableNodes } = computeGraphData(fullPage, ROW_HEIGHT, firstLaneMap)
     expect(stableNodes[2].lane).toBe(firstNodes[2].lane)
   })
@@ -640,14 +640,14 @@ describe('lazy-load lane stability (previousShaToLane)', () => {
       { sha: 'a1', parents: ['a2'], msg: 'c1' },
       { sha: 'a2', parents: [], msg: 'c2' },
     ]
-    const { shaToLane } = computeGraphData(commits, ROW_HEIGHT)
+    const { shaToLane } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
     expect(shaToLane).toBeInstanceOf(Map)
     expect(shaToLane.has('a1')).toBe(true)
     expect(shaToLane.has('a2')).toBe(true)
   })
 
   it('empty commits returns empty shaToLane', () => {
-    const { shaToLane, nodes, lines } = computeGraphData([], ROW_HEIGHT)
+    const { shaToLane, nodes, lines } = computeGraphData([], ROW_HEIGHT, undefined) as any
     expect(shaToLane).toBeInstanceOf(Map)
     expect(shaToLane.size).toBe(0)
     expect(nodes).toHaveLength(0)
@@ -661,7 +661,7 @@ describe('lazy-load lane stability (previousShaToLane)', () => {
       { sha: 'm2', parents: ['m3'], msg: 'c2' },
       { sha: 'm3', parents: ['m4'], msg: 'c3' },
     ]
-    const { nodes: nodes1, shaToLane: lanes1 } = computeGraphData(page1, ROW_HEIGHT)
+    const { nodes: nodes1, shaToLane: lanes1 } = computeGraphData(page1, ROW_HEIGHT, undefined) as any
     const laneM1 = nodes1[0].lane
 
     // Page 2: append 2 more commits
@@ -741,7 +741,7 @@ describe('lane compression for non-overlapping branches', () => {
 
 describe('branchNames on nodes', () => {
   it('attaches branch names to nodes by walking first-parent chain from branch refs', () => {
-    const { nodes } = getConnections(SINGLE_MERGE)
+    const { nodes } = getConnections(SINGLE_MERGE) as any
     // feature ref is on row 2 (feature: commit 2)
     // feature's first-parent chain: f2 -> f1 -> m2
     // So f2, f1, m2 should all have 'feature' in branchNames
@@ -759,12 +759,12 @@ describe('branchNames on nodes', () => {
       { sha: 'HEAD', parents: [], msg: '工作区变更', isWT: true },
       { sha: 'a1', parents: [], msg: 'commit 1' },
     ]
-    const { nodes } = computeGraphData(commits, ROW_HEIGHT)
+    const { nodes } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
     expect(nodes[0].branchNames).toEqual([])
   })
 
   it('commits with no branch refs have empty branchNames', () => {
-    const { nodes } = getConnections(LINEAR)
+    const { nodes } = getConnections(LINEAR) as any
     for (const n of nodes) {
       expect(n.branchNames).toEqual([])
     }
@@ -775,8 +775,7 @@ describe('branchNames on nodes', () => {
     // feature-a chain: aw2 -> aw1 -> ms
     // feature-b chain: bw1 -> ms
     // So ms should have both 'feature-a' and 'feature-b' in branchNames
-    const { nodes: msNodes } = getConnections(OPEN_BRANCHES)
-    const msNode = msNodes[4] // main: second (row 4)
+    void getConnections(OPEN_BRANCHES)
 
     // Note: OPEN_BRANCHES doesn't have branch refs in the test data,
     // so branchNames will be empty. Let's test with refs instead.
@@ -790,7 +789,7 @@ describe('branchNames on nodes', () => {
       { sha: 'brB', parents: ['fork'], msg: 'branch-b work', refs: ['feature-b'] },
       { sha: 'root', parents: [], msg: 'root' },
     ]
-    const { nodes } = computeGraphData(commits, ROW_HEIGHT)
+    const { nodes } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
 
     // root (row 4) is reachable from main, feature-a, and feature-b
     const rootNode = nodes[4]
@@ -809,7 +808,7 @@ describe('branchNames on nodes', () => {
     const commits = [
       { sha: 'a1', parents: [], msg: 'tagged commit', refs: ['HEAD -> main', 'tag: v1.0', 'main'] },
     ]
-    const { nodes } = computeGraphData(commits, ROW_HEIGHT)
+    const { nodes } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
     expect(nodes[0].branchNames).toContain('main')
     expect(nodes[0].branchNames).not.toContain('HEAD -> main')
     expect(nodes[0].branchNames).not.toContain('tag: v1.0')

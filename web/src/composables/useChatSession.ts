@@ -197,7 +197,8 @@ export function useChatSession(options: UseChatSessionOptions) {
       switching.value = false
     } catch (err) {
       console.error('Failed to load chat history:', err)
-      toast.show(err.message || gt('chat.session.loadHistoryFailed'), { icon: '⚠️', type: 'error' })
+      const _msg = err instanceof Error ? err.message : ''
+      toast.show(_msg ? gt('chat.session.loadHistoryFailedDetail', { error: _msg }) : gt('chat.session.loadHistoryFailed'), { icon: '⚠️', type: 'error' })
       switching.value = false
     }
   }
@@ -324,7 +325,8 @@ export function useChatSession(options: UseChatSessionOptions) {
       toast.show(gt('chat.session.created', { count: data.sessionCount ?? '', max: maxCount }), { icon: '✨', type: 'success', duration: 1500 })
     } catch (err) {
       console.error('Failed to create session:', err)
-      toast.show(err.message || gt('chat.session.createSessionFailed'), { icon: '⚠️', type: 'error' })
+      const _msg = err instanceof Error ? err.message : ''
+      toast.show(_msg ? gt('chat.session.createSessionFailedDetail', { error: _msg }) : gt('chat.session.createSessionFailed'), { icon: '⚠️', type: 'error' })
     }
   }
 

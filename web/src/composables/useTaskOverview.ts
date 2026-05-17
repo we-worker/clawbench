@@ -43,7 +43,8 @@ export function useTaskOverview(options: UseTaskOverviewOptions) {
         await loadTasks()
       }
     } catch (err: any) {
-      toast.show(err?.message || gt('task.actionFailed'), { type: 'error' })
+      const _msg = err?.message || ''
+      toast.show(_msg ? gt('task.actionFailedDetail', { error: _msg }) : gt('task.actionFailed'), { icon: '⚠️', type: 'error' })
     } finally {
       actionLoading.value = false
     }
