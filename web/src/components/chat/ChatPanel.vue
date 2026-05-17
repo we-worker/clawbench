@@ -433,7 +433,14 @@ async function sendMessage(text, extraFilePaths) {
 
     // If AI is generating, enqueue the message instead of sending immediately
     if (loading.value) {
-      manager.enqueueMessage(inputText, extraFilePaths, attachedFiles.value, pendingFiles.value.map(f => f.path))
+      // Capture file arrays before clearing (they're passed by reference)
+      const capturedAttached = attachedFiles.value
+      const capturedPending = pendingFiles.value.map(f => f.path)
+      // Clear input state synchronously so user sees immediate feedback
+      attachedFiles.value = []
+      inputBarRef.value?.clearInput()
+      clearPendingFiles()
+      manager.enqueueMessage(inputText, extraFilePaths, capturedAttached, capturedPending)
       return
     }
 

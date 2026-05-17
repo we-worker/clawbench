@@ -104,7 +104,6 @@ export function useSessionManager(options: UseSessionManagerOptions) {
       toast.show(gt('session.queueFailed'), { icon: '⚠️', type: 'error' })
     }
 
-    clearInputState()
     scrollBottom(true)
   }
 
