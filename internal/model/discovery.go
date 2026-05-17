@@ -56,16 +56,36 @@ var BackendRegistry = []BackendSpec{
 		ThinkingEffortLevels: []string{"off", "minimal", "low", "medium", "high", "xhigh"}},
 }
 
-// CheckCLIExists runs `cmd --version` with a 5-second timeout.
-// Returns true if the command exits with code 0.
+// CheckCLIExists checks whether a CLI command is available on the system.
+// It first tries `cmd --version` with a 5-second timeout.
+// If that fails, it falls back to exec.LookPath — some CLIs (especially Node.js ones)
+// may return non-zero exit codes for --version when run without a TTY or in certain
+// environments, but the binary itself is still present and functional.
 func CheckCLIExists(cmd string) bool {
 	if cmd == "" {
 		return false
 	}
+
+	// Primary check: run `cmd --version`
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := exec.CommandContext(ctx, cmd, "--version").Run()
-	return err == nil
+	if err == nil {
+		return true
+	}
+
+	// Fallback: check if the binary exists on PATH
+	// This handles cases where --version fails (non-zero exit, timeout, etc.)
+	// but the CLI is actually installed and usable for its primary function.
+	if _, lookupErr := exec.LookPath(cmd); lookupErr == nil {
+		slog.Warn("CLI --version failed but binary found on PATH, keeping agent",
+			"cmd", cmd, "version_error", err)
+		return true
+	}
+
+	slog.Warn("CLI not found on PATH",
+		"cmd", cmd, "version_error", err)
+	return false
 }
 
 // DiscoverModels runs the CLI's model-list command and returns parsed models.
