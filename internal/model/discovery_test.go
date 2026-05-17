@@ -793,3 +793,30 @@ func TestSyncDiscoverModels_CreatesCacheFiles(t *testing.T) {
 		assert.Contains(t, entry, "updated_at")
 	}
 }
+
+// --- Test 12: DiscoverClaudeModels ---
+
+func TestDiscoverClaudeModels_WithRealCLI(t *testing.T) {
+	if !model.CheckCLIExists("claude") {
+		t.Skip("claude not installed, skipping integration test")
+	}
+
+	models := model.DiscoverClaudeModels()
+	if len(models) == 0 {
+		t.Skip("claude model discovery returned no models (strings may not be available)")
+	}
+
+	// All models should have claude- prefixed IDs
+	for _, m := range models {
+		assert.True(t, strings.HasPrefix(m.ID, "claude-"), "model ID should start with claude-, got: %s", m.ID)
+		assert.NotEmpty(t, m.Name, "model should have a name")
+	}
+
+	// First model should be default
+	assert.True(t, models[0].Default, "first model should be default")
+
+	t.Logf("Discovered %d Claude models:", len(models))
+	for _, m := range models {
+		t.Logf("  %s (%s) default=%v", m.ID, m.Name, m.Default)
+	}
+}

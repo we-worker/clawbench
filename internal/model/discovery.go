@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ type BackendSpec struct {
 	Specialty            string                    // short description, e.g. "代码编写与推理"
 	ListModelsCmd        []string                  // optional: args to list models, e.g. ["models"]; empty = not supported
 	ParseModels          func(string) []AgentModel // optional: parse command stdout into AgentModel list; nil = not supported
+	DiscoverModelsFunc   func() []AgentModel       // optional: custom model discovery function (e.g. binary strings scan); takes priority over ListModelsCmd
 	ThinkingEffortLevels []string                  // supported thinking effort levels, e.g. ["low","medium","high"]; nil = not supported
 }
 
@@ -34,6 +36,7 @@ type BackendSpec struct {
 // For backends with ListModelsCmd+ParseModels, model lists are auto-discovered too.
 var BackendRegistry = []BackendSpec{
 	{ID: "claude", Backend: "claude", DefaultCmd: "claude", Name: "Claude", Icon: "🤖", Specialty: "代码编写与推理",
+		DiscoverModelsFunc: DiscoverClaudeModels,
 		ThinkingEffortLevels: []string{"low", "medium", "high", "xhigh", "max"}},
 	{ID: "codebuddy", Backend: "codebuddy", DefaultCmd: "codebuddy", Name: "Codebuddy", Icon: "🐛", Specialty: "全栈开发助手",
 		ListModelsCmd: []string{"--help"}, ParseModels: ParseCodebuddyModels,
@@ -69,6 +72,15 @@ func CheckCLIExists(cmd string) bool {
 // Returns nil if the CLI doesn't support model listing or if the command fails.
 // Errors are logged but not propagated — model discovery is best-effort.
 func DiscoverModels(spec BackendSpec) []AgentModel {
+	// Custom discovery function takes priority (e.g. binary strings scan for claude)
+	if spec.DiscoverModelsFunc != nil {
+		models := spec.DiscoverModelsFunc()
+		if len(models) > 0 {
+			slog.Info("model discovery succeeded", "backend", spec.ID, "models", len(models))
+		}
+		return models
+	}
+
 	if len(spec.ListModelsCmd) == 0 || spec.ParseModels == nil {
 		return nil
 	}
@@ -359,6 +371,105 @@ func ParseCodebuddyModels(output string) []AgentModel {
 			Default: i == 0,
 		})
 	}
+	return models
+}
+
+// claudeModelRe matches Claude model IDs like "claude-sonnet-4-6" or "claude-opus-4-5" from strings output.
+// Requires exactly two version segments (major-minor), excludes:
+// - date-stamped like "claude-opus-4-20250514" (8-digit date suffix)
+// - short aliases like "claude-sonnet-4" (points to latest snapshot)
+var claudeModelRe = regexp.MustCompile(`^claude-(sonnet|opus|haiku)-\d+-\d+$`)
+
+// claudeModelOrder defines the preferred display order: sonnet first (default), then opus, then haiku.
+var claudeModelOrder = map[string]int{"sonnet": 0, "opus": 1, "haiku": 2}
+
+// claudeModelNames maps model ID prefixes to human-readable names.
+var claudeModelNames = map[string]string{
+	"sonnet": "Sonnet",
+	"opus":   "Opus",
+	"haiku":  "Haiku",
+}
+
+// claudeIsDateStamped returns true if the model ID contains an 8-digit date segment
+// like "claude-opus-4-20250514", which are snapshot aliases we want to skip.
+func claudeIsDateStamped(modelID string) bool {
+	for _, seg := range strings.Split(modelID, "-") {
+		if len(seg) == 8 {
+			return true
+		}
+	}
+	return false
+}
+
+// DiscoverClaudeModels discovers Claude model IDs by scanning the claude binary
+// with `strings`. Claude CLI does not have a --list-models command, so we extract
+// model IDs from the binary which contains hardcoded model name patterns.
+func DiscoverClaudeModels() []AgentModel {
+	// Find the claude binary path
+	path, err := exec.LookPath("claude")
+	if err != nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "strings", path).Output()
+	if err != nil {
+		slog.Debug("claude model discovery: strings command failed", "error", err)
+		return nil
+	}
+
+	// Extract unique model IDs matching the pattern
+	seen := make(map[string]bool)
+	var models []AgentModel
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !claudeModelRe.MatchString(line) || seen[line] {
+			continue
+		}
+		// Skip date-stamped versions like claude-opus-4-20250514
+		if claudeIsDateStamped(line) {
+			continue
+		}
+		seen[line] = true
+
+		// Generate human-readable name: claude-sonnet-4-6 → "Claude Sonnet 4.6"
+		parts := strings.SplitN(line, "-", 3) // ["claude", "sonnet", "4-6"]
+		name := line
+		if len(parts) == 3 {
+			if family, ok := claudeModelNames[parts[1]]; ok {
+				version := strings.ReplaceAll(parts[2], "-", ".")
+				name = "Claude " + family + " " + version
+			}
+		}
+
+		models = append(models, AgentModel{
+			ID:   line,
+			Name: name,
+		})
+	}
+
+	// Sort: sonnet first, then opus, then haiku; within each family, newest first
+	sort.Slice(models, func(i, j int) bool {
+		familyI := strings.SplitN(models[i].ID, "-", 3)
+		familyJ := strings.SplitN(models[j].ID, "-", 3)
+		if len(familyI) >= 2 && len(familyJ) >= 2 {
+			orderI, okI := claudeModelOrder[familyI[1]]
+			orderJ, okJ := claudeModelOrder[familyJ[1]]
+			if okI && okJ && orderI != orderJ {
+				return orderI < orderJ
+			}
+		}
+		// Same family: sort by ID descending (newest first)
+		return models[i].ID > models[j].ID
+	})
+
+	// Mark first model as default
+	if len(models) > 0 {
+		models[0].Default = true
+	}
+
 	return models
 }
 
