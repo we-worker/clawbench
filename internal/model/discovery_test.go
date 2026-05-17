@@ -486,3 +486,103 @@ func TestParsePiModels_HeaderOnly(t *testing.T) {
 	models := model.ParsePiModels(output)
 	assert.Nil(t, models)
 }
+
+// --- Test 8: FindSpecByBackend ---
+
+func TestFindSpecByBackend_Found(t *testing.T) {
+	spec := model.FindSpecByBackend("codebuddy")
+	require.NotNil(t, spec)
+	assert.Equal(t, "codebuddy", spec.Backend)
+	assert.Equal(t, "codebuddy", spec.DefaultCmd)
+	assert.NotEmpty(t, spec.ListModelsCmd)
+	assert.NotNil(t, spec.ParseModels)
+}
+
+func TestFindSpecByBackend_NotFound(t *testing.T) {
+	spec := model.FindSpecByBackend("nonexistent")
+	assert.Nil(t, spec)
+}
+
+func TestFindSpecByBackend_AllBackends(t *testing.T) {
+	for _, s := range model.BackendRegistry {
+		spec := model.FindSpecByBackend(s.Backend)
+		require.NotNil(t, spec, "should find spec for backend %s", s.Backend)
+		assert.Equal(t, s.ID, spec.ID)
+	}
+}
+
+// --- Test 9: SyncDiscoverAgents ---
+
+func TestSyncDiscoverAgents_CreatesMinimalYAML(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agents")
+
+	present := model.SyncDiscoverAgents(dir)
+
+	// Directory should exist
+	info, err := os.Stat(dir)
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
+
+	// present should be a valid map
+	assert.NotNil(t, present)
+
+	// Each generated YAML should be minimal (no models, no thinking_effort_levels)
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		require.NoError(t, err)
+		content := string(data)
+		// Minimal YAML should NOT contain models or thinking_effort_levels
+		assert.NotContains(t, content, "models:")
+		assert.NotContains(t, content, "thinking_effort")
+		assert.NotContains(t, content, "system_prompt:")
+	}
+}
+
+func TestSyncDiscoverAgents_DoesNotOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0755))
+
+	// Create an existing agent YAML with custom content
+	existingYAML := `id: my-custom-agent
+name: My Custom Agent
+icon: 🎯
+specialty: Custom
+backend: codebuddy
+models:
+  - id: custom-model
+    name: Custom Model
+    default: true
+system_prompt: "I am custom"
+`
+	err := os.WriteFile(filepath.Join(agentsDir, "my-custom-agent.yaml"), []byte(existingYAML), 0644)
+	require.NoError(t, err)
+
+	model.SyncDiscoverAgents(agentsDir)
+
+	// Existing file should be preserved
+	data, err := os.ReadFile(filepath.Join(agentsDir, "my-custom-agent.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "My Custom Agent")
+	assert.Contains(t, string(data), "custom-model")
+}
+
+func TestSyncDiscoverAgents_ReturnsPresentMap(t *testing.T) {
+	dir := t.TempDir()
+
+	present := model.SyncDiscoverAgents(dir)
+
+	// For each backend that's installed, present[backend] should be true
+	for _, spec := range model.BackendRegistry {
+		if present[spec.Backend] {
+			// If marked present, the CLI should actually exist
+			assert.True(t, model.CheckCLIExists(spec.DefaultCmd),
+				"SyncDiscoverAgents marked %s as present but CLI not found", spec.Backend)
+		}
+	}
+}

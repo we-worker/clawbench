@@ -108,6 +108,16 @@ func GenerateAgentYAML(spec BackendSpec) ([]byte, error) {
 	return yaml.Marshal(agent)
 }
 
+// FindSpecByBackend returns the BackendSpec for the given backend type, or nil.
+func FindSpecByBackend(backend string) *BackendSpec {
+	for i := range BackendRegistry {
+		if BackendRegistry[i].Backend == backend {
+			return &BackendRegistry[i]
+		}
+	}
+	return nil
+}
+
 // DiscoverAgents scans the system for installed AI CLI tools and generates
 // agent YAML configs in the given directory. It only runs when no agent
 // configs exist (one-time generation).
@@ -168,6 +178,65 @@ func DiscoverAgents(dir string) error {
 	}
 
 	return nil
+}
+
+// SyncDiscoverAgents is called on every startup (not just first-run).
+// It does three things:
+// 1. Detects all installed CLIs from BackendRegistry.
+// 2. Generates minimal YAML for newly found backends (no overwrite).
+// 3. Returns a set of backend types whose CLI is currently present.
+func SyncDiscoverAgents(dir string) map[string]bool {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		slog.Warn("failed to create agents directory", "dir", dir, "error", err)
+		return nil
+	}
+
+	type result struct {
+		spec   BackendSpec
+		exists bool
+	}
+	results := make([]result, len(BackendRegistry))
+	var wg sync.WaitGroup
+	for i, spec := range BackendRegistry {
+		wg.Add(1)
+		go func(i int, spec BackendSpec) {
+			defer wg.Done()
+			results[i] = result{spec: spec, exists: CheckCLIExists(spec.DefaultCmd)}
+		}(i, spec)
+	}
+	wg.Wait()
+
+	present := make(map[string]bool)
+	for _, r := range results {
+		if r.exists {
+			present[r.spec.Backend] = true
+		}
+
+		yamlPath := filepath.Join(dir, r.spec.ID+".yaml")
+
+		// Don't overwrite existing files
+		if _, err := os.Stat(yamlPath); err == nil {
+			continue
+		}
+
+		if !r.exists {
+			continue
+		}
+
+		// New CLI found + no YAML → generate minimal config
+		data, err := GenerateAgentYAML(r.spec)
+		if err != nil {
+			slog.Warn("failed to generate agent YAML", "backend", r.spec.ID, "error", err)
+			continue
+		}
+		if err := os.WriteFile(yamlPath, data, 0644); err != nil {
+			slog.Warn("failed to write agent YAML", "path", yamlPath, "error", err)
+			continue
+		}
+		slog.Info("auto-generated agent config", "backend", r.spec.ID, "path", yamlPath)
+	}
+
+	return present
 }
 
 // --- Model list parsers ---
