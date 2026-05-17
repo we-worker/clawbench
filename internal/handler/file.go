@@ -264,10 +264,23 @@ func ServeLocalFile(w http.ResponseWriter, r *http.Request) {
 		mime = "application/octet-stream"
 	}
 
-	// If ?download=1 is present, force download with Content-Disposition header
+	// If ?download=1 is present, force download with Content-Disposition header.
+	// Use http.ServeContent instead of http.ServeFile to avoid a 301 redirect
+	// for files named "index.html" — http.ServeFile treats "index.html" as a
+	// directory index and redirects to "./", which changes the URL path to
+	// point at the parent directory, triggering a NotADirectory error.
 	if r.URL.Query().Get("download") == "1" {
 		fileName := sanitizeArchiveName(filepath.Base(absPath))
 		w.Header().Set("Content-Disposition", "attachment; filename=\""+fileName+"\"")
+		w.Header().Set("Content-Type", mime)
+		f, err := os.Open(absPath)
+		if err != nil {
+			model.WriteError(w, model.Internal(fmt.Errorf("cannot open file")))
+			return
+		}
+		defer f.Close()
+		http.ServeContent(w, r, fileName, info.ModTime(), f)
+		return
 	}
 
 	w.Header().Set("Content-Type", mime)
