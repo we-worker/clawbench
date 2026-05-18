@@ -98,7 +98,7 @@ public class MainActivity extends AppCompatActivity {
     private final ActivityResultLauncher<String> notificationPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
                 if (!isGranted) {
-                    Log.w(TAG, "POST_NOTIFICATIONS permission denied — tunnel notification will not show");
+                    AppLog.w(TAG, "POST_NOTIFICATIONS permission denied — tunnel notification will not show");
                 }
             });
 
@@ -281,7 +281,7 @@ public class MainActivity extends AppCompatActivity {
                         cameraIntent = null;
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "Camera intent not available", e);
+                    AppLog.w(TAG, "Camera intent not available", e);
                     cameraIntent = null;
                 }
 
@@ -293,7 +293,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                     fileChooserLauncher.launch(chooserIntent);
                 } catch (Exception e) {
-                    Log.e(TAG, "File chooser failed to launch", e);
+                    AppLog.e(TAG, "File chooser failed to launch", e);
                     filePathCallback = null;
                     return false;
                 }
@@ -387,7 +387,7 @@ public class MainActivity extends AppCompatActivity {
                 dm.enqueue(request);
                 Toast.makeText(this, R.string.download_started, Toast.LENGTH_SHORT).show();
             } catch (Exception e) {
-                Log.e(TAG, "Download failed", e);
+                AppLog.e(TAG, "Download failed", e);
                 Toast.makeText(this, R.string.download_failed, Toast.LENGTH_SHORT).show();
             }
         });
@@ -416,7 +416,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             return File.createTempFile("IMG_" + timestamp, ".jpg", storageDir);
         } catch (IOException e) {
-            Log.e(TAG, "Failed to create image file", e);
+            AppLog.e(TAG, "Failed to create image file", e);
             return null;
         }
     }
@@ -517,7 +517,7 @@ public class MainActivity extends AppCompatActivity {
     private void restorePortForwardServiceIfNeeded() {
         Set<String> savedPorts = prefs.getStringSet("forwarded_ports", null);
         if (savedPorts != null && !savedPorts.isEmpty()) {
-            Log.i(TAG, "Cold start: restoring PortForwardService with " + savedPorts.size() + " saved ports");
+            AppLog.i(TAG, "Cold start: restoring PortForwardService with " + savedPorts.size() + " saved ports");
             PortForwardService.start(this);
         }
     }
@@ -777,9 +777,9 @@ public class MainActivity extends AppCompatActivity {
                         intent.setData(Uri.parse("urn:android:pkg:" + packageName));
                         activity.startActivity(intent);
                         PortForwardService.setBatteryOptRequested(activity);
-                        Log.i(TAG, "Requested battery optimization exemption");
+                        AppLog.i(TAG, "Requested battery optimization exemption");
                     } catch (Exception e) {
-                        Log.w(TAG, "Failed to request battery optimization exemption", e);
+                        AppLog.w(TAG, "Failed to request battery optimization exemption", e);
                     }
                 } else {
                     // Already whitelisted, just mark as requested
@@ -807,7 +807,7 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public void stopPortForwardService() {
             activity.runOnUiThread(() -> {
-                Log.i(TAG, "WebView requested PortForwardService stop (no ports on server)");
+                AppLog.i(TAG, "WebView requested PortForwardService stop (no ports on server)");
                 activity.forwardedPorts.clear();
                 PortForwardService.stop(activity);
             });
@@ -962,7 +962,7 @@ public class MainActivity extends AppCompatActivity {
                     activity.runOnUiThread(() ->
                             Toast.makeText(activity, R.string.download_completed, Toast.LENGTH_SHORT).show());
                 } catch (Exception e) {
-                    Log.e(TAG, "downloadBlob failed", e);
+                    AppLog.e(TAG, "downloadBlob failed", e);
                     activity.runOnUiThread(() ->
                             Toast.makeText(activity, R.string.download_failed, Toast.LENGTH_SHORT).show());
                 }
@@ -979,6 +979,27 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public void setVolumeKeyMode(boolean enabled) {
             activity.volumeKeyMode = enabled;
+        }
+
+        /**
+         * Start capturing Android logs and sending them to the server.
+         * The logs are written to .clawbench/logs/android.log on the server
+         * and can be viewed in the built-in file browser.
+         */
+        @JavascriptInterface
+        public void startLogCapture() {
+            String baseUrl = activity.prefs.getString(KEY_SERVER_URL, "");
+            if (!baseUrl.isEmpty()) {
+                AppLog.startCapture(baseUrl);
+            }
+        }
+
+        /**
+         * Stop capturing Android logs and flush remaining entries.
+         */
+        @JavascriptInterface
+        public void stopLogCapture() {
+            AppLog.stopCapture();
         }
     }
 }

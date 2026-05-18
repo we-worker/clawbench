@@ -35,16 +35,28 @@
       </Transition>
     </div>
 
+    <div v-if="gitBranch" class="branch-badge" :title="gitBranch" @click="openHistory">
+      <GitBranch :size="12" class="branch-icon" />
+      <span class="branch-name">{{ gitBranch }}</span>
+    </div>
+
     <button ref="settingsBtnRef" class="settings-toggle" @click="toggleSettingsMenu" :title="t('appHeader.settings')">
       <Settings :size="20" />
     </button>
-    <PopupMenu v-model:show="settingsMenuOpen" :target-element="settingsBtnRef" :max-width="200" :max-height="280" :menu-items-count="settingsItemCount">
+    <PopupMenu v-model:show="settingsMenuOpen" :target-element="settingsBtnRef" :max-width="200" :max-height="320" :menu-items-count="settingsItemCount">
       <div class="settings-menu-title">{{ t('appHeader.settings') }}</div>
       <!-- Reconfigure server — always available in app mode -->
       <template v-if="isAppMode">
         <button class="settings-menu-item reconfigure-item" @click="handleReconfigure">
           <Server :size="14" />
           <span>{{ t('appHeader.reconfigureServer') }}</span>
+        </button>
+        <div class="settings-menu-divider"></div>
+        <button class="settings-menu-item" :class="{ active: debugLogEnabled }" @click="toggleDebugLog">
+          <Check v-if="debugLogEnabled" :size="14" />
+          <span v-else class="settings-menu-check-spacer"></span>
+          <Bug :size="14" />
+          <span>{{ t('appHeader.debugLog') }}</span>
         </button>
         <div class="settings-menu-divider"></div>
       </template>
@@ -77,17 +89,19 @@
 </template>
 
 <script setup>
-import { Projector, ChevronDown, Search, Moon, Sun, Settings, Check, Server } from 'lucide-vue-next'
-import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
+import { Projector, ChevronDown, Search, Moon, Sun, Settings, Check, Server, Bug, GitBranch } from 'lucide-vue-next'
+import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocale } from '@/composables/useLocale'
 import { useAppMode } from '@/composables/useAppMode'
 import { baseName, toRelativePath } from '@/utils/path.ts'
+import { store } from '@/stores/app.ts'
 import PopupMenu from '@/components/common/PopupMenu.vue'
 
 const { t } = useI18n()
 const { currentLocale, setLocale } = useLocale()
 const { isAppMode } = useAppMode()
+const switchTab = inject('switchTab')
 
 const props = defineProps({
     projectRoot: String,
@@ -101,6 +115,9 @@ const toast = inject('toast')
 // Settings menu state
 const settingsBtnRef = ref(null)
 const settingsMenuOpen = ref(false)
+
+// Debug log capture state (Android only, persisted in localStorage)
+const debugLogEnabled = ref(false)
 
 function toggleSettingsMenu() {
     settingsMenuOpen.value = !settingsMenuOpen.value
@@ -125,12 +142,38 @@ function handleReconfigure() {
     emit('reconfigureServer')
 }
 
+// Debug log capture toggle
+function toggleDebugLog() {
+    debugLogEnabled.value = !debugLogEnabled.value
+    localStorage.setItem('android_log_capture', debugLogEnabled.value ? 'true' : 'false')
+    if (window.AndroidNative) {
+        if (debugLogEnabled.value) {
+            window.AndroidNative.startLogCapture()
+        } else {
+            window.AndroidNative.stopLogCapture()
+        }
+    }
+    // Don't close menu so user can see the toggle state
+}
+
+// Restore debug log capture state on mount
+function restoreDebugLogState() {
+    if (!isAppMode.value || !window.AndroidNative) return
+    const saved = localStorage.getItem('android_log_capture')
+    if (saved === 'true') {
+        debugLogEnabled.value = true
+        try {
+            window.AndroidNative.startLogCapture()
+        } catch (_) {}
+    }
+}
+
 // Calculate menu item count for PopupMenu positioning
 const settingsItemCount = computed(() => {
     // 4 interactive items: zh + en + dark + light (divider height negligible)
     let count = 4
     if (isAppMode.value) {
-        count += 2 // reconfigure item + divider
+        count += 4 // reconfigure item + divider + debug log item + divider
     }
     return count
 })
@@ -139,6 +182,18 @@ const projectName = computed(() => {
     if (!props.projectRoot) return t('appHeader.selectProject')
     return baseName(props.projectRoot) || props.projectRoot
 })
+
+// Git branch
+const gitBranch = computed(() => store.state.gitBranch)
+
+function openHistory() {
+    switchTab?.('history')
+}
+
+// Refresh branch when project changes
+watch(() => props.projectRoot, (newRoot) => {
+    if (newRoot) store.loadGitBranch()
+}, { immediate: true })
 
 // Dropdown state
 const dropdownOpen = ref(false)
@@ -266,6 +321,7 @@ function onPathClick(e) {
 
 onMounted(() => {
     document.addEventListener('click', onClickOutside)
+    restoreDebugLogState()
 })
 
 onUnmounted(() => {
@@ -283,7 +339,8 @@ onUnmounted(() => {
 
 .project-dropdown-wrapper {
     position: relative;
-    flex-shrink: 0;
+    flex-shrink: 1;
+    min-width: 0;
 }
 
 .project-switch-btn {
@@ -298,7 +355,8 @@ onUnmounted(() => {
     border-radius: 999px;
     font-size: 13px;
     font-weight: 500;
-    max-width: 220px;
+    max-width: 180px;
+    min-width: 0;
     transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
     line-height: 1.4;
 }
@@ -440,6 +498,44 @@ onUnmounted(() => {
 .dropdown-leave-to {
     opacity: 0;
     transform: translateY(-4px);
+}
+
+/* Branch badge */
+.branch-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent-color);
+    flex-shrink: 1;
+    min-width: 0;
+    max-width: 140px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.branch-badge:hover {
+    background: color-mix(in srgb, var(--accent-color) 20%, transparent);
+    border-color: color-mix(in srgb, var(--accent-color) 40%, transparent);
+}
+
+.branch-badge:active {
+    transform: scale(0.96);
+}
+
+.branch-icon {
+    flex-shrink: 0;
+}
+
+.branch-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .settings-toggle {

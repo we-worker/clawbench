@@ -67,6 +67,7 @@ export default {
     darkMode: 'Dark Mode',
     lightMode: 'Light Mode',
     reconfigureServer: 'Reconfigure Server',
+    debugLog: 'Debug Log',
   },
   chat: {
     title: 'AI Chat',

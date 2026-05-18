@@ -230,7 +230,7 @@ public class PortForwardService extends Service {
         // If no ports were restored, there's nothing to forward — stop immediately.
         // This prevents an idle foreground service with no work to do (wastes battery).
         if (forwardedPorts.isEmpty()) {
-            Log.i(TAG, "SSH: no saved ports to forward, stopping service");
+            AppLog.i(TAG, "SSH: no saved ports to forward, stopping service");
             stopSelf();
         }
     }
@@ -265,7 +265,7 @@ public class PortForwardService extends Service {
             // onCreate() already restored port numbers into forwardedPorts via restoreForwardedPorts(),
             // but the SSH session was lost. Re-establish the tunnel now.
             if (!forwardedPorts.isEmpty()) {
-                Log.i(TAG, "SSH: service restarted by START_STICKY, restoring " + forwardedPorts.size() + " port forwards");
+                AppLog.i(TAG, "SSH: service restarted by START_STICKY, restoring " + forwardedPorts.size() + " port forwards");
                 networkExecutor.execute(this::restoreAndReconnect);
             }
         }
@@ -291,7 +291,7 @@ public class PortForwardService extends Service {
                     .edit()
                     .remove(KEY_FORWARDED_PORTS)
                     .apply();
-            Log.i(TAG, "SSH: cleaned up empty forwarded_ports from SharedPreferences");
+            AppLog.i(TAG, "SSH: cleaned up empty forwarded_ports from SharedPreferences");
         }
 
         stopForeground(true);
@@ -351,7 +351,7 @@ public class PortForwardService extends Service {
                     forwardedPorts.add(port);
                 } catch (NumberFormatException ignored) {}
             }
-            Log.i(TAG, "SSH: restored " + forwardedPorts.size() + " forwarded ports from prefs");
+            AppLog.i(TAG, "SSH: restored " + forwardedPorts.size() + " forwarded ports from prefs");
             updateNotification(forwardedPorts.size(), null);
         }
     }
@@ -366,10 +366,10 @@ public class PortForwardService extends Service {
         if (!forwardedPorts.isEmpty()) {
             try {
                 ensureConnection();
-                Log.i(TAG, "SSH: restored all port forwards after service restart");
+                AppLog.i(TAG, "SSH: restored all port forwards after service restart");
             } catch (Exception e) {
                 lastError = e.getMessage();
-                Log.e(TAG, "SSH: failed to restore connection after service restart", e);
+                AppLog.e(TAG, "SSH: failed to restore connection after service restart", e);
                 // Connection monitor will handle reconnect
             }
         }
@@ -386,7 +386,7 @@ public class PortForwardService extends Service {
         monitorActive = true;
 
         connectionMonitor = new Thread(() -> {
-            Log.i(TAG, "SSH: connection monitor started");
+            AppLog.i(TAG, "SSH: connection monitor started");
             while (monitorActive && !Thread.currentThread().isInterrupted()) {
                 try {
                     Thread.sleep(MONITOR_CHECK_INTERVAL_MS);
@@ -400,11 +400,11 @@ public class PortForwardService extends Service {
                 if (sshSession == null || !sshSession.isConnected()) {
                     if (forwardedPorts.isEmpty()) {
                         // No ports to maintain — don't bother reconnecting
-                        Log.d(TAG, "SSH: session disconnected but no ports to forward, skipping reconnect");
+                        AppLog.d(TAG, "SSH: session disconnected but no ports to forward, skipping reconnect");
                         continue;
                     }
 
-                    Log.w(TAG, "SSH: session disconnected, starting auto-reconnect");
+                    AppLog.w(TAG, "SSH: session disconnected, starting auto-reconnect");
                     isReconnecting = true;
                     reconnectAttempt = 0;
                     updateNotification(forwardedPorts.size(), "SSH 隧道断开，正在重连…");
@@ -429,16 +429,16 @@ public class PortForwardService extends Service {
 
                         // Give up after max attempts
                         if (reconnectAttempt > MAX_RECONNECT_ATTEMPTS) {
-                            Log.e(TAG, "SSH: exhausted " + MAX_RECONNECT_ATTEMPTS + " reconnect attempts, giving up");
+                            AppLog.e(TAG, "SSH: exhausted " + MAX_RECONNECT_ATTEMPTS + " reconnect attempts, giving up");
                             updateNotification(forwardedPorts.size(), "SSH 隧道重连失败，请重新打开页面");
                             break;
                         }
 
                         try {
-                            Log.i(TAG, "SSH: auto-reconnect attempt #" + reconnectAttempt);
+                            AppLog.i(TAG, "SSH: auto-reconnect attempt #" + reconnectAttempt);
                             ensureConnection();
                             lastError = null;
-                            Log.i(TAG, "SSH: auto-reconnect succeeded on attempt #" + reconnectAttempt);
+                            AppLog.i(TAG, "SSH: auto-reconnect succeeded on attempt #" + reconnectAttempt);
                             isReconnecting = false;
                             reconnectAttempt = 0;
                             updateNotification(forwardedPorts.size(), "SSH 隧道已恢复");
@@ -454,7 +454,7 @@ public class PortForwardService extends Service {
                             break; // Reconnected successfully
                         } catch (Exception e) {
                             lastError = e.getMessage();
-                            Log.w(TAG, "SSH: auto-reconnect attempt #" + reconnectAttempt + " failed: " + e.getMessage());
+                            AppLog.w(TAG, "SSH: auto-reconnect attempt #" + reconnectAttempt + " failed: " + e.getMessage());
                         }
                     }
 
@@ -464,7 +464,7 @@ public class PortForwardService extends Service {
                     }
                 }
             }
-            Log.i(TAG, "SSH: connection monitor stopped");
+            AppLog.i(TAG, "SSH: connection monitor stopped");
         }, "SSH-ConnectionMonitor");
 
         connectionMonitor.setDaemon(true);
@@ -500,10 +500,10 @@ public class PortForwardService extends Service {
                 }
                 wifiLock.setReferenceCounted(false);
                 wifiLock.acquire();
-                Log.i(TAG, "SSH: WifiLock acquired");
+                AppLog.i(TAG, "SSH: WifiLock acquired");
             }
         } catch (Exception e) {
-            Log.w(TAG, "SSH: failed to acquire WifiLock", e);
+            AppLog.w(TAG, "SSH: failed to acquire WifiLock", e);
         }
     }
 
@@ -514,9 +514,9 @@ public class PortForwardService extends Service {
         if (wifiLock != null && wifiLock.isHeld()) {
             try {
                 wifiLock.release();
-                Log.i(TAG, "SSH: WifiLock released");
+                AppLog.i(TAG, "SSH: WifiLock released");
             } catch (Exception e) {
-                Log.w(TAG, "SSH: failed to release WifiLock", e);
+                AppLog.w(TAG, "SSH: failed to release WifiLock", e);
             }
             wifiLock = null;
         }
@@ -559,7 +559,7 @@ public class PortForwardService extends Service {
             throw new Exception("SSH password not configured. Please log in first.");
         }
 
-        Log.i(TAG, "SSH: connecting to " + serverHost + ":" + sshPort);
+        AppLog.i(TAG, "SSH: connecting to " + serverHost + ":" + sshPort);
 
         // Create SSH session
         sshSession = jsch.getSession("clawbench", serverHost, sshPort);
@@ -575,7 +575,7 @@ public class PortForwardService extends Service {
         // Connection succeeded — clear any previous error
         lastError = null;
 
-        Log.i(TAG, "SSH: connected to " + serverHost + ":" + sshPort);
+        AppLog.i(TAG, "SSH: connected to " + serverHost + ":" + sshPort);
 
         // Acquire WifiLock to prevent WiFi from being disabled
         acquireWifiLock();
@@ -589,12 +589,12 @@ public class PortForwardService extends Service {
             try {
                 sshSession.setPortForwardingL("127.0.0.1", port, "127.0.0.1", port);
                 reEstablished++;
-                Log.i(TAG, "SSH: re-established port forward " + port);
+                AppLog.i(TAG, "SSH: re-established port forward " + port);
             } catch (Exception e) {
-                Log.e(TAG, "SSH: failed to re-establish port forward " + port, e);
+                AppLog.e(TAG, "SSH: failed to re-establish port forward " + port, e);
             }
         }
-        Log.i(TAG, "SSH: re-established " + reEstablished + "/" + forwardedPorts.size() + " port forwards");
+        AppLog.i(TAG, "SSH: re-established " + reEstablished + "/" + forwardedPorts.size() + " port forwards");
 
         updateNotification(forwardedPorts.size(), null);
 
@@ -621,14 +621,14 @@ public class PortForwardService extends Service {
         if (alreadyInSet && sessionAlive) {
             // Port is tracked and SSH session is alive — nothing to do.
             // (ensureConnection() already re-established this forward when it reconnected.)
-            Log.d(TAG, "SSH: port " + port + " already forwarded and session active");
+            AppLog.d(TAG, "SSH: port " + port + " already forwarded and session active");
             return;
         }
 
         // Port is in the set but session is dead — need to reconnect.
         // Or port is new — need to add it.
         if (alreadyInSet && !sessionAlive) {
-            Log.i(TAG, "SSH: port " + port + " in set but session disconnected, reconnecting...");
+            AppLog.i(TAG, "SSH: port " + port + " in set but session disconnected, reconnecting...");
         }
 
         try {
@@ -644,11 +644,11 @@ public class PortForwardService extends Service {
             // setPortForwardingL for all ports in forwardedPorts during reconnect.
             // If ensureConnection() failed to set up this specific port, it logged
             // the error — the connection monitor will retry later.
-            Log.i(TAG, "SSH: port forward ready: localhost:" + port + " → server:" + port);
+            AppLog.i(TAG, "SSH: port forward ready: localhost:" + port + " → server:" + port);
             updateNotification(forwardedPorts.size(), null);
         } catch (Exception e) {
             lastError = e.getMessage();
-            Log.e(TAG, "SSH: failed to add port forward for " + port + ", retrying...", e);
+            AppLog.e(TAG, "SSH: failed to add port forward for " + port + ", retrying...", e);
             // Disconnect and retry once (password may have been updated, or session stale)
             disconnectInternal();
             try {
@@ -658,11 +658,11 @@ public class PortForwardService extends Service {
                     forwardedPorts.add(port);
                     saveForwardedPorts();
                 }
-                Log.i(TAG, "SSH: port forward added on retry: localhost:" + port + " → server:" + port);
+                AppLog.i(TAG, "SSH: port forward added on retry: localhost:" + port + " → server:" + port);
                 updateNotification(forwardedPorts.size(), null);
             } catch (Exception e2) {
                 lastError = e2.getMessage();
-                Log.e(TAG, "SSH: failed to add port forward for " + port + " on retry", e2);
+                AppLog.e(TAG, "SSH: failed to add port forward for " + port + " on retry", e2);
             }
         }
     }
@@ -678,10 +678,10 @@ public class PortForwardService extends Service {
         try {
             if (sshSession != null && sshSession.isConnected()) {
                 sshSession.delPortForwardingL(port);
-                Log.i(TAG, "SSH: port forward removed: " + port);
+                AppLog.i(TAG, "SSH: port forward removed: " + port);
             }
         } catch (Exception e) {
-            Log.e(TAG, "SSH: failed to remove port forward for " + port, e);
+            AppLog.e(TAG, "SSH: failed to remove port forward for " + port, e);
         }
 
         forwardedPorts.remove(port);
@@ -735,18 +735,18 @@ public class PortForwardService extends Service {
                 boolean enabled = json.optBoolean("enabled", false);
                 if (enabled) {
                     int port = json.optInt("port", -1);
-                    Log.i(TAG, "SSH: fetched SSH port " + port + " from /api/ssh/info");
+                    AppLog.i(TAG, "SSH: fetched SSH port " + port + " from /api/ssh/info");
                     return port;
                 } else {
-                    Log.w(TAG, "SSH: SSH server is not enabled on the server");
+                    AppLog.w(TAG, "SSH: SSH server is not enabled on the server");
                     return -1;
                 }
             } else {
-                Log.w(TAG, "SSH: /api/ssh/info returned HTTP " + code);
+                AppLog.w(TAG, "SSH: /api/ssh/info returned HTTP " + code);
                 return -1;
             }
         } catch (Exception e) {
-            Log.w(TAG, "SSH: failed to fetch SSH info, will fallback to httpPort+1", e);
+            AppLog.w(TAG, "SSH: failed to fetch SSH info, will fallback to httpPort+1", e);
             return -1;
         }
     }
@@ -778,9 +778,9 @@ public class PortForwardService extends Service {
                     } catch (Exception ignored) {}
                 }
                 sshSession.disconnect();
-                Log.i(TAG, "SSH: disconnected");
+                AppLog.i(TAG, "SSH: disconnected");
             } catch (Exception e) {
-                Log.e(TAG, "SSH: error during disconnect", e);
+                AppLog.e(TAG, "SSH: error during disconnect", e);
             }
             sshSession = null;
         }
@@ -874,10 +874,10 @@ public class PortForwardService extends Service {
                 wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ClawBench:SSH-Tunnel");
                 wakeLock.setReferenceCounted(false);
                 wakeLock.acquire();
-                Log.i(TAG, "SSH: WakeLock acquired");
+                AppLog.i(TAG, "SSH: WakeLock acquired");
             }
         } catch (Exception e) {
-            Log.w(TAG, "SSH: failed to acquire WakeLock", e);
+            AppLog.w(TAG, "SSH: failed to acquire WakeLock", e);
         }
     }
 
@@ -888,9 +888,9 @@ public class PortForwardService extends Service {
         if (wakeLock != null && wakeLock.isHeld()) {
             try {
                 wakeLock.release();
-                Log.i(TAG, "SSH: WakeLock released");
+                AppLog.i(TAG, "SSH: WakeLock released");
             } catch (Exception e) {
-                Log.w(TAG, "SSH: failed to release WakeLock", e);
+                AppLog.w(TAG, "SSH: failed to release WakeLock", e);
             }
             wakeLock = null;
         }
@@ -940,7 +940,7 @@ public class PortForwardService extends Service {
             sc.init(null, trustAllCerts, new SecureRandom());
             trustAllSSLContext = sc;
         } catch (Exception e) {
-            Log.e(TAG, "SSH: failed to init trust-all SSL context", e);
+            AppLog.e(TAG, "SSH: failed to init trust-all SSL context", e);
         }
     }
 }

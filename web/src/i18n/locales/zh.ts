@@ -67,6 +67,7 @@ export default {
     darkMode: '深色模式',
     lightMode: '浅色模式',
     reconfigureServer: '重新配置服务器',
+    debugLog: '调试日志',
   },
   chat: {
     title: 'AI 对话',

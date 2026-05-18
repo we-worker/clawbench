@@ -176,7 +176,7 @@ public class BrowserActivity extends AppCompatActivity {
                 startActivity(new Intent(Intent.ACTION_VIEW, uri));
             }
         } catch (Exception e) {
-            Log.w(TAG, "Invalid URL: " + input, e);
+            AppLog.w(TAG, "Invalid URL: " + input, e);
         }
 
         // Hide keyboard

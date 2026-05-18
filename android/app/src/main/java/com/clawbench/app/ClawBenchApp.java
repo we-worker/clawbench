@@ -29,9 +29,9 @@ public class ClawBenchApp extends Application {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 try {
                     WebView.setDataDirectorySuffix("browser");
-                    Log.i(TAG, "Browser process: set WebView data directory suffix");
+                    AppLog.i(TAG, "Browser process: set WebView data directory suffix");
                 } catch (Exception e) {
-                    Log.e(TAG, "Failed to set WebView data directory suffix", e);
+                    AppLog.e(TAG, "Failed to set WebView data directory suffix", e);
                 }
             }
         }
@@ -55,7 +55,7 @@ public class ClawBenchApp extends Application {
             }
             return processName.endsWith(":browser");
         } catch (Exception e) {
-            Log.w(TAG, "Failed to detect process name", e);
+            AppLog.w(TAG, "Failed to detect process name", e);
             return false;
         }
     }
