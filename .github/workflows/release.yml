@@ -54,10 +54,9 @@ jobs:
           path: public/
 
   build-linux:
-    name: Build Linux amd64 (manylinux2_17)
+    name: Build Linux amd64
     needs: build-frontend
-    runs-on: ubuntu-latest
-    container: quay.io/pypa/manylinux_2_17_x86_64
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
@@ -67,12 +66,6 @@ jobs:
         with:
           name: public
           path: public/
-
-      - name: Install build dependencies
-        run: |
-          yum install -y gcc git
-          # 为 actions/setup-go 准备环境
-          mkdir -p /usr/local/go
 
       - uses: actions/setup-go@v5
         with:
