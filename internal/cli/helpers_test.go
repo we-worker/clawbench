@@ -182,6 +182,22 @@ func TestLoadConfig_Idempotent(t *testing.T) {
 
 // ---------- httpDoWithProject ----------
 
+func TestAddSessionCookie_SetsAuthCookieFromConfiguredPassword(t *testing.T) {
+	origCfg := model.ConfigInstance
+	t.Cleanup(func() { model.ConfigInstance = origCfg })
+
+	model.ConfigInstance = model.Config{Password: "testpass"}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	addSessionCookie(req)
+
+	cookies := req.Cookies()
+	if assert.Len(t, cookies, 1) {
+		assert.Equal(t, model.SessionCookie, cookies[0].Name)
+		assert.Equal(t, model.SessionTokenForPassword("testpass"), cookies[0].Value)
+	}
+}
+
 func TestHTTPDoWithProject_SetsCookie(t *testing.T) {
 	// Verify that httpDoWithProject sets the clawbench_project cookie
 	// by checking the request that reaches the server

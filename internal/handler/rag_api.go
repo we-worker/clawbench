@@ -10,7 +10,7 @@ import (
 )
 
 // ServeRAGSearch handles POST /api/rag/search — vector similarity search.
-// Auth: localhost bypasses auth (CLI); remote requires cookie.
+// Auth: when a password is configured, requests require a valid session cookie.
 // Project isolation: uses cookie-derived project path, ignoring client-supplied project field.
 func ServeRAGSearch(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {

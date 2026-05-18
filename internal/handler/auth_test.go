@@ -68,7 +68,7 @@ func TestServeAuthCheck(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 
-	t.Run("PasswordSet_LocalhostBypass_Returns200", func(t *testing.T) {
+	t.Run("PasswordSet_LocalhostWithoutCookie_Returns401", func(t *testing.T) {
 		_, teardown := setupTestEnv(t)
 		defer teardown()
 
@@ -76,14 +76,13 @@ func TestServeAuthCheck(t *testing.T) {
 
 		req := newRequest(t, http.MethodGet, "/api/auth/check", nil)
 		req.RemoteAddr = "127.0.0.1:54321"
-		// No cookie — should still pass because localhost
 
 		w := callHandler(ServeAuthCheck, req)
 
-		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 
-	t.Run("PasswordSet_LocalhostIPv6Bypass_Returns200", func(t *testing.T) {
+	t.Run("PasswordSet_LocalhostIPv6WithoutCookie_Returns401", func(t *testing.T) {
 		_, teardown := setupTestEnv(t)
 		defer teardown()
 
@@ -91,11 +90,10 @@ func TestServeAuthCheck(t *testing.T) {
 
 		req := newRequest(t, http.MethodGet, "/api/auth/check", nil)
 		req.RemoteAddr = "[::1]:54321"
-		// No cookie — should still pass because localhost
 
 		w := callHandler(ServeAuthCheck, req)
 
-		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 }
 

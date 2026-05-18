@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -405,8 +403,7 @@ func main() {
 	}
 
 	// Hash the password for session comparison
-	hash := sha256.Sum256([]byte(cfg.Password + "clawbench-salt"))
-	model.SessionToken = hex.EncodeToString(hash[:])
+	model.SessionToken = model.SessionTokenForPassword(cfg.Password)
 
 	// Generate bcrypt hash for secure password verification (ISS-003a)
 	if cfg.Password != "" {

@@ -91,8 +91,18 @@ var httpClient = &http.Client{
 	},
 }
 
+func addSessionCookie(req *http.Request) {
+	if model.ConfigInstance.Password == "" {
+		return
+	}
+	req.AddCookie(&http.Cookie{
+		Name:  model.SessionCookie,
+		Value: model.SessionTokenForPassword(model.ConfigInstance.Password),
+	})
+}
+
 // httpDo performs an HTTP request to the server API.
-// No auth needed — CLI runs on localhost which is auto-trusted by the server.
+// CLI authenticates with the same session cookie the browser uses.
 func httpDo(method, path string, body any) (map[string]any, int, error) {
 	var reqBody io.Reader
 	if body != nil {
@@ -108,6 +118,7 @@ func httpDo(method, path string, body any) (map[string]any, int, error) {
 		return nil, 0, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	addSessionCookie(req)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -145,6 +156,7 @@ func httpDoWithProject(method, path string, body any, projectPath string) (map[s
 		return nil, 0, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	addSessionCookie(req)
 
 	// Set project cookie so server's requireProject() can extract it
 	if projectPath != "" {

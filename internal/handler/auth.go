@@ -2,9 +2,7 @@ package handler
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -33,11 +31,11 @@ type loginLimiter struct {
 }
 
 const (
-	maxLoginFails    = 5
-	initialLoginBlock = 5 * time.Minute
-	maxLoginBlock     = 1 * time.Hour
+	maxLoginFails       = 5
+	initialLoginBlock   = 5 * time.Minute
+	maxLoginBlock       = 1 * time.Hour
 	loginCleanupInterval = 10 * time.Minute
-	loginRecordTTL    = 30 * time.Minute
+	loginRecordTTL       = 30 * time.Minute
 )
 
 var (
@@ -122,27 +120,12 @@ func extractIP(r *http.Request) string {
 	return host
 }
 
-// isLocalhost returns true if the request originates from the local machine.
-func isLocalhost(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	return host == "127.0.0.1" || host == "::1" || host == "localhost"
-}
-
 // --- Auth handlers ---
 
 // ServeAuthCheck returns 200 if the session cookie is valid, 401 otherwise.
-// Localhost requests are always considered authenticated (same as middleware.Auth).
 func ServeAuthCheck(w http.ResponseWriter, r *http.Request) {
 	if model.SessionToken == "" {
 		// No password set, always authenticated
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	// Localhost (CLI subcommands / local browser) — always allowed
-	if isLocalhost(r) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -185,18 +168,16 @@ func ServeLogin(w http.ResponseWriter, r *http.Request) {
 			authenticated = bcrypt.CompareHashAndPassword(model.PasswordHash, []byte(body.Password)) == nil
 		} else {
 			// Fallback: SHA-256 for backward compatibility (shouldn't happen after startup fix)
-			hash := sha256.Sum256([]byte(body.Password + "clawbench-salt"))
-			token := hex.EncodeToString(hash[:])
+			token := model.SessionTokenForPassword(body.Password)
 			authenticated = subtle.ConstantTimeCompare([]byte(token), []byte(model.SessionToken)) == 1
 		}
 
 		if authenticated {
 			limiter.reset(remoteIP)
-			// Generate session token (SHA-256 of password + salt — used as cookie value, not password hash)
+			// Generate session token (used as cookie value, not password hash)
 			sessionToken := model.SessionToken
 			if sessionToken == "" {
-				hash := sha256.Sum256([]byte(body.Password + "clawbench-salt"))
-				sessionToken = hex.EncodeToString(hash[:])
+				sessionToken = model.SessionTokenForPassword(body.Password)
 			}
 			http.SetCookie(w, &http.Cookie{
 				Name:     model.SessionCookie,
