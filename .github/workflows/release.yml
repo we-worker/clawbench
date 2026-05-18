@@ -8,7 +8,7 @@ on:
 jobs:
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +36,7 @@ jobs:
   build-frontend:
     name: Build Frontend
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
 
@@ -54,9 +54,10 @@ jobs:
           path: public/
 
   build-linux:
-    name: Build Linux amd64
+    name: Build Linux amd64 (manylinux2_17)
     needs: build-frontend
     runs-on: ubuntu-latest
+    container: quay.io/pypa/manylinux_2_17_x86_64
     permissions:
       contents: write
     steps:
@@ -66,6 +67,12 @@ jobs:
         with:
           name: public
           path: public/
+
+      - name: Install build dependencies
+        run: |
+          yum install -y gcc git
+          # 为 actions/setup-go 准备环境
+          mkdir -p /usr/local/go
 
       - uses: actions/setup-go@v5
         with:
@@ -207,7 +214,7 @@ jobs:
 
   build-android:
     name: Build Android APK
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     permissions:
       contents: write
 
@@ -246,7 +253,7 @@ jobs:
   release-notes:
     name: Generate Release Notes
     needs: [build-linux, build-windows, build-macos-arm64, build-macos-amd64, build-android]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     permissions:
       contents: write
     steps:
