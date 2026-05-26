@@ -72,7 +72,7 @@ jobs:
           docker run --rm -v $PWD:/build -w /build ubuntu:18.04 bash -c "
             set -e
             apt-get update -qq
-            apt-get install -y -qq gcc curl ca-certificates
+            apt-get install -y -qq gcc g++ curl ca-certificates
             curl -fsSL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz
             export PATH=/usr/local/go/bin:\$PATH
             VERSION=\$(git describe --tags --always 2>/dev/null || echo dev)
@@ -237,20 +237,22 @@ jobs:
       - name: Install Android SDK components
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Decode keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/clawbench.jks
-
-      - name: Build release APK
+      - name: Build APK (debug if no keystore)
         working-directory: android
-        env:
-          KEYSTORE_FILE: ../clawbench.jks
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           VERSION_CODE=$(git rev-list --count HEAD)
           VERSION_NAME=$(git describe --tags --always 2>/dev/null || echo "dev")
-          ./gradlew assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ../clawbench.jks
+            KEYSTORE_FILE=../clawbench.jks \
+            KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
+            KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
+            KEY_PASSWORD=${{ secrets.KEY_PASSWORD }} \
+            ./gradlew assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
+          else
+            echo "No keystore secret configured, building debug APK"
+            ./gradlew assembleDebug -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
+          fi
 
       - uses: softprops/action-gh-release@v2
         with:
