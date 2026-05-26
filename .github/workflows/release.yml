@@ -67,16 +67,16 @@ jobs:
           name: public
           path: public/
 
-      - name: Build Linux binary (Docker ubuntu:18.04 for GLIBC 2.27 compat)
+      - name: Build Linux binary (Docker ubuntu:20.04 for GLIBC 2.31 compat)
         run: |
-          docker run --rm -v $PWD:/build -w /build ubuntu:18.04 bash -c "
+          docker run --rm -v $PWD:/build -w /build ubuntu:20.04 bash -c "
             set -e
             apt-get update -qq
             apt-get install -y -qq gcc g++ curl ca-certificates
             curl -fsSL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz
             export PATH=/usr/local/go/bin:\$PATH
             VERSION=\$(git describe --tags --always 2>/dev/null || echo dev)
-            CGO_ENABLED=1 go build -ldflags=\"-s -w -X clawbench/internal/version.Version=\$VERSION\" -o clawbench-linux ./cmd/server
+            CGO_ENABLED=1 CGO_LDFLAGS=\"-static-libstdc++\" go build -ldflags=\"-s -w -X clawbench/internal/version.Version=\$VERSION\" -o clawbench-linux ./cmd/server
           "
 
       - name: Package Linux
