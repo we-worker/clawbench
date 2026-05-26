@@ -2,13 +2,38 @@ import { escapeHtml } from '@/utils/html.ts'
 import { splitPath } from '@/utils/path.ts'
 import { store } from '@/stores/app.ts'
 import { gt } from '@/composables/useLocale'
+import { clearCommitHashCache } from '@/composables/useCommitHashAnnotation.ts'
+import { clearWorktreeCache } from '@/composables/useWorktreeAnnotation.ts'
 
 /**
  * Resolve a file path to a project-relative path usable by store.selectFile().
  * Returns null if the path is not within the current project.
  * When projectRoot is empty, relative paths are returned as-is (best-effort).
+ *
+ * Supports tilde expansion: if homeDir is provided, ~/foo is expanded to
+ * homeDir + /foo before checking against projectRoot. Without homeDir,
+ * tilde-prefixed paths are rejected (we can't determine if they're in-project).
  */
-export function resolveFilePath(path: string, projectRoot: string): string | null {
+export function resolveFilePath(path: string, projectRoot: string, homeDir?: string): string | null {
+    // Reject paths containing glob wildcards, angle brackets, or double-star.
+    // These are glob patterns or template variables, not real filesystem paths.
+    if (/[*?\\[\]<>]/.test(path) || path.includes('**')) return null
+    // Reject URLs (handled by localhost annotation, not file path annotation)
+    if (/^https?:\/\//i.test(path)) return null
+    // Reject environment variable paths (e.g. $HOME/.bashrc, ${HOME}/config)
+    if (/\$/.test(path)) return null
+
+    // Expand tilde (~/...) to absolute path using homeDir.
+    // Only handle ~/ (current user's home) — ~username/ is not expanded.
+    if (path.startsWith('~/') || path === '~') {
+        if (!homeDir) return null // can't expand ~ without knowing home directory
+        const expanded = homeDir + path.slice(1) // ~/foo → /home/user/foo
+        // Now treat as absolute path
+        if (!projectRoot) return null
+        if (!expanded.startsWith(projectRoot + '/')) return null
+        return expanded.slice(projectRoot.length + 1)
+    }
+
     if (path.startsWith('/')) {
         // Absolute path: must be under projectRoot
         if (!projectRoot) return null
@@ -55,35 +80,24 @@ export function resolveFilePath(path: string, projectRoot: string): string | nul
 export const FILE_OPEN_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
 
 /**
- * SVG icon markup for the commit-open button (git-commit icon).
- * A small circle with lines — resembles a commit node in a graph.
- */
-export const COMMIT_OPEN_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><circle cx="12" cy="12" r="4"/><line x1="1.05" y1="12" x2="7" y2="12"/><line x1="17.01" y1="12" x2="22.96" y2="12"/></svg>'
-
-/**
  * Generate HTML for the small open-file button.
  */
 export function fileOpenButtonHtml(resolvedPath: string): string {
     return `<button class="chat-file-open-btn" data-file-path="${escapeHtml(resolvedPath)}" title="${escapeHtml(gt('chat.attach.openFile'))}">${FILE_OPEN_ICON_SVG}</button>`
 }
 
-/**
- * Generate HTML for the small commit-open button.
- */
-export function commitOpenButtonHtml(sha: string): string {
-    return `<button class="chat-commit-open-btn" data-commit-sha="${escapeHtml(sha)}" title="${escapeHtml(gt('chat.attach.openCommit'))}">${COMMIT_OPEN_ICON_SVG}</button>`
-}
-
 export interface AnnotateFilePathsOptions {
     projectRoot: string
     /** Base directory for resolving relative <a href="..."> links (e.g. the md file's dir) */
     baseDir?: string
+    /** User's home directory (from backend), used to expand ~/ paths */
+    homeDir?: string
 }
 
 /**
  * Regex that matches file paths in plain text.
  * Three forms combined into one regex:
- *   1. Absolute paths: /home/user/project/src/main.go
+ *   1. Absolute/tilde paths: /home/user/project/src/main.go, ~/.config/nvim/init.lua
  *   2. Relative paths with ./ or ../:  ./lib/utils.ts, ../config/settings.json
  *   3. Bare relative paths: src/main.go (at least two segments + extension)
  *
@@ -93,37 +107,23 @@ export interface AnnotateFilePathsOptions {
  * Because this regex only runs on text node content (never on HTML attributes or tags),
  * there is no risk of matching inside data-file-path or other generated attributes.
  */
-const FILE_PATH_RE = /(?:\/[^\s<>"')\]]+(?:\/[^\s<>"')\]]+)+\.[a-zA-Z][a-zA-Z0-9]*|\.\.?\/[^\s<>"')\]]+(?:\/[^\s<>"')\]]+)*\.[a-zA-Z][a-zA-Z0-9]*|[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_.-]+)+\.[a-zA-Z][a-zA-Z0-9]*)/g
-
-/**
- * Regex that matches potential git commit hashes in plain text.
- * Matches 7-40 character hex strings with at least one a-f letter.
- * Word-boundary delimited to avoid matching inside longer strings.
- * Pure-decimal 7-digit numbers (timestamps, byte counts) are excluded
- * because git commit hashes are SHA-1 values that virtually always
- * contain at least one hex letter.
- */
-const COMMIT_HASH_RE = /\b([0-9a-f]{7,40})\b/gi
+const FILE_PATH_RE = /(?:~?\/[^\s<>"')\]]+(?:\/[^\s<>"')\]]+)+\.[a-zA-Z][a-zA-Z0-9]*|\.\.?\/[^\s<>"')\]]+(?:\/[^\s<>"')\]]+)*\.[a-zA-Z][a-zA-Z0-9]*|[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_.-]+)+\.[a-zA-Z][a-zA-Z0-9]*)/g
 
 /**
  * Check if a string looks like a file path that should be annotated.
  * - Contains at least one '/' (e.g. src/foo.ts, ./bar.go)
  * - Or has a short file extension (e.g. ChatPanel.vue, main.go)
  * Bare identifiers like `useAutoSpeech`, `onUnmounted`, `ref` should NOT match.
+ * Rejects strings containing glob wildcards, angle brackets, or double-star
+ * — these are glob patterns or template variables, not real file paths.
  */
 function looksLikeFilePath(text: string): boolean {
+    if (/[*?\\[\]<>]/.test(text) || text.includes('**')) return false
+    // Exclude URLs (handled by localhost annotation)
+    if (/^https?:\/\//i.test(text)) return false
+    // Exclude environment variable paths (e.g. $HOME/.bashrc, ${HOME}/config)
+    if (/\$/.test(text)) return false
     return /\/|\.[a-zA-Z][a-zA-Z0-9]{0,3}$/.test(text)
-}
-
-/**
- * Check if a string looks like a git commit hash.
- * Must be 7-40 hex chars and contain at least one a-f letter
- * (to exclude pure-decimal strings like timestamps and byte counts).
- */
-function looksLikeCommitHash(text: string): boolean {
-    if (text.length < 7 || text.length > 40) return false
-    if (!/^[0-9a-f]+$/i.test(text)) return false
-    return /[a-f]/i.test(text)
 }
 
 /**
@@ -138,7 +138,7 @@ function looksLikeCommitHash(text: string): boolean {
  * Processing order:
  *   1. <a href="..."> tags with local-file hrefs → append open button
  *   2. <code> tags whose text content looks like a path → add class + button
- *   3. Text nodes (outside pre/a/code) → regex match paths → insert span + button
+ *   3. Text nodes (outside a/code) → regex match paths → insert span + button
  *
  * Returns the annotated HTML and a list of detected (resolved) paths
  * for the caller to verify asynchronously.
@@ -149,7 +149,7 @@ export function annotateFilePaths(
 ): { html: string; detectedPaths: string[] } {
     if (!html) return { html: '', detectedPaths: [] }
 
-    const { projectRoot, baseDir } = options
+    const { projectRoot, baseDir, homeDir } = options
     const detectedPaths: string[] = []
 
     const doc = new DOMParser().parseFromString(html, 'text/html')
@@ -161,38 +161,42 @@ export function annotateFilePaths(
         if (/^(https?:|\/\/|mailto:|tel:|#)/i.test(href)) continue
         const resolved = baseDir
             ? resolveRelativePath(href, baseDir)
-            : resolveFilePath(href, projectRoot)
+            : resolveFilePath(href, projectRoot, homeDir)
         if (!resolved) continue
         detectedPaths.push(resolved)
         a.insertAdjacentHTML('afterend', fileOpenButtonHtml(resolved))
     }
 
-    // ── Step 2: <code> tags whose content looks like a file path ──
+    // ── Step 2: <code> tags whose content is purely a file path ──
+    // Only handles the case where the entire <code> content is a single path.
+    // Mixed content (e.g. `import "src/main.go"`) is handled by Step 3's
+    // text-node walker, which now also enters <code> elements.
     for (const code of doc.querySelectorAll('code')) {
-        // Skip <code> inside <pre> blocks (multi-line code blocks should not get buttons)
-        if (code.closest('pre')) continue
+        // Skip <code> already annotated as worktree (worktree annotation runs first)
+        if (code.classList.contains('chat-worktree-path')) continue
         const stripped = (code.textContent || '').trim()
         if (!looksLikeFilePath(stripped)) continue
-        const resolved = resolveFilePath(stripped, projectRoot)
-        if (!resolved) continue
+        const resolved = resolveFilePath(stripped, projectRoot, homeDir)
+        if (!resolved || resolved.includes(' ') || resolved.includes('"')) continue
+        // Entire <code> content is a valid file path — annotate the whole element
         detectedPaths.push(resolved)
         code.classList.add('chat-file-path')
         code.setAttribute('data-file-path', resolved)
         code.insertAdjacentHTML('afterend', fileOpenButtonHtml(resolved))
     }
 
-    // ── Step 3: Text nodes (outside pre/a/code) → regex match paths ──
+    // ── Step 3: Text nodes (outside a/worktree-annotated, but including inside <code>) → regex match paths ──
     const textNodes: Text[] = []
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
         acceptNode(node: Text) {
             const parent = node.parentElement
             if (!parent) return NodeFilter.FILTER_REJECT
-            // Skip <pre> blocks
-            if (parent.closest('pre')) return NodeFilter.FILTER_REJECT
             // Skip text inside <a> tags (handled in step 1)
             if (parent.tagName === 'A' || parent.closest('a')) return NodeFilter.FILTER_REJECT
-            // Skip text inside <code> tags (handled in step 2)
-            if (parent.tagName === 'CODE' || parent.closest('code')) return NodeFilter.FILTER_REJECT
+            // Skip text inside <code> elements already annotated by step 2
+            if (parent.classList.contains('chat-file-path')) return NodeFilter.FILTER_REJECT
+            // Skip text inside worktree-annotated elements (worktree annotation runs first)
+            if (parent.classList.contains('chat-worktree-path') || parent.closest('.chat-worktree-path')) return NodeFilter.FILTER_REJECT
             return NodeFilter.FILTER_ACCEPT
         }
     })
@@ -213,7 +217,23 @@ export function annotateFilePaths(
         let match: RegExpExecArray | null
         while ((match = FILE_PATH_RE.exec(text)) !== null) {
             const pathStr = match[0]
-            const resolved = resolveFilePath(pathStr, projectRoot)
+            let resolved = resolveFilePath(pathStr, projectRoot, homeDir)
+            // If the text immediately after this match continues with a path segment
+            // (e.g. "/.worktrees" followed by "/gitgraph-fix"), the regex only matched
+            // a directory prefix — skip it so worktree annotation can handle the full path.
+            // Note: This may over-suppress in rare cases (e.g. "src/utils.ts/v2"),
+            // but directory-prefix false matches are far more common and harmful.
+            if (resolved) {
+                const afterIdx = match.index + pathStr.length
+                if (afterIdx < text.length && text[afterIdx] === '/') {
+                    const rest = text.slice(afterIdx + 1)
+                    // If there's a continuation that looks like a path segment, this
+                    // match is incomplete (a directory prefix, not a full file path).
+                    if (rest.length > 0 && /^[a-zA-Z0-9_.-]/.test(rest)) {
+                        resolved = null // incomplete match — likely a directory prefix
+                    }
+                }
+            }
             // Push the text before this match
             if (match.index > lastIndex) {
                 parts.push({ text: text.slice(lastIndex, match.index), resolved: null })
@@ -256,164 +276,61 @@ export function annotateFilePaths(
     return { html: doc.body.innerHTML, detectedPaths }
 }
 
-/**
- * Detect potential git commit hashes in rendered HTML and insert open-commit buttons after them.
- *
- * Processing order:
- *   1. <code> tags whose text content looks like a commit hash → add class + button
- *   2. Text nodes (outside pre/a/code) → regex match hashes → insert span + button
- *
- * Returns the annotated HTML and a list of detected SHAs for the caller to verify asynchronously.
- */
-export function annotateCommitHashes(
-    html: string,
-): { html: string; detectedSHAs: string[] } {
-    if (!html) return { html: '', detectedSHAs: [] }
-
-    const detectedSHAs: string[] = []
-
-    const doc = new DOMParser().parseFromString(html, 'text/html')
-
-    // ── Step 1: <code> tags whose content looks like a commit hash ──
-    for (const code of doc.querySelectorAll('code')) {
-        // Skip <code> inside <pre> blocks
-        if (code.closest('pre')) continue
-        // Skip <code> already annotated as file path
-        if (code.classList.contains('chat-file-path')) continue
-        const stripped = (code.textContent || '').trim()
-        if (!looksLikeCommitHash(stripped)) continue
-        detectedSHAs.push(stripped)
-        code.classList.add('chat-commit-hash')
-        code.setAttribute('data-commit-sha', stripped)
-        code.insertAdjacentHTML('afterend', commitOpenButtonHtml(stripped))
-    }
-
-    // ── Step 2: Text nodes (outside pre/a/code) → regex match hashes ──
-    const textNodes: Text[] = []
-    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
-        acceptNode(node: Text) {
-            const parent = node.parentElement
-            if (!parent) return NodeFilter.FILTER_REJECT
-            // Skip <pre> blocks
-            if (parent.closest('pre')) return NodeFilter.FILTER_REJECT
-            // Skip text inside <a> tags
-            if (parent.tagName === 'A' || parent.closest('a')) return NodeFilter.FILTER_REJECT
-            // Skip text inside <code> tags (handled in step 1)
-            if (parent.tagName === 'CODE' || parent.closest('code')) return NodeFilter.FILTER_REJECT
-            // Skip already-annotated spans
-            if (parent.classList.contains('chat-file-path') || parent.classList.contains('chat-commit-hash')) return NodeFilter.FILTER_REJECT
-            return NodeFilter.FILTER_ACCEPT
-        }
-    })
-    while (walker.nextNode()) textNodes.push(walker.currentNode as Text)
-
-    // Process text nodes in reverse order so that DOM insertions
-    // don't invalidate later node positions.
-    for (let i = textNodes.length - 1; i >= 0; i--) {
-        const textNode = textNodes[i]
-        const text = textNode.textContent || ''
-        COMMIT_HASH_RE.lastIndex = 0
-        if (!COMMIT_HASH_RE.test(text)) continue
-
-        // Re-run regex to collect matches
-        COMMIT_HASH_RE.lastIndex = 0
-        const parts: Array<{ text: string; sha: string | null }> = []
-        let lastIndex = 0
-        let match: RegExpExecArray | null
-        while ((match = COMMIT_HASH_RE.exec(text)) !== null) {
-            const shaStr = match[1]
-            const isCommit = looksLikeCommitHash(shaStr)
-            // Push the text before this match
-            if (match.index > lastIndex) {
-                parts.push({ text: text.slice(lastIndex, match.index), sha: null })
-            }
-            parts.push({ text: shaStr, sha: isCommit ? shaStr : null })
-            lastIndex = match.index + shaStr.length
-        }
-        // Push remaining text after last match
-        if (lastIndex < text.length) {
-            parts.push({ text: text.slice(lastIndex), sha: null })
-        }
-
-        // Build replacement nodes
-        const parent = textNode.parentNode!
-        const frag = doc.createDocumentFragment()
-        let hasAnnotation = false
-        for (const part of parts) {
-            if (part.sha) {
-                hasAnnotation = true
-                detectedSHAs.push(part.sha)
-                const span = doc.createElement('span')
-                span.className = 'chat-commit-hash'
-                span.setAttribute('data-commit-sha', part.sha)
-                span.textContent = part.text
-                frag.appendChild(span)
-                // Commit-open button
-                const btnContainer = doc.createElement('span')
-                btnContainer.innerHTML = commitOpenButtonHtml(part.sha)
-                while (btnContainer.firstChild) frag.appendChild(btnContainer.firstChild)
-            } else {
-                frag.appendChild(doc.createTextNode(part.text))
-            }
-        }
-
-        if (hasAnnotation) {
-            parent.replaceChild(frag, textNode)
-        }
-    }
-
-    return { html: doc.body.innerHTML, detectedSHAs }
-}
-
 // Cache of verified paths: path -> true (exists) | false (not found)
 const verifiedCache = new Map<string, boolean>()
-// In-flight verification requests to avoid duplicates
-const inFlight = new Map<string, Promise<boolean>>()
-
-async function checkPathExists(path: string): Promise<boolean> {
-    if (verifiedCache.has(path)) return verifiedCache.get(path)!
-    if (inFlight.has(path)) return inFlight.get(path)!
-
-    const promise = (async () => {
-        try {
-            const [fileResp, dirResp] = await Promise.all([
-                fetch(`/api/file/${encodeURIComponent(path)}`, { method: 'HEAD' }),
-                fetch(`/api/dir?path=${encodeURIComponent(path)}`, { method: 'HEAD' }),
-            ])
-            return fileResp.ok || dirResp.ok
-        } catch {
-            return true // Network error — assume exists (best effort)
-        }
-    })()
-
-    inFlight.set(path, promise)
-    const exists = await promise
-    verifiedCache.set(path, exists)
-    inFlight.delete(path)
-    return exists
-}
+// In-flight batch request to avoid duplicate calls
+let batchInFlight: Promise<{ results: Record<string, string> }> | null = null
 
 /**
  * Check which file paths actually exist on the server,
  * and hide buttons for files that don't exist.
+ * Uses a single batch POST /api/file/batch-exists request instead of
+ * per-path HEAD requests, dramatically reducing HTTP overhead.
  */
 export async function verifyFilePaths(paths: string[], containerEl: HTMLElement): Promise<void> {
-    // Batch verification with concurrency limit
-    const limit = 6
     const unique = [...new Set(paths)]
+    if (unique.length === 0) return
+
+    // Check cache first, collect uncached paths
+    const uncached: string[] = []
     const results = new Map<string, boolean>()
 
-    for (let i = 0; i < unique.length; i += limit) {
-        const batch = unique.slice(i, i + limit)
-        const batchResults = await Promise.all(batch.map(async (path) => {
-            const exists = await checkPathExists(path)
-            return { path, exists }
-        }))
-        for (const { path, exists } of batchResults) {
-            results.set(path, exists)
+    for (const p of unique) {
+        if (verifiedCache.has(p)) {
+            results.set(p, verifiedCache.get(p)!)
+        } else {
+            uncached.push(p)
         }
     }
 
+    // Batch request for uncached paths
+    if (uncached.length > 0) {
+        try {
+            // Reuse in-flight batch request if one is already running
+            if (!batchInFlight) {
+                batchInFlight = fetch('/api/file/batch-exists', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paths: uncached }),
+                }).then(r => r.json())
+            }
+            const resp = await batchInFlight
+            batchInFlight = null
+
+            for (const [path, type] of Object.entries(resp.results)) {
+                const exists = type === 'file' || type === 'dir'
+                results.set(path, exists)
+                verifiedCache.set(path, exists)
+            }
+        } catch {
+            // Network error — assume all exist (best effort)
+            for (const p of uncached) {
+                results.set(p, true)
+            }
+        }
+    }
+
+    // Remove non-existent path annotations from DOM
     for (const [path, exists] of results) {
         if (!exists) {
             containerEl.querySelectorAll(`.chat-file-open-btn[data-file-path="${CSS.escape(path)}"]`).forEach(btn => {
@@ -426,58 +343,14 @@ export async function verifyFilePaths(paths: string[], containerEl: HTMLElement)
     }
 }
 
-// Cache of verified commit SHAs: sha -> true (is commit) | false (not a commit)
-const verifiedCommitCache = new Map<string, boolean>()
-// In-flight verification requests to avoid duplicates
-const commitInFlight = new Map<string, Promise<boolean>>()
-
-/**
- * Check which commit SHAs are valid git commit objects,
- * and hide buttons/annotations for SHAs that aren't.
- */
-export async function verifyCommitHashes(shas: string[], containerEl: HTMLElement): Promise<void> {
-    const unique = [...new Set(shas)]
-    if (unique.length === 0) return
-
-    // Batch verify: send all SHAs in one request
-    let results: Map<string, boolean>
-    try {
-        const resp = await fetch('/api/git/verify-commits', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ shas: unique }),
-        })
-        if (!resp.ok) return
-        const data = await resp.json()
-        results = new Map(Object.entries(data.results || {}).map(([sha, type]) => [sha, type === 'commit']))
-        // Update cache
-        for (const [sha, isCommit] of results) {
-            verifiedCommitCache.set(sha, isCommit)
-        }
-    } catch {
-        return // Network error — leave buttons as-is
-    }
-
-    for (const [sha, isCommit] of results) {
-        if (!isCommit) {
-            containerEl.querySelectorAll(`.chat-commit-open-btn[data-commit-sha="${CSS.escape(sha)}"]`).forEach(btn => {
-                btn.remove()
-            })
-            containerEl.querySelectorAll(`.chat-commit-hash[data-commit-sha="${CSS.escape(sha)}"]`).forEach(span => {
-                span.replaceWith(...span.childNodes)
-            })
-        }
-    }
-}
-
 /**
  * Clear the verification cache (e.g. when switching projects).
  */
 export function clearVerifiedCache(): void {
     verifiedCache.clear()
-    inFlight.clear()
-    verifiedCommitCache.clear()
-    commitInFlight.clear()
+    batchInFlight = null
+    clearCommitHashCache()
+    clearWorktreeCache()
 }
 
 /**
@@ -489,8 +362,6 @@ export function useFilePathAnnotation() {
         fileOpenButtonHtml,
         annotateFilePaths,
         verifyFilePaths,
-        annotateCommitHashes,
-        verifyCommitHashes,
         resolveRelativePath,
         openFilePath,
         clearVerifiedCache,

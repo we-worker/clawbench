@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { useAgents } from '@/composables/useAgents'
+import { useAgents, resetAgents } from '@/composables/useAgents'
 
 // Mock apiGet to control agent data
 const mockApiGet = vi.fn()
@@ -338,6 +338,37 @@ describe('useAgents', () => {
 
     it('returns false for unknown agent', () => {
       expect(hasThinkingEffortLevels('nonexistent')).toBe(false)
+    })
+  })
+
+  // --- resetAgents ---
+
+  describe('resetAgents', () => {
+    it('clears agents and defaultAgentId', async () => {
+      // After beforeEach, agents are loaded
+      expect(agents.value).toHaveLength(3)
+      expect(defaultAgentId.value).toBe('claude')
+
+      resetAgents()
+
+      expect(agents.value).toEqual([])
+      expect(defaultAgentId.value).toBe('')
+    })
+
+    it('clears loadPromise so next loadAgents re-fetches', async () => {
+      // After beforeEach, loadAgents is cached (loadPromise was set and cleared)
+      // Reset should clear the cache so a new loadAgents() triggers an API call
+      const callCountBefore = mockApiGet.mock.calls.length
+      await loadAgents()
+      expect(mockApiGet.mock.calls.length).toBe(callCountBefore) // cached, no new call
+
+      resetAgents()
+      mockApiGet.mockResolvedValue({ agents: testAgents, defaultAgent: 'gpt' })
+      await loadAgents()
+      expect(mockApiGet.mock.calls.length).toBe(callCountBefore + 1) // new API call made
+
+      // New default loaded
+      expect(defaultAgentId.value).toBe('gpt')
     })
   })
 

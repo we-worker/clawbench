@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"clawbench/internal/model"
 	"clawbench/internal/service"
 )
 
@@ -16,7 +17,7 @@ func AIChatStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, ok := requireProject(w, r)
+	projectPath, ok := requireProject(w, r)
 	if !ok {
 		return
 	}
@@ -27,6 +28,13 @@ func AIChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 	if sessionID == "" {
 		writeLocalizedErrorf(w, r, http.StatusBadRequest, "SessionIdRequired")
+		return
+	}
+
+	// Verify the session belongs to the requesting project (ISS-180)
+	// Skip ownership check if session doesn't exist in DB (not-yet-persisted or in-memory only)
+	if sessionProject := service.GetSessionProjectPath(sessionID); sessionProject != "" && sessionProject != projectPath {
+		writeLocalizedError(w, r, model.Forbidden(nil, "AccessDenied"))
 		return
 	}
 
@@ -176,6 +184,11 @@ func AIChatStream(w http.ResponseWriter, r *http.Request) {
 				}
 			case "queue_done":
 				fmt.Fprintf(w, "event: queue_done\ndata: {}\n\n")
+			case "resume_split":
+				// Internal event from AutoResumeBackend: the AI detected ExitPlanMode
+				// and will auto-resume. Forward to frontend so it can reset streaming
+				// state (clear blocks, prepare for new content after resume).
+				fmt.Fprintf(w, "event: resume_split\ndata: {}\n\n")
 			}
 
 			if canFlush {
@@ -206,6 +219,9 @@ func AIChatStream(w http.ResponseWriter, r *http.Request) {
 			// network switch) and the frontend will reconnect or fall back to polling.
 			// Let the AI goroutine finish naturally; it cleans itself up via defers.
 			// If no SSE client reconnects, the goroutine still completes and unregisters.
+			// Record the disconnect reason so the session finalizer knows the SSE
+			// client went away (distinct from an explicit user cancel).
+			service.SetCancelReason(sessionID, "disconnect")
 			slog.Info("sse client disconnected, ai session continues",
 				slog.String("session_id", sessionID),
 			)

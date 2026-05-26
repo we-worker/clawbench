@@ -39,6 +39,177 @@ export function registerSwitchTab(cb: (tab: string) => void) {
     switchTabCallback = cb
 }
 
+/** Called when a task execution completes (runningCount drops to 0) */
+function onTaskCompleted(task: any) {
+    // Sound + haptic
+    playNotificationSound()
+
+    // Navigate to task history on click
+    const navigateToHistory = () => {
+        navigateToTaskHistory(task.id)
+        if (switchTabCallback) switchTabCallback('tasks')
+    }
+
+    // Browser push notification (only when page not focused)
+    try {
+        showBrowserNotification(task.name || gt('task.title'), {
+            body: gt('task.exec.completed'),
+            tag: `task-completed-${task.id}`,
+            onClick: navigateToHistory,
+        })
+    } catch {
+        // Non-critical
+    }
+    // Toast — include task name, icon, and click-to-navigate
+    try {
+        const taskName = task.name || gt('task.title')
+        useToast().show(`${taskName} — ${gt('task.exec.completed')}`, {
+            icon: '✅',
+            type: 'success',
+            duration: 5000,
+            onClick: navigateToHistory,
+        })
+    } catch {
+        // Non-critical
+    }
+    // Set just-completed flag for dock flash animation
+    store.state.taskJustCompleted = true
+    if (justCompletedTimer) clearTimeout(justCompletedTimer)
+    justCompletedTimer = setTimeout(() => {
+        store.state.taskJustCompleted = false
+        justCompletedTimer = null
+    }, 2000)
+}
+
+// --- Module-level data methods ---
+
+async function loadTasks() {
+    try {
+        const resp = await fetch('/api/tasks')
+        if (!resp.ok) return
+        const data = await resp.json()
+        // Race condition guard: if markAllTasksRead is in progress,
+        // don't let a stale hasUnread flip taskUnread back to true
+        if (!markingReadInProgress) {
+            store.state.taskUnread = !!data.hasUnread
+        }
+        const newTasks = data.tasks || []
+        // Derive running state from runningCount
+        const hasRunning = newTasks.some((t: any) => t.runningCount > 0)
+        store.state.taskRunning = hasRunning
+
+        // ── Detect task completion (runningCount dropped to 0) ──
+        for (const task of newTasks) {
+            const id: number = task.id
+            const prevCount = prevRunningCounts.get(id) || 0
+            const currCount = task.runningCount || 0
+            // Completion: was running, now stopped, and has new unread results
+            if (prevCount > 0 && currCount === 0) {
+                const dedupKey = `${id}-${task.runCount}`
+                if (!notifiedTaskCompletions.has(dedupKey)) {
+                    notifiedTaskCompletions.add(dedupKey)
+                    // Trigger completion effects
+                    onTaskCompleted(task)
+                }
+            }
+            prevRunningCounts.set(id, currCount)
+        }
+        // Clean up dedup set for deleted tasks
+        const currentIds = new Set(newTasks.map((t: any) => t.id))
+        for (const key of prevRunningCounts.keys()) {
+            if (!currentIds.has(key)) prevRunningCounts.delete(key)
+        }
+        // Clean up notifiedTaskCompletions for tasks no longer running
+        // (they will be re-added if the task runs again)
+        for (const key of [...notifiedTaskCompletions]) {
+            const taskId = parseInt(key.split('-')[0])
+            const task = newTasks.find((t: any) => t.id === taskId)
+            if (task && task.runningCount === 0) {
+                notifiedTaskCompletions.delete(key)
+            }
+        }
+
+        // Diff-check to avoid unnecessary watcher triggers
+        if (
+            store.state.tasks.length !== newTasks.length ||
+            newTasks.some(
+                (t: any, i: number) =>
+                    t.id !== store.state.tasks[i]?.id ||
+                    t.status !== store.state.tasks[i]?.status ||
+                    t.runCount !== store.state.tasks[i]?.runCount ||
+                    t.unreadCount !== store.state.tasks[i]?.unreadCount ||
+                    t.runningCount !== store.state.tasks[i]?.runningCount
+            )
+        ) {
+            store.state.tasks = newTasks
+        }
+    } catch {
+        // Silently ignore fetch errors (network down, server restart, etc.)
+    }
+}
+
+async function markAllTasksRead() {
+    const unreadTasks = store.state.tasks.filter((t: any) => t.unreadCount > 0)
+    if (unreadTasks.length === 0) return
+    markingReadInProgress = true
+    try {
+        await Promise.all(
+            unreadTasks.map((t: any) =>
+                fetch(`/api/tasks/${t.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'read' }),
+                }).then(r => {
+                    if (!r.ok) throw new Error(`mark read failed: ${r.status}`)
+                })
+            )
+        )
+        // Optimistically clear unread counts in local store
+        for (const t of store.state.tasks) {
+            if ((t as any).unreadCount > 0) {
+                (t as any).unreadCount = 0
+            }
+        }
+        store.state.taskUnread = false
+    } catch {
+        // Mark-read failed — don't clear badge, next poll will correct
+    } finally {
+        markingReadInProgress = false
+    }
+}
+
+/** Mark a single task as read — clears unread badge for that task only */
+async function markTaskRead(taskId: number) {
+    const task = store.state.tasks.find((t: any) => t.id === taskId)
+    if (!task || (task as any).unreadCount <= 0) return
+    try {
+        const resp = await fetch(`/api/tasks/${taskId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'read' }),
+        })
+        if (!resp.ok) return
+        // Optimistically clear unread count for this task
+        ;(task as any).unreadCount = 0
+        // Re-derive taskUnread from remaining unread tasks
+        const stillHasUnread = store.state.tasks.some((t: any) => t.unreadCount > 0)
+        if (!stillHasUnread) {
+            store.state.taskUnread = false
+        }
+    } catch {
+        // Silently ignore — next poll will correct
+    }
+}
+
+// --- WS event handler ---
+
+// Called from WS task_update event
+export function onTaskEvent(data: { task_id?: string; status?: string; execution_id?: string } | undefined) {
+    if (!data) return
+    // Refresh task list on any task status change
+    loadTasks()
+}
+
 export function useTaskTab() {
     // --- Navigation methods ---
 
@@ -54,6 +225,8 @@ export function useTaskTab() {
         currentView.value = 'history'
         execDetailOpen.value = false
         formViewOpen.value = false
+        // Clear unread badge for this task — user is viewing its execution history
+        markTaskRead(taskId)
     }
 
     function goBack() {
@@ -82,12 +255,38 @@ export function useTaskTab() {
         selectedExecId.value = execId
         selectedExecData.value = execData || null
         execDetailOpen.value = true
+        // If no execData provided, auto-fetch from API (e.g. from push notification deep link)
+        if (!execData) {
+            refreshExecDetail()
+        }
     }
 
     function closeExecDetail() {
         execDetailOpen.value = false
         selectedExecId.value = null
         selectedExecData.value = null
+    }
+
+    /** Refresh the currently-viewed execution detail by re-fetching from API */
+    async function refreshExecDetail() {
+        if (!selectedTaskId.value || !selectedExecId.value) return
+        try {
+            const resp = await fetch(`/api/tasks/${selectedTaskId.value}/executions?limit=50`)
+            if (!resp.ok) return
+            const data = await resp.json()
+            const exec = (data.executions || []).find((e: any) => String(e.id) === String(selectedExecId.value) || String(e.sessionId) === String(selectedExecId.value))
+            if (exec) {
+                // Preserve existing content/blocks/metadata/preview if API returns null
+                // (LEFT JOIN may return null content when chat_history has no matching row)
+                const { content: _apiContent, blocks: _apiBlocks, metadata: _apiMetadata, preview: _apiPreview, ...safeFields } = exec
+                const merged = { ...selectedExecData.value, ...safeFields }
+                // Only overwrite content if API returned a non-null value
+                if (exec.content != null) merged.content = exec.content
+                selectedExecData.value = merged
+            }
+        } catch {
+            // Silently ignore
+        }
     }
 
     function openCreateForm() {
@@ -102,145 +301,6 @@ export function useTaskTab() {
 
     function closeForm() {
         formViewOpen.value = false
-    }
-
-    // --- Data methods ---
-
-    async function loadTasks() {
-        try {
-            const resp = await fetch('/api/tasks')
-            if (!resp.ok) return
-            const data = await resp.json()
-            // Race condition guard: if markAllTasksRead is in progress,
-            // don't let a stale hasUnread flip taskUnread back to true
-            if (!markingReadInProgress) {
-                store.state.taskUnread = !!data.hasUnread
-            }
-            const newTasks = data.tasks || []
-            // Derive running state from runningCount
-            const hasRunning = newTasks.some((t: any) => t.runningCount > 0)
-            store.state.taskRunning = hasRunning
-
-            // ── Detect task completion (runningCount dropped to 0) ──
-            for (const task of newTasks) {
-                const id: number = task.id
-                const prevCount = prevRunningCounts.get(id) || 0
-                const currCount = task.runningCount || 0
-                // Completion: was running, now stopped, and has new unread results
-                if (prevCount > 0 && currCount === 0) {
-                    const dedupKey = `${id}-${task.runCount}`
-                    if (!notifiedTaskCompletions.has(dedupKey)) {
-                        notifiedTaskCompletions.add(dedupKey)
-                        // Trigger completion effects
-                        onTaskCompleted(task)
-                    }
-                }
-                prevRunningCounts.set(id, currCount)
-            }
-            // Clean up dedup set for deleted tasks
-            const currentIds = new Set(newTasks.map((t: any) => t.id))
-            for (const key of prevRunningCounts.keys()) {
-                if (!currentIds.has(key)) prevRunningCounts.delete(key)
-            }
-            // Clean up notifiedTaskCompletions for tasks no longer running
-            // (they will be re-added if the task runs again)
-            for (const key of [...notifiedTaskCompletions]) {
-                const taskId = parseInt(key.split('-')[0])
-                const task = newTasks.find((t: any) => t.id === taskId)
-                if (task && task.runningCount === 0) {
-                    notifiedTaskCompletions.delete(key)
-                }
-            }
-
-            // Diff-check to avoid unnecessary watcher triggers
-            if (
-                store.state.tasks.length !== newTasks.length ||
-                newTasks.some(
-                    (t: any, i: number) =>
-                        t.id !== store.state.tasks[i]?.id ||
-                        t.status !== store.state.tasks[i]?.status ||
-                        t.runCount !== store.state.tasks[i]?.runCount ||
-                        t.unreadCount !== store.state.tasks[i]?.unreadCount ||
-                        t.runningCount !== store.state.tasks[i]?.runningCount
-                )
-            ) {
-                store.state.tasks = newTasks
-            }
-        } catch {
-            // Silently ignore fetch errors (network down, server restart, etc.)
-        }
-    }
-
-    /** Called when a task execution completes (runningCount drops to 0) */
-    function onTaskCompleted(task: any) {
-        // Sound + haptic
-        playNotificationSound()
-
-        // Navigate to task history on click
-        const navigateToHistory = () => {
-            navigateToTaskHistory(task.id)
-            if (switchTabCallback) switchTabCallback('tasks')
-        }
-
-        // Browser push notification (only when page not focused)
-        try {
-            showBrowserNotification(task.name || gt('task.title'), {
-                body: gt('task.exec.completed'),
-                tag: `task-completed-${task.id}`,
-                onClick: navigateToHistory,
-            })
-        } catch {
-            // Non-critical
-        }
-        // Toast — include task name, icon, and click-to-navigate
-        try {
-            const taskName = task.name || gt('task.title')
-            useToast().show(`${taskName} — ${gt('task.exec.completed')}`, {
-                icon: '✅',
-                type: 'success',
-                duration: 5000,
-                onClick: navigateToHistory,
-            })
-        } catch {
-            // Non-critical
-        }
-        // Set just-completed flag for dock flash animation
-        store.state.taskJustCompleted = true
-        if (justCompletedTimer) clearTimeout(justCompletedTimer)
-        justCompletedTimer = setTimeout(() => {
-            store.state.taskJustCompleted = false
-            justCompletedTimer = null
-        }, 2000)
-    }
-
-    async function markAllTasksRead() {
-        const unreadTasks = store.state.tasks.filter((t: any) => t.unreadCount > 0)
-        if (unreadTasks.length === 0) return
-        markingReadInProgress = true
-        try {
-            await Promise.all(
-                unreadTasks.map((t: any) =>
-                    fetch(`/api/tasks/${t.id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'read' }),
-                    }).then(r => {
-                        if (!r.ok) throw new Error(`mark read failed: ${r.status}`)
-                    })
-                )
-            )
-            // Optimistically clear unread counts in local store
-            for (const t of store.state.tasks) {
-                if ((t as any).unreadCount > 0) {
-                    (t as any).unreadCount = 0
-                }
-            }
-            store.state.taskUnread = false
-        } catch {
-            // Mark-read failed — don't clear badge, next poll will correct
-        } finally {
-            markingReadInProgress = false
-        }
     }
 
     // --- Polling ---
@@ -275,6 +335,7 @@ export function useTaskTab() {
         goBack,
         openExecDetail,
         closeExecDetail,
+        refreshExecDetail,
         openCreateForm,
         openEditForm,
         closeForm,
@@ -282,6 +343,7 @@ export function useTaskTab() {
         // Data methods
         loadTasks,
         markAllTasksRead,
+        markTaskRead,
 
         // Polling
         startTaskPolling,

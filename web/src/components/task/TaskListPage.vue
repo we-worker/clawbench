@@ -1,8 +1,11 @@
 <template>
   <div class="task-list-page">
-    <!-- Compact header: breadcrumb + create button -->
+    <!-- Compact header: breadcrumb + refresh + create button -->
     <div class="list-header">
       <TaskBreadcrumb />
+      <button class="header-btn refresh-btn" :class="{ spinning: loading }" :disabled="loading" @click="refresh" :title="t('common.refresh')">
+        <RefreshCw :size="14" />
+      </button>
       <button class="create-btn" @click="$emit('create')" :title="t('task.form.createTitle')">
         <Plus :size="16" />
       </button>
@@ -30,7 +33,6 @@
               <span class="task-item-name">{{ task.name }}</span>
               <span v-if="task.runningCount > 0" class="task-item-running-dot" :title="t('task.exec.running')"></span>
               <span v-if="task.unreadCount > 0" class="task-item-unread">{{ task.unreadCount }}</span>
-              <span class="task-item-status" :class="task.status">{{ statusLabel(task.status) }}</span>
             </div>
             <div class="task-item-meta">
               <div class="meta-item cron" :title="task.cronExpr">
@@ -48,14 +50,18 @@
               <span>{{ t('task.nextRun', { time: formatDateTime(task.nextRunAt) }) }}</span>
             </div>
           </div>
-          <button
-            v-if="task.runCount > 0 || task.runningCount > 0"
-            class="task-item-history-btn"
-            @click.stop="$emit('history', task.id)"
-            :title="t('task.history')"
-          >
-            <History :size="14" />
-          </button>
+          <div class="task-item-right">
+            <span class="task-item-status" :class="task.status">{{ statusLabel(task.status) }}</span>
+            <button
+              v-if="task.runCount > 0 || task.runningCount > 0"
+              class="task-item-history-btn"
+              :class="{ 'has-unread-flash': task.unreadCount > 0 }"
+              @click.stop="$emit('history', task.id)"
+              :title="t('task.history')"
+            >
+              <History :size="16" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -63,7 +69,7 @@
 </template>
 
 <script setup lang="ts">
-import { Plus, Loader2, CalendarX, Clock, Repeat, CalendarClock, History } from 'lucide-vue-next'
+import { Plus, Loader2, CalendarX, Clock, Repeat, CalendarClock, History, RefreshCw } from 'lucide-vue-next'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskTab } from '@/composables/useTaskTab'
@@ -132,6 +138,42 @@ onMounted(refresh)
   justify-content: center;
   flex-shrink: 0;
   transition: all 0.2s ease;
+}
+
+/* Header icon button (refresh, etc.) */
+.header-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 14px;
+  background: var(--bg-secondary, #f1f3f5);
+  color: var(--text-secondary, #666);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.header-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (hover: hover) {
+  .header-btn:hover:not(:disabled) {
+    background: var(--bg-tertiary, #eef1f4);
+    color: var(--accent-color, #0066cc);
+  }
+}
+
+.header-btn:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.header-btn.spinning svg {
+  animation: spin 1s linear infinite;
 }
 
 @media (hover: hover) {
@@ -249,7 +291,7 @@ onMounted(refresh)
   padding: 2px 6px;
   border-radius: 10px;
   font-weight: 600;
-  background: #ef4444;
+  background: var(--accent-color, #0066cc);
   color: #fff;
   flex-shrink: 0;
   min-width: 16px;
@@ -258,16 +300,23 @@ onMounted(refresh)
 }
 
 .task-item.has-unread {
-  border-left: 3px solid #ef4444;
+  border-left: 3px solid var(--accent-color, #0066cc);
 }
 
 .task-item.has-unread .task-item-icon {
-  animation: task-unread-flash 0.8s ease-in-out infinite;
+  /* static accent highlight, no animation */
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent-color, #0066cc) 40%, transparent));
 }
 
-@keyframes task-unread-flash {
-  0%, 100% { opacity: 1; text-shadow: 0 0 0 transparent; }
-  50% { opacity: 0.7; text-shadow: 0 0 8px color-mix(in srgb, var(--accent-color, #0066cc) 40%, transparent); }
+/* When both unread and running, keep the unread left border + icon highlight
+ * but also apply running border pulse via box-shadow to avoid animation conflict */
+.task-item.has-unread.is-running {
+  border-left: 3px solid var(--accent-color, #0066cc);
+  animation: task-card-running 2s ease-in-out infinite;
+}
+
+.task-item.has-unread.is-running .task-item-icon {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent-color, #0066cc) 40%, transparent));
 }
 
 .task-item-status {
@@ -310,6 +359,7 @@ onMounted(refresh)
 }
 
 .task-item.is-running {
+  background: rgba(34, 197, 94, 0.05);
   animation: task-card-running 2s ease-in-out infinite;
 }
 
@@ -364,31 +414,50 @@ onMounted(refresh)
   width: fit-content;
 }
 
+.task-item-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
+  margin-left: 10px;
+}
+
 .task-item-history-btn {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   border: none;
-  border-radius: 14px;
-  background: transparent;
-  color: var(--text-muted, #999);
+  border-radius: 17px;
+  background: var(--bg-tertiary, #eef1f4);
+  color: var(--text-secondary, #666);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   transition: all 0.2s ease;
-  align-self: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 @media (hover: hover) {
   .task-item-history-btn:hover {
-    background: var(--bg-tertiary, #eef1f4);
-    color: var(--accent-color, #0066cc);
+    background: var(--accent-color, #0066cc);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(0, 102, 204, 0.3);
+    transform: translateY(-1px);
   }
 }
 
 .task-item-history-btn:active {
   transform: scale(0.9);
   background: var(--border-color, #e5e5e5);
+}
+
+/* Static indicator for history button when task has unread messages */
+.task-item-history-btn.has-unread-flash {
+  color: var(--accent-color, #0066cc);
+  background: color-mix(in srgb, var(--accent-color, #0066cc) 12%, var(--bg-tertiary, #eef1f4));
 }
 </style>

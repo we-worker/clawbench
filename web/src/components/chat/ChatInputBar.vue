@@ -6,7 +6,7 @@
         <span class="chat-group-label" :title="t('chat.actions.session')">
           <MessageSquare :size="12" />
         </span>
-        <button class="chat-action-btn" :class="{ 'has-unread': chatUnread, 'has-running': chatRunning && !chatUnread }"
+        <button class="chat-action-btn" :class="{ 'has-unread': chatUnread, 'has-running': chatRunning }"
           @click="$emit('open-session-tab', 'sessions')"
           :title="t('chat.actions.session')">
           <List :size="14" />
@@ -87,7 +87,7 @@
             <Paperclip :size="16" />
           </button>
         </div>
-        <button v-if="inputText && !loading" class="chat-clear-btn" @click="inputText = ''" :title="t('chat.input.clearInput')">
+        <button v-if="inputText" class="chat-clear-btn" @click="inputText = ''" :title="t('chat.input.clearInput')">
           <XCircle :size="16" />
         </button>
         <textarea class="chat-textarea"
@@ -97,7 +97,9 @@
           :placeholder="pendingFiles.length > 0 ? t('chat.input.placeholderOptional') : loading ? t('chat.input.placeholderQueue') : t('chat.input.placeholder')"
           rows="1"
           @keydown.enter.exact.prevent="$emit('send', inputText.trim())"
-          @blur="autoResizeTextarea"></textarea>
+          @focus="onTextareaFocus"
+          @blur="onTextareaBlur"
+          ></textarea>
         <button v-if="!stopPrimed" class="chat-send-btn" ref="sendBtnRef" :class="{ queued: loading }" @click.stop="handleSendClick" :title="loading ? t('chat.input.enqueue') : t('chat.input.send')">
           <!-- Queue mode: inbox with down arrow (enqueue) -->
           <Inbox v-if="loading" :size="16" />
@@ -192,6 +194,7 @@ import QuickSendDialog from '@/components/chat/QuickSendDialog.vue'
 import { createStopButtonMachine } from '@/utils/stopButtonMachine.ts'
 import { useDialog } from '@/composables/useDialog.ts'
 import { useQuickSend } from '@/composables/useQuickSend'
+import { useChatKeyboard } from '@/composables/useChatKeyboard'
 
 const { t } = useI18n()
 const dialog = useDialog()
@@ -251,6 +254,10 @@ const showModelMenu = ref(false)
 const modelChipRef = ref(null)
 const showThinkingEffortMenu = ref(false)
 const thinkingEffortChipRef = ref(null)
+
+// Keyboard detection for iOS (no adjustResize) — activates visualViewport monitoring
+// when textarea is focused so App.vue can compensate the layout.
+const chatKeyboard = useChatKeyboard()
 
 // Stop button two-click confirmation state
 const stopPrimed = ref(false)
@@ -334,6 +341,16 @@ function autoResizeTextarea() {
   const maxContentHeight = lineHeight * 3
   const maxHeight = maxContentHeight + paddingTop + paddingBottom
   el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
+}
+
+function onTextareaFocus() {
+  chatKeyboard.activate()
+  autoResizeTextarea()
+}
+
+function onTextareaBlur() {
+  chatKeyboard.debounceDeactivate()
+  autoResizeTextarea()
 }
 
 // Watch inputText changes (both user input and programmatic changes like draft restore)
@@ -520,6 +537,7 @@ defineExpose({
     background: var(--bg-tertiary, #f0f0f0);
     pointer-events: none;
     user-select: none;
+    border-right: 1px solid var(--border-color, #e5e5e5);
 }
 
 .chat-action-group .chat-action-btn:last-child {
@@ -588,37 +606,37 @@ defineExpose({
   cursor: not-allowed;
 }
 
-/* Unread session indicator — fast flash on the button (GPU-safe: opacity + box-shadow) */
+/* Unread session indicator — static accent dot only (no background tint, no flash animation).
+ * The user is already on the chat tab, so flashing is unnecessary and distracting.
+ * A small dot is enough to indicate other sessions have unread messages.
+ * Can stack with .has-running sweep light: unread = dot, running = sweep. */
 .chat-action-btn.has-unread {
     position: relative;
-    color: var(--accent-color, #0066cc);
-    background: color-mix(in srgb, var(--accent-color, #0066cc) 16%, transparent);
-    animation: unread-flash 0.8s ease-in-out infinite;
 }
 
-.chat-action-btn.has-unread:active {
-    animation: none;
-    background: color-mix(in srgb, var(--accent-color, #0066cc) 30%, transparent);
-    transform: scale(0.92);
+.chat-action-btn.has-unread::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-color, #0066cc);
+    z-index: 1;
 }
 
-@keyframes unread-flash {
-    0%, 100% {
-        opacity: 0.6;
-        box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-color, #0066cc) 0%, transparent);
-    }
-    50% {
-        opacity: 1;
-        box-shadow: 0 0 10px 2px color-mix(in srgb, var(--accent-color, #0066cc) 25%, transparent);
-    }
-}
-
-/* Running session indicator — horizontal sweep light */
+/* Running session indicator — refined sweep light with accent color blend */
+/* Stacks with .has-unread: sweep light (::before) + unread dot (::after) coexist */
 .chat-action-btn.has-running {
     position: relative;
     overflow: hidden;
     color: var(--accent-color, #0066cc);
     background: color-mix(in srgb, var(--accent-color, #0066cc) 8%, transparent);
+}
+
+/* When both unread and running, keep running's background as-is */
+.chat-action-btn.has-unread.has-running {
 }
 
 .chat-action-btn.has-running:active {
@@ -631,16 +649,25 @@ defineExpose({
     position: absolute;
     top: 0;
     left: 0;
-    width: 60%;
+    width: 40%;
     height: 100%;
-    transform: translateX(-160%);
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
-    animation: sweep-light 2s ease-in-out infinite;
+    transform: translateX(-140%);
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        color-mix(in srgb, var(--accent-color, #0066cc) 12%, rgba(255,255,255,0.08)) 25%,
+        color-mix(in srgb, var(--accent-color, #0066cc) 30%, rgba(255,255,255,0.22)) 50%,
+        color-mix(in srgb, var(--accent-color, #0066cc) 12%, rgba(255,255,255,0.08)) 75%,
+        transparent 100%
+    );
+    animation: sweep-light 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 @keyframes sweep-light {
-    0% { transform: translateX(-60%); }
-    100% { transform: translateX(160%); }
+    0% { transform: translateX(-40%); opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { transform: translateX(200%); opacity: 0; }
 }
 
 .chat-action-btn svg {
@@ -657,7 +684,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   background: var(--bg-tertiary, #f0f0f0);
-  flex: 1;
+  flex: none;
   min-width: 0;
   border: none;
   border-radius: 20px;
@@ -753,6 +780,27 @@ defineExpose({
 .chat-attach-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Clear input button (next to attach button) */
+.chat-clear-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted, #999);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+
+.chat-clear-btn:hover {
+  color: var(--danger-color, #dc3545);
+  background: color-mix(in srgb, var(--danger-color, #dc3545) 8%, transparent);
 }
 
 /* Attachment tags row */
@@ -868,34 +916,13 @@ defineExpose({
   padding: 4px 6px 6px;
 }
 
-/* Clear input button (next to attach button) */
-.chat-clear-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-muted, #999);
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
-  flex-shrink: 0;
-  align-self: flex-end;
-}
-
-.chat-clear-btn:hover {
-  color: var(--danger-color, #dc3545);
-  background: color-mix(in srgb, var(--danger-color, #dc3545) 8%, transparent);
-}
-
 .chat-textarea {
   flex: 1;
   padding: 4px 8px;
   border: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 20px;
   outline: none;
   resize: none;

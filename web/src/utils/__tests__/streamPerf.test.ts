@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isValidAskContent, detectAskQuestion } from '../streamPerf'
+import { isValidAskContent, detectAskQuestion, extractScheduledTaskIds, stripScheduledTaskTags, taskChanged, StaticBlockCache, SCHEDULED_TASK_RE } from '../streamPerf'
 
 describe('isValidAskContent', () => {
   it('accepts standard JSON object with questions array', () => {
@@ -73,5 +73,199 @@ describe('detectAskQuestion', () => {
     expect(result.content).toBeDefined()
     // The content should be parseable as JSON with questions
     expect(isValidAskContent(result.content!)).toBe(true)
+  })
+})
+
+describe('extractScheduledTaskIds', () => {
+  it('extracts a single ID', () => {
+    expect(extractScheduledTaskIds('<scheduled-task id="42" />')).toEqual(['42'])
+  })
+
+  it('extracts multiple IDs', () => {
+    const text = '<scheduled-task id="1" /> and <scheduled-task id="99" />'
+    expect(extractScheduledTaskIds(text)).toEqual(['1', '99'])
+  })
+
+  it('returns empty array when no tags present', () => {
+    expect(extractScheduledTaskIds('no tags here')).toEqual([])
+  })
+
+  it('does not match non-integer IDs', () => {
+    expect(extractScheduledTaskIds('<scheduled-task id="abc" />')).toEqual([])
+    expect(extractScheduledTaskIds('<scheduled-task id="3.14" />')).toEqual([])
+  })
+
+  it('extracts IDs from tags at different positions', () => {
+    const text = 'start <scheduled-task id="7" /> middle <scheduled-task id="13" /> end'
+    expect(extractScheduledTaskIds(text)).toEqual(['7', '13'])
+  })
+
+  it('resets lastIndex so repeated calls work correctly', () => {
+    const text = '<scheduled-task id="5" />'
+    // First call
+    expect(extractScheduledTaskIds(text)).toEqual(['5'])
+    // If lastIndex is not reset, second call on same regex would return []
+    expect(extractScheduledTaskIds(text)).toEqual(['5'])
+  })
+})
+
+describe('stripScheduledTaskTags', () => {
+  it('removes a single tag', () => {
+    expect(stripScheduledTaskTags('before <scheduled-task id="1" /> after')).toBe('before  after')
+  })
+
+  it('removes multiple tags', () => {
+    expect(stripScheduledTaskTags('<scheduled-task id="1" />mid<scheduled-task id="2" />')).toBe('mid')
+  })
+
+  it('preserves content between and around tags', () => {
+    const text = 'A <scheduled-task id="10" /> B <scheduled-task id="20" /> C'
+    expect(stripScheduledTaskTags(text)).toBe('A  B  C')
+  })
+
+  it('returns trimmed text unchanged when no tags present', () => {
+    expect(stripScheduledTaskTags('hello world')).toBe('hello world')
+  })
+
+  it('trims the result', () => {
+    expect(stripScheduledTaskTags('  <scheduled-task id="1" />  ')).toBe('')
+  })
+
+  it('resets lastIndex so repeated calls work correctly', () => {
+    const text = '<scheduled-task id="5" />hello'
+    expect(stripScheduledTaskTags(text)).toBe('hello')
+    expect(stripScheduledTaskTags(text)).toBe('hello')
+  })
+})
+
+describe('taskChanged', () => {
+  const baseTask = {
+    status: 'active',
+    name: 'test',
+    cronExpr: '0 * * * *',
+    runCount: 0,
+    lastRunAt: null,
+    nextRunAt: '2025-01-01',
+    runningCount: 0,
+    repeatMode: 'repeat',
+    maxRuns: 0,
+    agentId: 'agent-1',
+  }
+
+  it('returns true when oldTask is null', () => {
+    expect(taskChanged(null, baseTask)).toBe(true)
+  })
+
+  it('returns true when newTask is null', () => {
+    expect(taskChanged(baseTask, null)).toBe(true)
+  })
+
+  it('returns true when both are null', () => {
+    expect(taskChanged(null, null)).toBe(true)
+  })
+
+  it('returns false when all key fields are the same', () => {
+    expect(taskChanged(baseTask, { ...baseTask })).toBe(false)
+  })
+
+  it('returns false when extra non-key fields differ', () => {
+    expect(taskChanged(baseTask, { ...baseTask, extraField: 'different' })).toBe(false)
+  })
+
+  it.each([
+    ['status', 'paused'],
+    ['name', 'renamed'],
+    ['cronExpr', '0 0 * * *'],
+    ['runCount', 5],
+    ['lastRunAt', '2025-06-01'],
+    ['nextRunAt', '2025-07-01'],
+    ['runningCount', 3],
+    ['repeatMode', 'once'],
+    ['maxRuns', 10],
+    ['agentId', 'agent-2'],
+  ] as const)('returns true when %s differs', (key, value) => {
+    expect(taskChanged(baseTask, { ...baseTask, [key]: value })).toBe(true)
+  })
+})
+
+describe('StaticBlockCache', () => {
+  it('returns undefined for cache miss', () => {
+    const cache = new StaticBlockCache()
+    expect(cache.get('msg1', 0, 'hello')).toBeUndefined()
+  })
+
+  it('stores and retrieves a value', () => {
+    const cache = new StaticBlockCache()
+    cache.set('msg1', 0, 'hello', '<p>hello</p>')
+    expect(cache.get('msg1', 0, 'hello')).toBe('<p>hello</p>')
+  })
+
+  it('clears all entries', () => {
+    const cache = new StaticBlockCache()
+    cache.set('msg1', 0, 'a', '<p>a</p>')
+    cache.set('msg2', 0, 'b', '<p>b</p>')
+    cache.clear()
+    expect(cache.get('msg1', 0, 'a')).toBeUndefined()
+    expect(cache.get('msg2', 0, 'b')).toBeUndefined()
+  })
+
+  it('differentiates by msgId', () => {
+    const cache = new StaticBlockCache()
+    cache.set('msg1', 0, 'text', '<p>A</p>')
+    cache.set('msg2', 0, 'text', '<p>B</p>')
+    expect(cache.get('msg1', 0, 'text')).toBe('<p>A</p>')
+    expect(cache.get('msg2', 0, 'text')).toBe('<p>B</p>')
+  })
+
+  it('differentiates by blockIdx', () => {
+    const cache = new StaticBlockCache()
+    cache.set('msg1', 0, 'text', '<p>A</p>')
+    cache.set('msg1', 1, 'text', '<p>B</p>')
+    expect(cache.get('msg1', 0, 'text')).toBe('<p>A</p>')
+    expect(cache.get('msg1', 1, 'text')).toBe('<p>B</p>')
+  })
+
+  it('differentiates by text content', () => {
+    const cache = new StaticBlockCache()
+    cache.set('msg1', 0, 'hello', '<p>hello</p>')
+    expect(cache.get('msg1', 0, 'world')).toBeUndefined()
+  })
+
+  it('makeKey uses text length as part of key', () => {
+    const cache = new StaticBlockCache()
+    // Two strings with same prefix/suffix but different length
+    const short = 'ab'
+    const long = 'a123456789012345678901234567890b'
+    cache.set('msg1', 0, short, '<p>short</p>')
+    cache.set('msg1', 0, long, '<p>long</p>')
+    expect(cache.get('msg1', 0, short)).toBe('<p>short</p>')
+    expect(cache.get('msg1', 0, long)).toBe('<p>long</p>')
+  })
+
+  it('makeKey omits prefix when text length <= 40', () => {
+    const cache = new StaticBlockCache()
+    const text40 = 'a'.repeat(40)
+    const text41 = 'a'.repeat(41)
+    // Both have same length-based suffix behavior, but different text.length (40 vs 41)
+    // so keys differ
+    cache.set('msg1', 0, text40, '<p>40</p>')
+    cache.set('msg1', 0, text41, '<p>41</p>')
+    expect(cache.get('msg1', 0, text40)).toBe('<p>40</p>')
+    expect(cache.get('msg1', 0, text41)).toBe('<p>41</p>')
+  })
+
+  it('makeKey includes prefix for text length > 40', () => {
+    const cache = new StaticBlockCache()
+    // 42 chars: first 20 differ, last 20 same
+    const textA = 'aaaaaaaaaaaaaaaaaaaa' + 'x'.repeat(2) + 'bbbbbbbbbbbbbbbbbbbb' // prefix=aaa..., suffix=bbb...
+    const textB = 'cccccccccccccccccccc' + 'x'.repeat(2) + 'bbbbbbbbbbbbbbbbbbbb' // prefix=ccc..., suffix=bbb...
+    cache.set('msg1', 0, textA, '<p>A</p>')
+    expect(cache.get('msg1', 0, textB)).toBeUndefined()
+  })
+
+  it('accepts numeric msgId', () => {
+    const cache = new StaticBlockCache()
+    cache.set(42, 0, 'text', '<p>ok</p>')
+    expect(cache.get(42, 0, 'text')).toBe('<p>ok</p>')
   })
 })

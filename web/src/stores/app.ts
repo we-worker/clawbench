@@ -1,6 +1,6 @@
 // Global application state (singleton reactive store)
 import { reactive } from 'vue'
-import { apiGet, apiPost } from '@/utils/api.ts'
+import { apiGet, apiPost } from '@/utils/api'
 import { baseName, dirName } from '@/utils/path.ts'
 import { gt } from '@/composables/useLocale'
 import { useToast } from '@/composables/useToast'
@@ -33,6 +33,7 @@ interface AppState {
     projectRoot: string
     projectName: string
     watchDir: string
+    homeDir: string
 
     // Upload config
     uploadMaxSizeMB: number
@@ -41,8 +42,12 @@ interface AppState {
     // Chat UI config
     chatInitialMessages: number
     chatPageSize: number
+    chatSessionPageSize: number
     chatCollapsedHeight: number
     sessionMaxCount: number
+
+    // Recent projects config
+    recentProjectsMaxCount: number
 
     // Chat unread badge
     chatUnread: boolean
@@ -65,26 +70,18 @@ interface AppState {
     // File browser
     currentDir: string
     dirEntries: DirEntry[]
-    allItems: DirEntry[]
-    currentFileList: unknown[]
     dirLoading: boolean
 
     // Current file
     currentFile: CurrentFile | null
-
-    // File history (browser-like navigation)
-    fileHistory: string[]
-    fileHistoryIndex: number
 
     // Theme
     theme: string
 
     // Git
     gitBranch: string
-    isGitRepo: boolean
-
-    // Git navigation (commit hash links from chat)
-    commitNavigateSha: string | null
+    gitHead: string
+    gitDirty: boolean
 
 }
 
@@ -93,6 +90,7 @@ const state = reactive<AppState>({
     projectRoot: '',
     projectName: '',
     watchDir: '',
+    homeDir: '',
 
     // Upload config
     uploadMaxSizeMB: 100,
@@ -101,8 +99,10 @@ const state = reactive<AppState>({
     // Chat UI config
     chatInitialMessages: 20,
     chatPageSize: 20,
+    chatSessionPageSize: 10,
     chatCollapsedHeight: 150,
     sessionMaxCount: 10,
+    recentProjectsMaxCount: 10,
     chatUnread: false,
     chatRunning: false,
     taskUnread: false,
@@ -113,24 +113,18 @@ const state = reactive<AppState>({
     // File browser
     currentDir: '',
     dirEntries: [],
-    allItems: [],
-    currentFileList: [],
     dirLoading: false,
 
     // Current file
     currentFile: null,
-
-    // File history (browser-like navigation)
-    fileHistory: [],
-    fileHistoryIndex: -1,
 
     // Theme
     theme: 'light',
 
     // Git
     gitBranch: '',
-    isGitRepo: false,
-    commitNavigateSha: null,
+    gitHead: '',
+    gitDirty: false,
 
 })
 
@@ -141,21 +135,24 @@ const state = reactive<AppState>({
 async function loadProject(): Promise<void> {
     try {
         try {
-            const wd = await apiGet<{ watchDir: string; uploadMaxSizeMB: number; uploadMaxFiles: number; chatInitialMessages?: number; chatPageSize?: number; chatCollapsedHeight?: number; sessionMaxCount?: number }>('/api/watch-dir')
+            const wd = await apiGet<{ watchDir: string; uploadMaxSizeMB: number; uploadMaxFiles: number; chatInitialMessages?: number; chatPageSize?: number; chatSessionPageSize?: number; chatCollapsedHeight?: number; sessionMaxCount?: number; recentProjectsMaxCount?: number }>('/api/watch-dir')
             state.watchDir = wd.watchDir || ''
             if (wd.uploadMaxSizeMB > 0) state.uploadMaxSizeMB = wd.uploadMaxSizeMB
             if (wd.uploadMaxFiles > 0) state.uploadMaxFiles = wd.uploadMaxFiles
             if (wd.chatInitialMessages > 0) state.chatInitialMessages = wd.chatInitialMessages
             if (wd.chatPageSize > 0) state.chatPageSize = wd.chatPageSize
+            if (wd.chatSessionPageSize > 0) state.chatSessionPageSize = wd.chatSessionPageSize
             if (wd.chatCollapsedHeight > 0) state.chatCollapsedHeight = wd.chatCollapsedHeight
             if (wd.sessionMaxCount > 0) state.sessionMaxCount = wd.sessionMaxCount
+            if (wd.recentProjectsMaxCount > 0) state.recentProjectsMaxCount = wd.recentProjectsMaxCount
         } catch (error) {
             console.error('[loadProject] watchDir failed:', error)
         }
-        const data = await apiGet<{ path: string }>('/api/project')
+        const data = await apiGet<{ path: string; homeDir?: string }>('/api/project')
         if (!data.path) return
         state.projectRoot = data.path
         state.projectName = baseName(data.path)
+        state.homeDir = data.homeDir || ''
         localStorage.setItem('currentProjectPath', data.path)
         // Add to recent projects
         apiPost('/api/recent-projects', { path: data.path }).catch(() => {})
@@ -164,28 +161,62 @@ async function loadProject(): Promise<void> {
     }
 }
 
-async function setProject(path: string): Promise<void> {
-    await apiPost('/api/project', { path })
-    window.location.reload()
+async function setProject(path: string): Promise<string> {
+    const data = await apiPost<{ ok: string; path: string }>('/api/project', { path })
+    resetProjectState()
+    return data.path || path
+}
+
+function resetProjectState(): void {
+    // Project
+    state.projectRoot = ''
+    state.projectName = ''
+    state.watchDir = ''
+    state.homeDir = ''
+    // File browser
+    state.currentDir = ''
+    state.dirEntries = []
+    state.dirLoading = false
+    state.currentFile = null
+    // Git
+    state.gitBranch = ''
+    state.gitHead = ''
+    state.gitDirty = false
+    // Chat/task badges
+    state.chatUnread = false
+    state.chatRunning = false
+    state.taskUnread = false
+    state.taskRunning = false
+    state.taskJustCompleted = false
+    state.tasks = []
+    // Config defaults
+    state.uploadMaxSizeMB = 100
+    state.uploadMaxFiles = 20
+    state.chatInitialMessages = 20
+    state.chatPageSize = 20
+    state.chatSessionPageSize = 10
+    state.chatCollapsedHeight = 150
+    state.sessionMaxCount = 10
+    state.recentProjectsMaxCount = 10
 }
 
 // =============================================
 // Git
 // =============================================
 
-async function loadGitBranch(): Promise<void> {
+async function loadGitBranch(): Promise<{ isGit: boolean; branch: string; head: string; dirty: boolean }> {
     try {
-        const data = await apiGet<{ isGit: boolean; branch: string }>('/api/git/branch')
-        state.isGitRepo = data.isGit
+        const data = await apiGet<{ isGit: boolean; branch: string; head: string; dirty: boolean }>('/api/git/branch')
         state.gitBranch = data.branch || ''
+        state.gitHead = data.head || ''
+        state.gitDirty = !!data.dirty
+        return data
     } catch (_) {
-        state.isGitRepo = false
         state.gitBranch = ''
+        state.gitHead = ''
+        state.gitDirty = false
+        return { isGit: false, branch: '', head: '', dirty: false }
     }
-}
-
-function setCommitNavigate(sha: string): void {
-    state.commitNavigateSha = sha
 }
 
 // =============================================
@@ -198,7 +229,6 @@ async function loadFiles(dir = ''): Promise<void> {
     const seq = ++loadFilesSeq // this call supersedes any earlier in-flight call
     const prevDir = state.currentDir
     const prevEntries = state.dirEntries.slice()
-    const prevAllItems = state.allItems.slice()
     state.dirLoading = true
     try {
         const url = dir ? `/api/dir?path=${encodeURIComponent(dir)}` : '/api/dir?path='
@@ -207,14 +237,12 @@ async function loadFiles(dir = ''): Promise<void> {
         if (seq !== loadFilesSeq) return
         state.currentDir = dir
         state.dirEntries = data.items || []
-        state.allItems = state.dirEntries.slice()
     } catch (err) {
         // A newer loadFiles call started — don't corrupt its state
         if (seq !== loadFilesSeq) return
         // Roll back to previous state on failure
         state.currentDir = prevDir
         state.dirEntries = prevEntries
-        state.allItems = prevAllItems
         useToast().show(gt('file.toast.dirLoadFailed'), { type: 'error', icon: '⚠️' })
     } finally {
         // Only clear loading if we are still the latest call
@@ -227,19 +255,6 @@ async function loadFiles(dir = ''): Promise<void> {
 async function selectFile(path: string, isImageFile = false, isAudioFile = false, addToHistory = true, forceText = false): Promise<void> {
     const key = 'clawbenchLastFile_' + state.projectRoot
     if (key !== 'clawbenchLastFile_') localStorage.setItem(key, path)
-
-    // Add to file history (like browser history)
-    if (addToHistory) {
-        // If we're not at the end of history, truncate forward history
-        if (state.fileHistoryIndex < state.fileHistory.length - 1) {
-            state.fileHistory = state.fileHistory.slice(0, state.fileHistoryIndex + 1)
-        }
-        // Add new path to history (avoid consecutive duplicates)
-        if (state.fileHistory[state.fileHistory.length - 1] !== path) {
-            state.fileHistory.push(path)
-            state.fileHistoryIndex = state.fileHistory.length - 1
-        }
-    }
 
     // Detect media files by extension (avoids dynamic import)
     const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico', '.tiff', '.tif', '.avif']
@@ -398,63 +413,16 @@ async function navigateToDir(dirPath: string): Promise<void> {
     await loadFiles(dirPath)
 }
 
-async function navigateUp(): Promise<void> {
-    if (!state.currentDir) return
-    await loadFiles(dirName(state.currentDir))
-}
-
-async function navigateToRoot(): Promise<void> {
-    await loadFiles('')
-}
-
-// =============================================
-// File Navigation (Browser-like history)
-// =============================================
-
-// Navigate to previous file in history
-async function navigateToPrevFile(): Promise<void> {
-    if (state.fileHistoryIndex > 0) {
-        state.fileHistoryIndex--
-        const path = state.fileHistory[state.fileHistoryIndex]
-        await selectFile(path, false, false, false)
-    }
-}
-
-// Navigate to next file in history
-async function navigateToNextFile(): Promise<void> {
-    if (state.fileHistoryIndex < state.fileHistory.length - 1) {
-        state.fileHistoryIndex++
-        const path = state.fileHistory[state.fileHistoryIndex]
-        await selectFile(path, false, false, false)
-    }
-}
-
-// Check if can navigate back
-function canNavigateBack(): boolean {
-    return state.fileHistoryIndex > 0
-}
-
-// Check if can navigate forward
-function canNavigateForward(): boolean {
-    return state.fileHistoryIndex < state.fileHistory.length - 1
-}
-
 export const store = {
     state,
     loadProject,
     setProject,
+    resetProjectState,
     loadGitBranch,
-    setCommitNavigate,
     loadFiles,
     selectFile,
     deleteFile,
     deleteFiles,
     renameFile,
     navigateToDir,
-    navigateUp,
-    navigateToRoot,
-    navigateToNextFile,
-    navigateToPrevFile,
-    canNavigateBack,
-    canNavigateForward,
 }

@@ -1,5 +1,27 @@
 package model
 
+import "strings"
+
+// IsSHA256Password returns true if the password field contains a SHA-256
+// hashed value (prefixed with "sha256:"). These passwords are stored as
+// SHA-256(password + "clawbench-salt") and cannot be reversed to plaintext.
+func IsSHA256Password(password string) bool {
+	return strings.HasPrefix(password, "sha256:")
+}
+
+// ParseSHA256Hash extracts the hex hash from a "sha256:<hex>" formatted password.
+// Returns empty string if the format is invalid or not a SHA-256 password.
+func ParseSHA256Hash(password string) string {
+	if !IsSHA256Password(password) {
+		return ""
+	}
+	hash := strings.TrimPrefix(password, "sha256:")
+	if len(hash) != 64 { // SHA-256 hex is 64 chars
+		return ""
+	}
+	return hash
+}
+
 // Config holds the application configuration.
 type Config struct {
 	Port         int    `yaml:"port"`
@@ -23,16 +45,18 @@ type Config struct {
 	Chat struct {
 		InitialMessages      int              `yaml:"initial_messages"`        // Number of messages to load initially (default: 20)
 		PageSize             int              `yaml:"page_size"`               // Number of messages per lazy-load batch (default: 20)
+		SessionPageSize      int              `yaml:"session_page_size"`       // Number of sessions per page in session list (default: 10)
 		CollapsedHeight      int              `yaml:"collapsed_height"`        // Collapsed message height in pixels (default: 150)
 		SystemPromptInterval int              `yaml:"system_prompt_interval"`  // Re-inject system prompt every N assistant turns (0=never, default: 10)
 	} `yaml:"chat"`
 	Session struct {
 		MaxCount int `yaml:"max_count"` // Maximum number of chat sessions per project (default: 10)
 	} `yaml:"session"`
+	RecentProjects struct {
+		MaxCount int `yaml:"max_count"` // Maximum number of recent projects to keep (default: 10)
+	} `yaml:"recent_projects"`
 	TTS struct {
-		Engine            string         `yaml:"engine"`             // TTS engine: "edge" (default), "minimax", "piper", "kokoro", "moss-nano"
-		SummarizeBackend  string         `yaml:"summarize_backend"`  // Summarization backend: "simple" (default), "mmx-cli", "api", "claude", "codebuddy", "gemini", "opencode", "codex", "qoder", "vecli", "deepseek", "pi"
-		SummarizeModel    string         `yaml:"summarize_model"`    // Model for summarization (default: "MiniMax-M2.7" for mmx-cli; empty = backend default for others)
+		Engine            string         `yaml:"engine"`             // TTS engine: "edge" (default), "piper", "kokoro", "moss-nano"
 		TTSModel          string         `yaml:"tts_model"`          // TTS model for speech synthesis (default: "Speech-2.8-Turbo")
 		Voice             string         `yaml:"voice"`              // Voice ID for TTS (default: "female-chengshu")
 		Speed             float64        `yaml:"speed"`              // Speech speed multiplier (default: 1.0)
@@ -43,13 +67,13 @@ type Config struct {
 		Piper             PiperConfig    `yaml:"piper"`              // Piper-specific configuration (only used when engine: "piper")
 		Kokoro            KokoroConfig   `yaml:"kokoro"`             // Kokoro-specific configuration (only used when engine: "kokoro")
 		MossNano          MossNanoConfig `yaml:"moss_nano"`          // MOSS-TTS-Nano-specific configuration (only used when engine: "moss-nano")
-		API               APIConfig      `yaml:"api"`               // API-based summarization (only used when summarize_backend: "api")
 	} `yaml:"tts"`
-	Proxy    ProxyConfig    `yaml:"proxy"`     // Port forwarding configuration
-	SSH      SSHConfig      `yaml:"ssh"`       // SSH tunnel server configuration
+	Summarize  SummarizeConfig  `yaml:"summarize"`  // Shared summarization configuration (TTS + Tasks)
+	Proxy       ProxyConfig       `yaml:"proxy"`          // Legacy: kept for backward-compatible YAML reading
+	PortForward PortForwardConfig `yaml:"port_forward"`   // SSH tunnel server + port forwarding configuration
 	RAG      RAGConfig      `yaml:"rag"`       // RAG history memory configuration
 	Terminal TerminalConfig `yaml:"terminal"`  // Interactive web terminal configuration
-	Tasks    TasksConfig    `yaml:"tasks"`     // Scheduled task configuration
+	Push     PushConfig     `yaml:"push"`      // Push notification configuration
 }
 
 // TerminalConfig holds configuration for the interactive web terminal.
@@ -62,23 +86,50 @@ type TerminalConfig struct {
 	MaxSessions  int    `yaml:"max_sessions"`     // Max concurrent terminal sessions (default: 10)
 }
 
-// TasksConfig holds configuration for scheduled task execution.
-type TasksConfig struct {
-	SummarizeBackend string `yaml:"summarize_backend"` // Summarization backend for task executions (empty = disabled)
-	SummarizeModel   string `yaml:"summarize_model"`   // Model for task summarization (empty = backend default)
+// SummarizeConfig holds unified summarization configuration shared by TTS and scheduled tasks.
+type SummarizeConfig struct {
+	Backend     string    `yaml:"backend"`       // Summarization backend: "simple" (default), "api", "claude", "codebuddy", etc.
+	Model       string    `yaml:"model"`         // Model for summarization (empty = backend default)
+	ChatSummary *bool     `yaml:"chat_summary"`  // Enable auto-summarization for chat messages (default: true, nil = true)
+	API         APIConfig `yaml:"api"`           // API-based summarization (used when backend is "api")
+}
+
+// IsChatSummaryEnabled returns whether chat message auto-summarization is enabled.
+// Defaults to true when ChatSummary is nil (not explicitly set).
+func (s SummarizeConfig) IsChatSummaryEnabled() bool {
+	if s.ChatSummary == nil {
+		return true
+	}
+	return *s.ChatSummary
+}
+
+// PushConfig holds configuration for push notifications.
+type PushConfig struct {
+	JPush JPushConfig `yaml:"jpush"`
+}
+
+// JPushConfig holds configuration for the JPush push notification service.
+type JPushConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	AppKey       string `yaml:"app_key"`
+	MasterSecret string `yaml:"master_secret"`
 }
 
 // RAGConfig holds configuration for the RAG history memory system.
+// RAG is always enabled. When the embedding API is unavailable, falls back to BM25 full-text search.
 type RAGConfig struct {
-	Enabled       bool   `yaml:"enabled"`          // Enable RAG history memory (default: false)
-	OllamaBaseURL string `yaml:"ollama_base_url"`  // Ollama API base URL (default: "http://localhost:11434")
-	OllamaModel   string `yaml:"ollama_model"`     // Embedding model name (default: "bge-m3")
-	ChunkSize     int    `yaml:"chunk_size"`        // Chunk size in tokens (default: 512)
-	ChunkOverlap  int    `yaml:"chunk_overlap"`     // Overlap between chunks in tokens (default: 64)
-	PollInterval  string `yaml:"poll_interval"`     // Indexer poll interval (default: "10s")
-	BatchSize     int    `yaml:"batch_size"`        // Messages per indexer batch (default: 10)
-	SearchLimit   int    `yaml:"search_limit"`      // Default search result limit (default: 5)
-	RetentionDays int    `yaml:"retention_days"`    // Soft-deleted data retention days (0=keep forever, default: 90)
+	BaseURL        string `yaml:"base_url"`         // OpenAI-compatible API base URL (default: "http://localhost:11434")
+	Model          string `yaml:"model"`             // Embedding model name (default: "bge-m3")
+	APIKey         string `yaml:"api_key"`           // API key for the embedding service (optional, for cloud providers)
+	OllamaBaseURL  string `yaml:"ollama_base_url"`   // Deprecated: use base_url
+	OllamaModel    string `yaml:"ollama_model"`       // Deprecated: use model
+	ChunkSize      int    `yaml:"chunk_size"`        // Chunk size in tokens (default: 512)
+	ChunkOverlap   int    `yaml:"chunk_overlap"`     // Overlap between chunks in tokens (default: 64)
+	PollInterval   string `yaml:"poll_interval"`     // Indexer poll interval (default: "10s")
+	BatchSize      int    `yaml:"batch_size"`        // Messages per indexer batch (default: 10)
+	SearchLimit    int    `yaml:"search_limit"`      // Default search result limit (default: 5)
+	SearchPoolSize int    `yaml:"search_pool_size"`  // Candidates per search source before RRF fusion (default: 20)
+	RetentionDays  int    `yaml:"retention_days"`    // Soft-deleted data retention days (0=keep forever, default: 90)
 }
 
 // PiperConfig holds configuration for the Piper TTS engine.
@@ -109,7 +160,6 @@ type APIConfig struct {
 	BaseURL string `yaml:"base_url"` // Full endpoint URL (e.g., "https://api.openai.com/v1/chat/completions")
 	Key     string `yaml:"key"`      // API key (sent as Bearer token for OpenAI, x-api-key for Anthropic)
 	Format  string `yaml:"format"`   // API format: "openai" (default) or "anthropic"
-	Model   string `yaml:"model"`    // Model name (default: "gpt-4o-mini" for openai, "claude-3-5-haiku-latest" for anthropic)
 }
 
 // ConfigInstance holds the resolved configuration after ApplyDefaults.
@@ -122,6 +172,7 @@ var (
 	WatchDir       string
 	SessionToken   string
 	PasswordHash   []byte // bcrypt hash for password verification (ISS-003a)
+	PasswordIsSHA256 bool  // true when config.yaml stores password as sha256:<hex>
 	SessionCookie  = "clawbench_session"
 	DefaultAgentID string // Default agent for new sessions, set from config or first agent
 
@@ -132,11 +183,15 @@ var (
 	// Chat UI config (set from config, with defaults)
 	ChatInitialMessages      int // Default: 20
 	ChatPageSize             int // Default: 20
+	ChatSessionPageSize      int // Default: 10
 	ChatCollapsedHeight      int // Default: 150
 	ChatSystemPromptInterval int // Re-inject system prompt every N assistant turns (0=never, default: 10)
 
 	// Session limits (set from config, with defaults)
 	SessionMaxCount int // Default: 10
+
+	// Recent projects limits (set from config, with defaults)
+	RecentProjectsMaxCount int // Default: 10
 
 	// TTS cache limits (set from config, with defaults)
 	TTSMaxCacheFiles int // Default: 100; 0 = unlimited

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeGraphData, LANE_COLORS, refLabelWidth, refLabelText, refLabelBg } from '@/utils/gitGraph'
+import { computeGraphData, refLabelText, refLabelWidth, refLabelBg } from '@/utils/gitGraph'
 
 const ROW_HEIGHT = 64
 
@@ -207,10 +207,10 @@ describe('02-single-merge', () => {
     expect(mergeIn.toLane).toBe(0)
   })
 
-  it('generates correct number of lines (VERT=1 path, FORK=1 path, MERGE-IN=2 paths)', () => {
+  it('generates correct number of lines (VERT=1 path, FORK=2 paths, MERGE-IN=2 paths)', () => {
     const { lines } = computeGraphData(SINGLE_MERGE, ROW_HEIGHT, undefined) as any
-    // 5 VERT + 1 FORK + 2 MERGE-IN = 8 line paths
-    expect(lines).toHaveLength(8)
+    // 5 VERT + 2 FORK (vert+bezier) + 2 MERGE-IN = 9 line paths
+    expect(lines).toHaveLength(9)
   })
 })
 
@@ -476,34 +476,14 @@ describe('graph dimensions', () => {
 })
 
 describe('ref label helpers', () => {
-  it('refLabelWidth calculates based on text length', () => {
-    expect(refLabelWidth('main')).toBe(4 * 6 + 8) // 32
-    expect(refLabelWidth('tag: v1.0')).toBe(4 * 6 + 8) // strips "tag: "
-  })
-
   it('refLabelText strips tag prefix', () => {
     expect(refLabelText('main')).toBe('main')
     expect(refLabelText('tag: v1.0')).toBe('v1.0')
   })
-
-  it('refLabelBg returns correct colors', () => {
-    expect(refLabelBg('HEAD')).toBe('#1a1a2e')
-    expect(refLabelBg('tag: v1.0')).toBe('#555')
-    expect(refLabelBg('main')).toBe('#4a90d9')
-  })
 })
 
-describe('lane colors', () => {
-  it('cycles through colors for high lane numbers', () => {
-    expect(LANE_COLORS).toHaveLength(8)
-    // Lane 8 should use the same color as lane 0
-    const color8 = LANE_COLORS[8 % LANE_COLORS.length]
-    expect(color8).toBe(LANE_COLORS[0])
-  })
-})
-
-describe('octopus merge cascade fork rendering', () => {
-  it('non-adjacent fork with enough vertical space uses cascade (more lines)', () => {
+describe('smooth bezier for cross-lane connections', () => {
+  it('non-adjacent fork uses a single smooth bezier (no cascade segments)', () => {
     // Create a scenario where merge is on L0 and branch is on L3 with 3+ rows gap
     const commits = [
       { sha: 'top', parents: ['mrg'], msg: 'top' },
@@ -517,26 +497,67 @@ describe('octopus merge cascade fork rendering', () => {
     ]
     const { lines } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
 
-    // The FORK from L0 to L3 (mrg -> fa) should use cascade, generating
-    // more line segments than a simple bezier (1 path)
-    // Adjacent fork L0->L1 = 1 line path
-    // Non-adjacent cascade L0->L3 = 1(start) + 2(diag+vert per intermediate) + 1(end) = 6 paths
-    // But L0->L2 also uses cascade = 1 + 1(diag+vert) + 1 = 4 paths
-    // Total fork paths: 1(adj) + 4(L0->L2) + 6(L0->L3) = 11
-    // Plus VERT and MERGE-IN lines
-    expect(lines.length).toBeGreaterThan(11) // at least the fork lines
+    // Count bezier curves (paths with 'C' command) — each FORK produces exactly 1
+    const forkBeziers = lines.filter((l: any) => l.path.includes('C') && !l.fade)
+    // 3 FORK curves (to fa, fb, fc) + 3 MERGE-IN curves (from fa, fb, fc to root)
+    expect(forkBeziers.length).toBeGreaterThanOrEqual(3)
   })
 
-  it('non-adjacent fork with short vertical distance uses simple bezier', () => {
-    // 03-multi-branch: merge: feature-a (L0) -> feature-a: work 2 (L2)
-    // Only 1 row gap - not enough space for cascade
-    const { lines }: any = computeGraphData(MULTI_BRANCH, ROW_HEIGHT, undefined)
+  it('fork bezier uses parentLane color (the merged branch)', () => {
+    // Single merge: merge commit on lane 0, feature on lane 1
+    const { lines } = computeGraphData(SINGLE_MERGE, ROW_HEIGHT, undefined) as any
 
-    // Count bezier curves (paths with 'C' command) that start from L0
-    const forkBeziers: any[] = lines.filter((l: any) => l.path.includes('C') && l.path.startsWith('M20,'))
-    // The FORK from R5[L0] to R6[L2] should be a simple bezier, not cascade
-    // A simple bezier is 1 line path, cascade would be multiple paths
+    // Find the FORK bezier (from lane 0 to lane 1)
+    const forkBeziers = lines.filter((l: any) => {
+      if (!l.path.includes('C')) return false
+      // Starts at lane 0 x position
+      return l.path.startsWith('M20,')
+    })
+
+    // The fork bezier should use parentLane color (lane 1 = orange)
+    // because the line represents the branch being merged in
+    for (const fb of forkBeziers) {
+      expect(fb.lane).toBe(1) // parentLane = feature branch lane
+      expect(fb.color).toBe('#e67e22') // laneColor(1) = orange
+    }
+  })
+
+  it('non-adjacent fork produces exactly one bezier path per connection', () => {
+    // Multi-branch: merge: feature-a forks from L0 to L2
+    const { lines } = computeGraphData(MULTI_BRANCH, ROW_HEIGHT, undefined) as any
+
+    // Count all bezier curves starting from L0 (fork origin)
+    const forkBeziers = lines.filter((l: any) => l.path.includes('C') && l.path.startsWith('M20,'))
+    // Each fork is a single smooth bezier regardless of lane gap
     expect(forkBeziers.length).toBeGreaterThanOrEqual(1)
+    // No cascade segments (straight diagonal lines) should exist
+    const diagonalLines = lines.filter((l: any) => {
+      if (l.fade || l.path.includes('C')) return false
+      const nums = l.path.match(/[\d.]+/g)
+      if (!nums || nums.length < 4) return false
+      const startX = parseFloat(nums[0])
+      const endX = parseFloat(nums[nums.length - 2])
+      return Math.abs(startX - endX) > 1 // non-vertical straight line
+    })
+    expect(diagonalLines).toHaveLength(0)
+  })
+
+  it('merge-in bezier uses childLane color', () => {
+    // Single merge: feature: commit 1 (lane 1) merges into main: commit 2 (lane 0)
+    const { lines } = computeGraphData(SINGLE_MERGE, ROW_HEIGHT, undefined) as any
+
+    // Find MERGE-IN bezier lines: starts at lane 1 x (40) and ends at lane 0 x (20)
+    const mergeInBeziers = lines.filter((l: any) => {
+      if (!l.path.includes('C') || l.fade) return false
+      // Starts at lane 1 x position (40) and contains lane 0 x position
+      return l.path.startsWith('M40,') && l.path.includes('20,')
+    })
+
+    // Merge-in bezier should use childLane (lane 1 = feature branch)
+    for (const mib of mergeInBeziers) {
+      expect(mib.lane).toBe(1) // childLane = feature branch lane
+      expect(mib.color).toBe('#e67e22') // laneColor(1) = orange
+    }
   })
 })
 
@@ -813,5 +834,212 @@ describe('branchNames on nodes', () => {
     expect(nodes[0].branchNames).not.toContain('HEAD -> main')
     expect(nodes[0].branchNames).not.toContain('tag: v1.0')
     expect(nodes[0].branchNames).not.toContain('v1.0')
+  })
+})
+
+// ─── Fork line structure tests ─────────────────────────────────────────────
+
+describe('fork line structure: vertical + bezier (mirror of merge-in)', () => {
+  it('fork produces a vertical line segment before the bezier', () => {
+    // SINGLE_MERGE: merge commit (row 1, lane 0) forks to feature (row 2, lane 1)
+    const { lines } = computeGraphData(SINGLE_MERGE, ROW_HEIGHT, undefined) as any
+
+    // FORK vertical line: starts at childLane X (20) and stays on X=20 (vertical on lane 0)
+    const forkVerts = lines.filter((l: any) => {
+      if (l.path.includes('C') || l.fade) return false
+      // Vertical line on lane 0 (X=20) between merge commit and one row below
+      return l.path.startsWith('M20,') && l.color === '#e67e22' // parentLane color (orange)
+    })
+    expect(forkVerts.length).toBeGreaterThanOrEqual(1)
+    // The vertical line should go from childBottom to childRowBottom
+    // row 1: childCy = 96, childBottom = 101, childRowBottom = 128
+    for (const v of forkVerts) {
+      expect(v.lane).toBe(1) // parentLane
+    }
+  })
+
+  it('fork bezier starts at childRowBottom (one row below the merge commit)', () => {
+    const { lines } = computeGraphData(SINGLE_MERGE, ROW_HEIGHT, undefined) as any
+    // row 1 merge commit: childRowBottom = (1+1)*64 = 128
+    const forkBez = lines.find((l: any) => {
+      if (!l.path.includes('C') || l.fade) return false
+      // Starts from lane 0 X=20 at y=128
+      return l.path.startsWith('M20,128')
+    })
+    expect(forkBez).toBeDefined()
+    expect(forkBez.lane).toBe(1) // parentLane
+    expect(forkBez.color).toBe('#e67e22')
+  })
+
+  it('fork bezier control points ensure tangential entry/exit (vertical tangent)', () => {
+    const { lines } = computeGraphData(SINGLE_MERGE, ROW_HEIGHT, undefined) as any
+    const forkBez = lines.find((l: any) => l.path.includes('C') && l.path.startsWith('M20,128'))
+    expect(forkBez).toBeDefined()
+
+    // Parse the bezier: M startX,startY C cp1X,cp1Y cp2X,cp2Y endX,endY
+    const nums = forkBez.path.match(/[\d.]+/g).map(Number)
+    const [startX, startY, cp1X, cp1Y, cp2X, cp2Y, endX, endY] = nums
+
+    // cp1 should be at startX (tangential to vertical at start)
+    expect(cp1X).toBe(startX)
+    // cp2 should be at endX (tangential to vertical at end)
+    expect(cp2X).toBe(endX)
+    // cp1 should be between startY and cp2Y (not inverted)
+    expect(cp1Y).toBeGreaterThan(startY)
+    expect(cp2Y).toBeGreaterThan(cp1Y)
+  })
+
+  it('fork and merge-in bezier have mirrored control point ratios', () => {
+    const { lines } = computeGraphData(SINGLE_MERGE, ROW_HEIGHT, undefined) as any
+
+    const forkBez = lines.find((l: any) => l.path.includes('C') && l.path.startsWith('M20,128'))
+    const mergeInBez = lines.find((l: any) => l.path.includes('C') && l.path.startsWith('M40,3'))
+
+    expect(forkBez).toBeDefined()
+    expect(mergeInBez).toBeDefined()
+
+    // Parse both beziers
+    const fNums = forkBez.path.match(/[\d.]+/g).map(Number)
+    const mNums = mergeInBez.path.match(/[\d.]+/g).map(Number)
+
+    const [fSx, fSy, , fCp1Y, , fCp2Y, , fEy] = fNums
+    const [mSx, mSy, , mCp1Y, , mCp2Y, , mEy] = mNums
+
+    // Both should use ~0.25 control point ratio
+    const fDy = fEy - fSy
+    expect(Math.abs((fCp1Y - fSy) / fDy - 0.25)).toBeLessThan(0.05)
+    expect(Math.abs((fEy - fCp2Y) / fDy - 0.25)).toBeLessThan(0.05)
+
+    const mDy = mEy - mSy
+    expect(Math.abs((mCp1Y - mSy) / mDy - 0.25)).toBeLessThan(0.05)
+    expect(Math.abs((mEy - mCp2Y) / mDy - 0.25)).toBeLessThan(0.05)
+  })
+
+  it('fork vertical line and bezier both use parentLane color', () => {
+    const { lines } = computeGraphData(SINGLE_MERGE, ROW_HEIGHT, undefined) as any
+    // All FORK-related lines (vertical + bezier) should be orange (lane 1 color)
+    const forkLines = lines.filter((l: any) => {
+      if (l.fade) return false
+      // Lane 1 (feature branch) lines that are part of the FORK
+      return l.lane === 1 && l.color === '#e67e22'
+    })
+    expect(forkLines.length).toBeGreaterThanOrEqual(2) // vertical + bezier at minimum
+  })
+})
+
+// ─── Merge-in node gap (compressed lane) tests ────────────────────────────
+
+describe('merge-in with compressed lane node gaps', () => {
+  it('merge-in vertical line breaks around nodes on the same compressed lane', () => {
+    // Construct a scenario where branch-a and branch-b share a compressed
+    // lane (non-overlapping). Branch-a is near the top, branch-b is below.
+    // Branch-a has a merge-in that passes through branch-b's node positions.
+    //
+    // Graph:
+    //   fin → mrgA → m2 ──→ m1 → init
+    //          ↗           ↘
+    //         a1            b1 → b2
+    //
+    // If lane compression puts a1 and b1/b2 on the same lane, the merge-in
+    // from a1 to m1 will have nodeGaps (b1, b2) on its vertical path.
+    const commits = [
+      { sha: 'fin', parents: ['mrgA'], msg: 'main: final', refs: ['main'] },
+      { sha: 'mrgA', parents: ['m2', 'a1'], msg: 'merge: branch-a' },
+      { sha: 'b2', parents: ['b1'], msg: 'branch-b: work 2', refs: ['branch-b'] },
+      { sha: 'b1', parents: ['m1'], msg: 'branch-b: work 1' },
+      { sha: 'm2', parents: ['m1'], msg: 'main: second' },
+      { sha: 'a1', parents: ['m1'], msg: 'branch-a: work 1' },
+      { sha: 'm1', parents: ['init'], msg: 'main: first' },
+      { sha: 'init', parents: [], msg: 'main: init' },
+    ]
+    const { nodes, lines } = computeGraphData(commits, ROW_HEIGHT, undefined) as any
+
+    // Find the merge-in from a1 to m1 (a1 is on lane 1, m1 is on lane 0)
+    // The vertical part should break around b1/b2 if they share the lane
+    const mergeInVerts = lines.filter((l: any) => {
+      if (l.path.includes('C') || l.fade) return false
+      return l.lane === 1
+    })
+    expect(mergeInVerts.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('merge-in vertical segments are split into multiple parts when nodeGaps exist', () => {
+    // Create a scenario that forces lane compression and node gaps.
+    // Two sequential branches share a lane. Branch-a merges in first,
+    // but its merge-in vertical line must break around branch-b nodes.
+    //
+    // Layout (row order):
+    //   row 0: fin (L0)
+    //   row 1: mrgA (L0)  ← merge branch-a
+    //   row 2: b2 (L1)    ← branch-b node on shared lane
+    //   row 3: m2 (L0)
+    //   row 4: b1 (L1)    ← branch-b node on shared lane
+    //   row 5: mrgB (L0)  ← merge branch-b
+    //   row 6: a1 (L1)    ← branch-a node on shared lane
+    //   row 7: m1 (L0)
+    //   row 8: init (L0)
+    //
+    // If a1 (L1) has first parent m1 (L0), the merge-in from a1
+    // goes from row 6 to row 7. But b2 (row 2) and b1 (row 4)
+    // are also on L1, so the vertical line must break around them
+    // when it goes from a1 down.
+    // However, a1 is at row 6 and m1 is at row 7, so the merge-in
+    // vertical segment only spans rows 6→7 — no gaps between them.
+    // To trigger gaps, we need the child higher up and the parent
+    // lower down with intermediate same-lane nodes.
+
+    // Better scenario: one branch whose merge-in spans multiple rows
+    // with another branch's nodes on the same compressed lane.
+    const commits = [
+      { sha: 'top', parents: ['mrg'], msg: 'main: top' },
+      { sha: 'mrg', parents: ['mid', 'a1'], msg: 'merge: branch-a' },
+      { sha: 'b2', parents: ['b1'], msg: 'branch-b: work 2', refs: ['branch-b'] },
+      { sha: 'mid', parents: ['b1m'], msg: 'main: mid' },
+      { sha: 'b1', parents: ['root'], msg: 'branch-b: work 1' },
+      { sha: 'b1m', parents: ['root'], msg: 'main: pre-b' },
+      { sha: 'a1', parents: ['root'], msg: 'branch-a: work 1' },
+      { sha: 'root', parents: [], msg: 'root' },
+    ]
+    const result = computeGraphData(commits, ROW_HEIGHT, undefined) as any
+
+    // Check that we have vertical lines on lane 1 (the branch lane)
+    const branchVerts = result.lines.filter((l: any) => {
+      if (l.path.includes('C') || l.fade) return false
+      return l.lane === 1
+    })
+    expect(branchVerts.length).toBeGreaterThanOrEqual(1)
+  })
+})
+
+// ─── Ref label helper tests ────────────────────────────────────────────────
+
+describe('ref label width', () => {
+  it('calculates width based on text length', () => {
+    expect(refLabelWidth('main')).toBe('main'.length * 6 + 8)
+    expect(refLabelWidth('feature')).toBe('feature'.length * 6 + 8)
+  })
+
+  it('strips tag: prefix before calculating width', () => {
+    // 'tag: v1.0' → text = 'v1.0'
+    expect(refLabelWidth('tag: v1.0')).toBe('v1.0'.length * 6 + 8)
+  })
+
+  it('longer ref names produce wider labels', () => {
+    expect(refLabelWidth('very-long-branch-name')).toBeGreaterThan(refLabelWidth('main'))
+  })
+})
+
+describe('ref label background color', () => {
+  it('HEAD ref gets dark background', () => {
+    expect(refLabelBg('HEAD')).toBe('#1a1a2e')
+  })
+
+  it('tag refs get gray background', () => {
+    expect(refLabelBg('tag: v1.0')).toBe('#555')
+  })
+
+  it('branch refs get blue background', () => {
+    expect(refLabelBg('main')).toBe('#4a90d9')
+    expect(refLabelBg('feature')).toBe('#4a90d9')
   })
 })

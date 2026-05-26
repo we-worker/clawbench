@@ -17,13 +17,21 @@
 set -e
 
 NAME="clawbench-dev"
-VITE_PID_FILE="/tmp/${NAME}-vite.pid"
-VITE_LOG="/tmp/vite-dev.log"
 
-# Ports — dev_port defaults to production port + 2 (matches Go backend ApplyDefaults)
-PROD_PORT=${PROD_PORT:-20000}
-DEV_HTTP_PORT=${DEV_HTTP_PORT:-$((PROD_PORT + 2))}
-FRONTEND_PORT=${VITE_FRONTEND_PORT:-$((PROD_PORT + 3))}
+# All runtime data under .clawbench/ (green portable deployment)
+VITE_PID_FILE=".clawbench/dev-vite.pid"
+VITE_LOG=".clawbench/dev-vite.log"
+
+# Resolve effective port from config (fallback to default)
+_resolve_port() {
+    local port
+    port=$(grep "^port:" "config/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')
+    echo "${port:-20000}"
+}
+
+PROD_PORT=$(_resolve_port)
+DEV_HTTP_PORT=$((PROD_PORT + 2))
+FRONTEND_PORT=$((PROD_PORT + 3))
 
 # Load shared shell utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -78,7 +86,7 @@ _stop_vite() {
     # Fallback: kill by port
     local pids=""
     if command -v ss >/dev/null 2>&1; then
-        pids=$(ss -tlnp 2>/dev/null | grep ":$FRONTEND_PORT" | grep -oP 'pid=\K[0-9]+' | sort -u | tr '\n' ' ')
+        pids=$(ss -tlnp 2>/dev/null | grep ":$FRONTEND_PORT " | grep -oP 'pid=\K[0-9]+' | sort -u | tr '\n' ' ')
     fi
     if [[ -n "$pids" ]]; then
         echo "Killing orphan process on port $FRONTEND_PORT (PIDs: $pids)..."
@@ -90,6 +98,7 @@ start_dev() {
     _stop_vite
     sleep 0.3
 
+    mkdir -p .clawbench
     check_dev_port
 
     echo "=== Starting $NAME (dev mode) ==="
@@ -98,8 +107,22 @@ start_dev() {
     echo ""
 
     # Start Vite dev server — proxy to production backend's dev HTTP port
-    VITE_BACKEND_PORT=$DEV_HTTP_PORT VITE_FRONTEND_PORT=$FRONTEND_PORT nohup npx vite --port $FRONTEND_PORT > "$VITE_LOG" 2>&1 &
-    echo $! > "$VITE_PID_FILE"
+    # Use setsid to create new session so Vite survives parent shell exit
+    VITE_BACKEND_PORT=$DEV_HTTP_PORT VITE_FRONTEND_PORT=$FRONTEND_PORT setsid npx vite --port $FRONTEND_PORT > "$VITE_LOG" 2>&1 &
+    VITE_PID=$!
+    # setsid spawns a new process; find the actual Vite node process
+    sleep 1
+    # The PID we got is the setsid wrapper which may have exited;
+    # find the real Vite process listening on the port
+    REAL_PID=""
+    if command -v ss >/dev/null 2>&1; then
+        REAL_PID=$(ss -tlnp 2>/dev/null | grep ":$FRONTEND_PORT " | grep -oP 'pid=\K[0-9]+' | head -1)
+    fi
+    if [[ -n "$REAL_PID" ]]; then
+        echo "$REAL_PID" > "$VITE_PID_FILE"
+    else
+        echo "$VITE_PID" > "$VITE_PID_FILE"
+    fi
 
     sleep 1
     if ! kill -0 $(cat "$VITE_PID_FILE") 2>/dev/null; then

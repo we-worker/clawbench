@@ -2,6 +2,8 @@
 
 # ClawBench — AI Workstation Built for Mobile
 
+> 🎬 **Demo Video**: [OpenClaw and Hermes are toys, so I built one that actually works](https://b23.tv/ewACF0h) — Bilibili
+
 <p>
   <img src="assets/logo.png" alt="ClawBench" width="96" height="96" align="left" style="margin-right:16px;">
 </p>
@@ -164,6 +166,7 @@ Each `.yaml.example` file contains complete configuration fields and description
 - **Multi-Select Operations**: Toggle multi-select mode from toolbar, batch copy/cut/delete; mobile long-press triggers context menu
 - File upload (image support, configurable size and count)
 - Toggle hidden file visibility
+- **Drill-down Browsing + Edge Swipe Back**: Tap folders to drill down, swipe from right edge to go back — intuitive mobile navigation
 
 ### 🎨 Code Preview
 - Syntax highlighting, sticky line numbers, word wrap toggle
@@ -187,10 +190,12 @@ Each `.yaml.example` file contains complete configuration fields and description
 - **Model Selection Persistence**: Model choice and thinking effort per agent auto-saved to localStorage, restored on reload/session switch
 - **Scheduled Tasks**: AI creates Cron schedules via CLI subcommands, executes automatically; independent tab with 4-level breadcrumb navigation; task cards embedded in chat messages; frequency presets (hourly/daily/weekly/monthly) + custom cron expressions; per-execution read tracking + TTS playback; execution auto-summary + completion notification (sound/haptic/toast)
 - **Multi-Session Management**: Create, switch, delete independent sessions, swipe to switch
+- **Swipe Session Toggle**: Toggle left/right swipe session switching in Settings → Chat; defaults to off to prevent accidental switches when scrolling wide content
 - **Image Upload**: Upload images for AI conversation (multimodal)
 - **Disconnect Protection**: Messages persist immediately, no data loss on disconnect, 15s heartbeat keep-alive + 30s timeout auto-reconnect (live content updates during polling fallback)
 - **Auto Resume**: Automatically sends "continue" after Claude/CodeBuddy/Qoder/DeepSeek/Pi exits Plan Mode
 - **Message Queue**: Messages queue when AI is busy, sent sequentially
+- **Auto Summary**: Automatically generates a summary of the last assistant message on session complete; toggle between summary/original via bottom banner; TTS playback also uses the summary
 
 ### ⏰ Scheduled Tasks
 - **Cron Scheduling**: AI creates Cron schedules via CLI subcommands, executes automatically
@@ -231,12 +236,19 @@ Each `.yaml.example` file contains complete configuration fields and description
 - **Git Diff View**: View changes relative to HEAD, character-level highlighting
 - Commit detail view (author, time, commit message)
 - Working tree changes view (staged / unstaged files)
+- **3-Tab Management**: Worktree / Branches / Tags tabs for unified management, default tab persisted to localStorage
+- **Swipe to Delete**: Branches, worktrees, and tags support swipe-to-delete with safety guards (current branch, default branch, and current worktree cannot be deleted)
+- **Tag Management**: Browse project tags, click a tag to checkout, auto-prompt for dirty working tree
 - Git init (one-click `git init` from UI)
 
 ### 🔀 SSH Tunnel Port Forwarding
 - **Remote Development**: Access server local ports directly from Android App
 - **Protocol Transparent**: HTTP, HTTPS, WebSocket, SSE, gRPC — no URL rewriting needed
+- **Custom Target Host**: Forward to any reachable host (LAN/remote, not limited to 127.0.0.1)
+- **Auto Port Assignment**: Automatically allocates local ports when forwarding the same target port to different hosts
+- **Port Editing**: Modify existing port forwarding configurations
 - **Auto-Open Localhost URLs**: localhost URLs appearing in chat (e.g., web services started by AI) can be opened with one tap — port forwarding is auto-registered and the URL opens via WebView in App mode
+- **Tunnel Health Check & Reconnect**: Auto-checks tunnel health before opening localhost URLs; reconnects if unhealthy; one-tap reconnect for disconnected tunnels
 
 ### 💻 Web Terminal
 - **Interactive Terminal**: PTY + WebSocket + xterm.js, operate server terminal directly in browser
@@ -261,6 +273,7 @@ Each `.yaml.example` file contains complete configuration fields and description
 ### 🔔 Notifications
 - Notification sound + haptic feedback (alerts when AI completes)
 - Browser push notifications
+- **Task Completion Push**: Scheduled task completion notifications include response preview summary; tap to navigate to execution details
 
 ### 🎨 Themes
 - Light / Dark mode, follows system preference
@@ -271,6 +284,7 @@ Each `.yaml.example` file contains complete configuration fields and description
 ### 🔒 Security
 - Optional password protection (SHA-256 salted)
 - Path traversal protection, all operations restricted to project directory
+- Git parameter injection protection (SHA/branch name/tag name validation, `--` separator)
 - Configurable file upload size and count (default 10MB / 20 files)
 - XSS protection (DOMPurify sanitization)
 - TLS support (manual certificate configuration required)

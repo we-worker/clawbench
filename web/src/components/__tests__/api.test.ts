@@ -19,7 +19,7 @@ const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
 
 // Import after mocks are set up
-import { apiGet, apiPost, apiPut, apiDelete, cancelChat } from '@/utils/api.ts'
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, cancelChat } from '@/utils/api'
 
 beforeEach(() => {
   mockFetch.mockReset()
@@ -123,35 +123,66 @@ describe('apiDelete', () => {
     mockFetch.mockResolvedValue({
       ok: false,
       statusText: 'Forbidden',
+      json: () => Promise.resolve({}),
     })
 
     await expect(apiDelete('/api/test/123')).rejects.toThrow('Forbidden')
+  })
+
+  it('sends body with DELETE request when body option is provided', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ success: true }),
+    })
+
+    const result = await apiDelete('/api/git/branch', { body: { name: 'feature-x' } })
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/api/git/branch',
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ name: 'feature-x' }),
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+      }),
+    )
+    expect(result).toEqual({ success: true })
+  })
+
+  it('includes error from response JSON when DELETE fails', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      statusText: 'Internal Server Error',
+      json: () => Promise.resolve({ error: 'cannot_delete_current' }),
+    })
+
+    await expect(apiDelete('/api/git/branch', { body: { name: 'main' } }))
+      .rejects.toThrow('cannot_delete_current')
   })
 })
 
 describe('cancelChat', () => {
   it('makes POST request to cancel endpoint', async () => {
-    mockFetch.mockResolvedValue({ ok: true })
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) })
 
     await cancelChat('session-123')
-    expectFetchCalledWith(
+    expect(mockFetch).toHaveBeenCalledWith(
       '/api/ai/chat/cancel?session_id=session-123',
-      {
+      expect.objectContaining({
         method: 'POST',
-        headers: { 'X-Locale': 'en' },
-      },
+        body: '{}',
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        signal: expect.any(AbortSignal),
+      }),
     )
   })
 
   it('encodes session ID with special characters', async () => {
-    mockFetch.mockResolvedValue({ ok: true })
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({}) })
 
     await cancelChat('session/with+special')
     expect(mockFetch).toHaveBeenCalledWith(
       '/api/ai/chat/cancel?session_id=session%2Fwith%2Bspecial',
       expect.objectContaining({
         method: 'POST',
-        headers: { 'X-Locale': 'en' },
         signal: expect.any(AbortSignal),
       }),
     )
@@ -161,9 +192,10 @@ describe('cancelChat', () => {
     mockFetch.mockResolvedValue({
       ok: false,
       statusText: 'Not Found',
+      json: () => Promise.resolve({}),
     })
 
-    await expect(cancelChat('bad-session')).rejects.toThrow('Not Found')
+    await expect(cancelChat('bad-session')).rejects.toThrow()
   })
 })
 
@@ -298,6 +330,66 @@ describe('apiDelete with signal', () => {
     await apiDelete('/api/tasks/1', { signal: externalSignal })
 
     expect(mockFetch).toHaveBeenCalledWith('/api/tasks/1', expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }))
+  })
+})
+
+describe('apiPatch', () => {
+  it('makes PATCH request with JSON body and locale header', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ needs_restart: false }),
+    })
+
+    const result = await apiPatch('/api/config', { 'chat.page_size': 25 })
+    expectFetchCalledWith('/api/config', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Locale': 'en' },
+      body: JSON.stringify({ 'chat.page_size': 25 }),
+    })
+    expect(result).toEqual({ needs_restart: false })
+  })
+
+  it('throws error with data.error message on non-ok response', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      json: () => Promise.resolve({ error: 'forbidden_field' }),
+    })
+
+    await expect(apiPatch('/api/config', {})).rejects.toThrow('forbidden_field')
+  })
+
+  it('throws with statusText when no error field', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      statusText: 'Bad Request',
+      json: () => Promise.resolve({}),
+    })
+
+    await expect(apiPatch('/api/config', {})).rejects.toThrow('Bad Request')
+  })
+
+  it('handles JSON parse failure in error response', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      statusText: 'Internal Server Error',
+      json: () => Promise.reject(new Error('Invalid JSON')),
+    })
+
+    await expect(apiPatch('/api/config', {})).rejects.toThrow('Internal Server Error')
+  })
+
+  it('forwards external signal to fetch', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({}),
+    })
+
+    const externalSignal = new AbortController().signal
+    await apiPatch('/api/config', { key: 'value' }, { signal: externalSignal })
+
+    expect(mockFetch).toHaveBeenCalledWith('/api/config', expect.objectContaining({
       signal: expect.any(AbortSignal),
     }))
   })

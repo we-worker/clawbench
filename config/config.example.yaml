@@ -55,6 +55,9 @@
 # 建议设置强密码保护服务安全。
 # Uncomment to set a fixed password / 取消注释以设置固定密码
 # password: "your-password-here"
+# Password can also be set via Settings UI, which stores it as SHA-256 hash:
+# 也可通过设置面板修改密码，将以 SHA-256 哈希存储：
+# password: "sha256:<64-char-hex-hash>"
 
 # Upload limits / 文件上传限制
 # upload:
@@ -83,34 +86,19 @@
 # session:
 #   max_count: 10  # Maximum chat sessions per project (default: 10) / 会话数量上限（默认: 10）
 
+# Recent projects limit / 最近项目数量限制
+# recent_projects:
+#   max_count: 10  # Maximum recent projects shown in the header dropdown (default: 10) / 标题栏下拉显示的最近项目数量上限（默认: 10）
+
 # TTS (Text-to-Speech) configuration / 语音合成配置
 # Supported engines / 支持的引擎：
 #   edge      — Microsoft Edge TTS, free and unlimited (default) / 微软 Edge TTS，免费无限制（默认）
-#   minimax   — Cloud synthesis, best audio quality / 云端合成，音质最佳
 #   piper     — Local offline, ultra-fast / 本地离线，极速
 #   kokoro    — Local offline, high-quality Chinese / 本地离线，高质量中文
 #   moss-nano — Local offline, multilingual, voice cloning / 本地离线，多语言，音色克隆
 # Full installation & deployment guide: docs/TTS.md / 完整安装部署指南：docs/TTS.md
 tts:
-  engine: "edge"                                          # TTS engine / TTS引擎: "edge" (default/默认), "minimax", "piper", "kokoro", "moss-nano"
-
-  # --- Summarization backend (compresses AI replies into TTS-friendly summaries) ---
-  # --- 总结后端（将AI回复压缩为适合朗读的摘要） ---
-  #   "simple"    — Pure text cleaning only (default) / 纯文本清洗（默认），零延迟
-  #   "api"       — Remote AI API (OpenAI/Anthropic format, configurable URL & key) / 远程AI API（OpenAI/Anthropic格式，可配置URL和密钥）
-  #   "mmx-cli"   — mmx text chat / 使用 mmx text chat
-  #   "claude"    — Claude CLI / 使用 Claude CLI
-  #   "codebuddy" — CodeBuddy CLI / 使用 CodeBuddy CLI
-  #   "gemini"    — Gemini CLI / 使用 Gemini CLI
-  #   "opencode"  — OpenCode CLI / 使用 OpenCode CLI
-  #   "codex"     — Codex CLI / 使用 Codex CLI
-  #   "qoder"     — Qoder CLI (Alibaba) / 使用 Qoder CLI（阿里编码智能体）
-  #   "vecli"     — VeCLI (Volcengine Doubao) / 使用 VeCLI（火山引擎 Doubao）
-  #   "deepseek"  — DeepSeek TUI (requires v0.8.33+) / 使用 DeepSeek TUI（需 v0.8.33+）
-  #   "pi"        — Pi CLI (minimalist coding agent) / 使用 Pi CLI（极简编程智能体）
-  summarize_backend: "simple"
-  summarize_model: "MiniMax-M2.7"                        # Summarization model (leave empty for backend default)
-                                                          # 总结模型（留空则使用后端默认）
+  engine: "edge"                                          # TTS engine / TTS引擎: "edge" (default/默认), "piper", "kokoro", "moss-nano"
 
   # --- Speed & Voice (shared across all engines) ---
   # --- 语速与音色（所有引擎共享） ---
@@ -140,26 +128,8 @@ tts:
   # voice: "zh-CN-XiaoxiaoNeural"                       # Voice ID / 音色ID
   # speed: 1
 
-  # --- Combo 2: Edge TTS + mmx-cli summarization ---
-  # --- 组合2: Edge TTS + mmx-cli总结 ---
-  # engine: "edge"
-  # summarize_backend: "mmx-cli"
-  # summarize_model: "MiniMax-M2.7"
-  # voice: "zh-CN-XiaoxiaoNeural"
-  # speed: 1
-
-  # --- Combo 3: MiniMax (cloud, best audio quality) ---
-  # --- 组合3: MiniMax（云端，音质最佳） ---
-  # engine: "minimax"
-  # summarize_backend: "mmx-cli"
-  # summarize_model: "MiniMax-M2.7"
-  # voice: "female-chengshu"
-  # tts_model: "speech-2.8-hd"
-  # speed: 1.5
-  # format: "mp3"
-
-  # --- Combo 4: Piper (local offline, ultra-fast) ---
-  # --- 组合4: Piper（本地离线，极速） ---
+  # --- Combo 2: Piper (local offline, ultra-fast) ---
+  # --- 组合2: Piper（本地离线，极速） ---
   # engine: "piper"
   # voice: "zh_CN-huayan-medium"
   # speed: 1
@@ -169,8 +139,8 @@ tts:
   #   length_scale: 1.0
   #   sentence_silence: 0.2
 
-  # --- Combo 5: Kokoro (local offline, high-quality Chinese) ---
-  # --- 组合5: Kokoro（本地离线，高质量中文） ---
+  # --- Combo 3: Kokoro (local offline, high-quality Chinese) ---
+  # --- 组合3: Kokoro（本地离线，高质量中文） ---
   # engine: "kokoro"
   # voice: "zf_001"
   # speed: 1
@@ -179,8 +149,8 @@ tts:
   #   voices_path: ""
   #   lang: "cmn"
 
-  # --- Combo 6: MOSS-TTS-Nano (local offline, multilingual, voice cloning) ---
-  # --- 组合6: MOSS-TTS-Nano（本地离线，多语言，音色克隆） ---
+  # --- Combo 4: MOSS-TTS-Nano (local offline, multilingual, voice cloning) ---
+  # --- 组合4: MOSS-TTS-Nano（本地离线，多语言，音色克隆） ---
   # engine: "moss-nano"
   # moss_nano:
   #   model_dir: ""
@@ -188,29 +158,29 @@ tts:
   #   voice: "Junhao"
   #   backend: "onnx"
 
-  # --- Combo 7: API summarization (OpenAI-compatible, e.g., DeepSeek, Groq, Ollama) ---
-  # --- 组合7: API总结（OpenAI兼容格式，如 DeepSeek、Groq、Ollama） ---
-  # engine: "edge"
-  # summarize_backend: "api"
+# Summarization configuration / 总结配置
+# Shared by TTS voice summarization and scheduled task summarization.
+# TTS 语音总结和定时任务总结共用。
+# Backends / 总结后端：
+#   "simple"    — Pure text cleaning only (default) / 纯文本清洗（默认），零延迟
+#   "api"       — Remote AI API (OpenAI/Anthropic format) / 远程AI API（OpenAI/Anthropic格式）
+#   "claude"    — Claude CLI / 使用 Claude CLI
+#   "codebuddy" — CodeBuddy CLI / 使用 CodeBuddy CLI
+#   "gemini"    — Gemini CLI / 使用 Gemini CLI
+#   "opencode"  — OpenCode CLI / 使用 OpenCode CLI
+#   "codex"     — Codex CLI / 使用 Codex CLI
+#   "qoder"     — Qoder CLI (Alibaba) / 使用 Qoder CLI（阿里编码智能体）
+#   "vecli"     — VeCLI (Volcengine Doubao) / 使用 VeCLI（火山引擎 Doubao）
+#   "deepseek"  — DeepSeek TUI (requires v0.8.33+) / 使用 DeepSeek TUI（需 v0.8.33+）
+#   "pi"        — Pi CLI (minimalist coding agent) / 使用 Pi CLI（极简编程智能体）
+summarize:
+  backend: "simple"                                     # Summarization backend (default: "simple") / 总结后端（默认: simple）
+  # model: ""                                           # Summarization model (leave empty for backend default) / 总结模型（留空使用后端默认）
+  # API sub-config (only used when backend is "api") / API子配置（backend为api时使用）
   # api:
   #   base_url: "https://api.openai.com/v1/chat/completions"  # Full endpoint URL / 完整端点URL
   #   key: "sk-xxx"                                         # API key / API密钥
   #   format: "openai"                                      # "openai" (default) or "anthropic" / "openai"（默认）或 "anthropic"
-  #   model: "gpt-4o-mini"                                  # Model name / 模型名称
-  # voice: "zh-CN-XiaoxiaoNeural"
-  # speed: 1
-
-  # --- Combo 8: API summarization (Anthropic format) ---
-  # --- 组合8: API总结（Anthropic格式） ---
-  # engine: "edge"
-  # summarize_backend: "api"
-  # api:
-  #   base_url: "https://api.anthropic.com/v1/messages"
-  #   key: "sk-ant-xxx"
-  #   format: "anthropic"
-  #   model: "claude-3-5-haiku-latest"
-  # voice: "zh-CN-XiaoxiaoNeural"
-  # speed: 1
 
 # Default agent (optional; leave empty to use the first agent in config/agents/ directory)
 # 默认智能体（可选，留空则使用 config/agents/ 目录下的第一个智能体）
@@ -222,42 +192,47 @@ default_agent: "codebuddy"
 log_dir: ".clawbench/logs"
 log_max_days: 7            # Log retention in days (default/默认: 7) / 日志保留天数，默认 7
 
-# Port forwarding configuration (Android WebView accessing server local ports)
-# 端口转发配置（Android WebView 访问服务器本地端口）
-# Default: enabled with port range 1024-65535 / 默认：启用，端口范围 1024-65535
-proxy:
-  enabled: true             # Enable port forwarding (default: true) / 启用端口转发代理（默认: true）
-  allowed_ports: "1024-65535"  # Allowed port range (supports ranges and discrete ports, e.g. "3000,5173,8080")
-                                # 允许转发的端口范围（支持范围和离散端口，如 "3000,5173,8080"）
-
-# SSH tunnel configuration (remote development port forwarding)
-# SSH 隧道配置（远程开发端口转发）
+# SSH tunnel configuration for remote port forwarding
+# SSH 隧道远程端口转发配置
+# When enabled, Android app connects via SSH tunnel to access server local ports transparently.
+# The proxy section has been merged into port_forward — proxy.enabled is no longer used.
+# 启用后，Android App 通过 SSH 隧道访问服务器本地端口，对应用完全透明。
+# 旧版 proxy 配置已合并到 port_forward，proxy.enabled 不再生效。
 # Default: enabled / 默认：启用
-# Android app connects via SSH tunnel to access server local ports transparently
-# Android App 通过 SSH 隧道访问服务器本地端口，对应用完全透明
-ssh:
+port_forward:
   enabled: true             # Enable SSH tunnel server (default: true) / 启用 SSH 隧道服务（默认: true）
   port: 0                   # SSH port (0 = auto = main_port + 1, e.g. production 20001; or specify like 20020)
                             # SSH 端口（0 = 自动 = 主端口+1，如生产环境 20001；也可指定如 20020）
   host_key: ""              # Host key file path (empty = auto-generate ephemeral key; set a path for persistence across restarts)
                             # Host key 文件路径（空 = 自动生成临时密钥，重启后变更；建议指定路径以持久化）
+  allowed_ports: ""  # Allowed port range for SSH tunnel forwarding (empty = allow all; supports ranges and discrete ports, e.g. "1024-65535", "80,443,8080")
+                     # 允许通过 SSH 隧道转发的端口范围（空 = 允许所有端口；支持范围和离散端口，如 "1024-65535", "80,443,8080"）
 
 # RAG history memory configuration / RAG 历史记忆配置
-# When enabled, chat messages are automatically indexed into a vector database (DuckDB + BGE-M3),
+# When enabled, chat messages are automatically indexed into a vector database (DuckDB),
 # and AI agents can search historical conversations via the RAG API.
-# 启用后，聊天消息自动索引到向量数据库（DuckDB + BGE-M3），AI 智能体可通过 RAG API 搜索历史对话。
-# Prerequisite: Ollama must be running with the bge-m3 model pulled (ollama pull bge-m3)
-# 前提条件：Ollama 需运行并拉取 bge-m3 模型（ollama pull bge-m3）
+# 启用后，聊天消息自动索引到向量数据库（DuckDB），AI 智能体可通过 RAG API 搜索历史对话。
+# RAG history memory — always enabled. Without embedding API, uses FTS-only search.
+# When embedding API is available, uses hybrid vector + FTS search with RRF fusion.
+# RAG 历史记忆 — 始终启用。无嵌入 API 时使用纯全文检索。
+# 嵌入 API 可用时，使用向量 + 全文混合检索（RRF 融合）。
+# Compatible with any OpenAI /v1/embeddings endpoint: Ollama, vLLM, LM Studio, LocalAI,
+# LiteLLM, OpenAI, Azure OpenAI, etc.
+# 兼容任何 OpenAI /v1/embeddings 端点：Ollama、vLLM、LM Studio、LocalAI、LiteLLM、OpenAI、Azure OpenAI 等。
+# Prerequisite for vector search: an embedding service must be running with the model loaded
+# (e.g., for Ollama: ollama pull bge-m3)
+# 向量搜索前提条件：嵌入服务需运行并加载模型（如 Ollama: ollama pull bge-m3）
 # rag:
-#   enabled: false                  # Enable RAG history memory (default: false) / 启用 RAG 历史记忆（默认: false）
-#   ollama_base_url: "http://localhost:11434"  # Ollama API URL / Ollama API 地址
-#   ollama_model: "bge-m3"          # Embedding model name / Embedding 模型名
-#   chunk_size: 512                  # Chunk size in tokens (default: 512) / 分块大小（token，默认: 512）
-#   chunk_overlap: 64                # Overlap between chunks in tokens (default: 64) / 分块重叠（token，默认: 64）
-#   poll_interval: "10s"             # Indexer poll interval (default: 10s) / 索引轮询间隔（默认: 10s）
-#   batch_size: 10                   # Messages per indexer batch (default: 10) / 每轮索引消息数（默认: 10）
-#   search_limit: 5                  # Default search result limit (default: 5) / 默认搜索结果数量（默认: 5）
-#   retention_days: 90               # Soft-deleted data retention days, 0=keep forever (default: 90) / 软删除数据保留天数，0=永久保留（默认: 90）
+#   base_url: "http://localhost:11434"     # OpenAI-compatible API base URL / OpenAI 兼容 API 地址
+#   model: "bge-m3"                        # Embedding model name / Embedding 模型名
+#   api_key: ""                            # API key (optional, for cloud providers like OpenAI) / API 密钥（可选，云服务如 OpenAI 需要）
+#   chunk_size: 512                        # Chunk size in tokens (default: 512) / 分块大小（token，默认: 512）
+#   chunk_overlap: 64                      # Overlap between chunks in tokens (default: 64) / 分块重叠（token，默认: 64）
+#   poll_interval: "10s"                   # Indexer poll interval (default: 10s) / 索引轮询间隔（默认: 10s）
+#   batch_size: 10                         # Messages per indexer batch (default: 10) / 每轮索引消息数（默认: 10）
+#   search_limit: 5                        # Default search result limit (default: 5) / 默认搜索结果数量（默认: 5）
+#   search_pool_size: 20                   # RRF candidate pool size per source (default: 20) / RRF 候选池大小（默认: 20）
+#   retention_days: 90                     # Soft-deleted data retention days, 0=keep forever (default: 90) / 软删除数据保留天数，0=永久保留（默认: 90）
 
 # Terminal configuration / 终端配置
 # Interactive web terminal with PTY + WebSocket + xterm.js
@@ -292,3 +267,11 @@ ssh:
 # 前端: useSystemEvents composable 自动连接（cookie 认证）。
 # Android: PortForwardService native SSE listener uses ?token= auth; shows system notifications when backgrounded.
 # 安卓: PortForwardService 原生 SSE 监听器使用 ?token= 认证；后台时弹出系统通知。
+
+# Push notifications (JPush for Android)
+# 推送通知（极光推送，用于 Android）
+# push:
+#   jpush:
+#     enabled: false            # Enable JPush notifications (default: false) / 启用极光推送（默认: false）
+#     app_key: ""               # JPush AppKey / 极光推送 AppKey
+#     master_secret: ""         # JPush Master Secret / 极光推送 Master Secret

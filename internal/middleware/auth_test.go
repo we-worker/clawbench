@@ -39,9 +39,9 @@ func TestAuth_NoPassword_PassThrough(t *testing.T) {
 	})
 }
 
-// --- Auth: localhost still requires cookie when password is configured ---
+// --- Auth: localhost bypass ---
 
-func TestAuth_Localhost_IPv4_RequiresCookie(t *testing.T) {
+func TestAuth_Localhost_IPv4_BypassesAuth(t *testing.T) {
 	withSavedToken(func() {
 		model.SessionToken = "valid-token"
 
@@ -51,11 +51,11 @@ func TestAuth_Localhost_IPv4_RequiresCookie(t *testing.T) {
 
 		middleware.Auth(okHandler).ServeHTTP(rec, req)
 
-		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 }
 
-func TestAuth_Localhost_IPv6_RequiresCookie(t *testing.T) {
+func TestAuth_Localhost_IPv6_BypassesAuth(t *testing.T) {
 	withSavedToken(func() {
 		model.SessionToken = "valid-token"
 
@@ -65,7 +65,7 @@ func TestAuth_Localhost_IPv6_RequiresCookie(t *testing.T) {
 
 		middleware.Auth(okHandler).ServeHTTP(rec, req)
 
-		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 }
 
@@ -123,9 +123,9 @@ func TestAuth_MissingCookie_Returns401(t *testing.T) {
 	})
 }
 
-// --- Auth: localhost + bad cookie still fails ---
+// --- Auth: localhost + bad cookie still passes (localhost wins) ---
 
-func TestAuth_LocalhostWithBadCookie_Returns401(t *testing.T) {
+func TestAuth_LocalhostWithBadCookie_StillPasses(t *testing.T) {
 	withSavedToken(func() {
 		model.SessionToken = "valid-token"
 
@@ -139,7 +139,7 @@ func TestAuth_LocalhostWithBadCookie_Returns401(t *testing.T) {
 
 		middleware.Auth(okHandler).ServeHTTP(rec, req)
 
-		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 }
 

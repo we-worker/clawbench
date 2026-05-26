@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -18,6 +20,8 @@ import (
 	"clawbench/internal/model"
 	"clawbench/internal/platform"
 	"clawbench/internal/service"
+
+	"github.com/google/uuid"
 )
 
 const maxChatBodySize = 10 << 20 // 10MB
@@ -79,33 +83,39 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 				writeLocalizedErrorf(w, r, http.StatusNotFound, "SessionNotFound")
 				return
 			}
-		} else {
-			// No specific session requested, get the most recent session across all backends
-			allSessions, err := service.GetSessions(projectPath, "")
-			if err != nil {
-				model.WriteError(w, model.Internal(fmt.Errorf("failed to load sessions")))
+			// Verify the session belongs to the requesting project (ISS-180)
+			// Skip ownership check if session doesn't exist in DB (session auto-created below)
+			if sessionProject := service.GetSessionProjectPath(sessionID); sessionProject != "" && sessionProject != projectPath {
+				writeLocalizedError(w, r, model.Forbidden(nil, "AccessDenied"))
 				return
 			}
-
-			if len(allSessions) == 0 {
-				// No sessions exist, create a new one with default agent
-				agentID := model.GetDefaultAgentID()
-				sessionBackend2, defaultModel, _, _, ok := resolveAgentConfig(agentID)
-				if !ok {
-					writeLocalizedErrorf(w, r, http.StatusServiceUnavailable, "NoAgentsAvailable")
-					return
-				}
-				sessionID, err = service.CreateSession(projectPath, sessionBackend2, T(r, "NewSession"), agentID, defaultModel, "default", "chat")
-				if err != nil {
-					model.WriteError(w, model.Internal(fmt.Errorf("failed to create session")))
-					return
-				}
-			} else {
-				// Use the most recent session (already sorted by updated_at DESC)
-				sessionID = allSessions[0].ID
-				sessionBackend = allSessions[0].Backend
+	} else {
+		// No specific session requested — use lightweight query to find the most recent session
+		latestID, latestBackend, err := service.GetLatestSessionID(projectPath)
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				model.WriteError(w, model.Internal(fmt.Errorf("failed to find latest session")))
+				return
 			}
+			// No sessions exist, create a new one with default agent.
+			// Don't pre-fill agent default model — leave empty so frontend
+			// falls back to global localStorage preference (cross-project).
+			agentID := model.GetDefaultAgentID()
+			sessionBackend2, _, _, _, ok := resolveAgentConfig(agentID)
+			if !ok {
+				writeLocalizedErrorf(w, r, http.StatusServiceUnavailable, "NoAgentsAvailable")
+				return
+			}
+			sessionID, err = service.CreateSession(projectPath, sessionBackend2, T(r, "NewSession"), agentID, "", "default", "chat")
+			if err != nil {
+				model.WriteError(w, model.Internal(fmt.Errorf("failed to create session")))
+				return
+			}
+		} else {
+			sessionID = latestID
+			sessionBackend = latestBackend
 		}
+	}
 
 		// Always update cookie with current session ID
 		setSessionID(w, sessionID)
@@ -113,15 +123,28 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 		service.UpdateLastRead(sessionID)
 
 		// Parse pagination params
+		// Supports both before_id (preferred, integer cursor) and before (legacy, timestamp cursor).
+		// before_id takes priority when both are provided.
 		limit := 0
-		beforeTime := ""
+		beforeID := 0
 		if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 				limit = l
 			}
 		}
-		if bt := r.URL.Query().Get("before"); bt != "" {
-			beforeTime = bt
+		if bid := r.URL.Query().Get("before_id"); bid != "" {
+			if id, err := strconv.Atoi(bid); err == nil && id > 0 {
+				beforeID = id
+			}
+		}
+		// Legacy: accept "before" (timestamp) for backward compatibility with older clients.
+		// When before_id is absent and before is present, fall back to timestamp-based lookup.
+		if beforeID == 0 {
+			if bt := r.URL.Query().Get("before"); bt != "" {
+				if id, err := service.GetMessageIDBeforeTime(projectPath, sessionBackend, sessionID, bt); err == nil && id > 0 {
+					beforeID = id
+				}
+			}
 		}
 
 		// If limit not specified, use config default
@@ -134,12 +157,21 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		totalCount := service.GetChatMessageCount(sessionID)
-		messages, err := service.GetChatHistoryPaged(projectPath, sessionBackend, sessionID, limit, beforeTime)
-		// Get session title and agent info
-		sessionTitle, _ := service.GetSessionTitle(sessionID)
-		sessionAgentID := service.GetSessionAgentID(sessionID)
-		sessionModelID := service.GetSessionModel(sessionID)
-		sessionThinkingEffort := service.GetSessionThinkingEffort(sessionID)
+		messages, err := service.GetChatHistoryPaged(projectPath, sessionBackend, sessionID, limit, beforeID)
+		// Get session metadata in a single query
+		sessionInfo, _ := service.GetSessionInfo(sessionID)
+		var sessionTitle, sessionAgentID, sessionModelID, sessionThinkingEffort string
+		var sessionInfoBackend string
+		if sessionInfo != nil {
+			sessionTitle = sessionInfo.Title
+			sessionInfoBackend = sessionInfo.Backend
+			sessionAgentID = sessionInfo.AgentID
+			sessionModelID = sessionInfo.Model
+			sessionThinkingEffort = sessionInfo.ThinkingEffort
+		}
+		if sessionInfoBackend != "" {
+			sessionBackend = sessionInfoBackend
+		}
 		running := service.IsSessionRunning(sessionID)
 		if err != nil {
 			writeJSON(w, http.StatusOK, map[string]any{"messages": []any{}, "running": running, "sessionId": sessionID, "sessionTitle": sessionTitle, "backend": sessionBackend, "agentId": sessionAgentID, "modelId": sessionModelID, "thinkingEffort": sessionThinkingEffort, "total": totalCount})
@@ -166,13 +198,15 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		agentID2 := model.GetDefaultAgentID()
-		sessionBackend2, defaultModel2, _, _, ok := resolveAgentConfig(agentID2)
+		sessionBackend2, _, _, _, ok := resolveAgentConfig(agentID2)
 		if !ok {
 			writeLocalizedErrorf(w, r, http.StatusServiceUnavailable, "NoAgentsAvailable")
 			return
 		}
 		var err error
-		sessionID, err = service.CreateSession(projectPath, sessionBackend2, T(r, "NewSession"), agentID2, defaultModel2, "default", "chat")
+		// Don't pre-fill agent default model — leave empty so frontend
+		// falls back to global localStorage preference (cross-project).
+		sessionID, err = service.CreateSession(projectPath, sessionBackend2, T(r, "NewSession"), agentID2, "", "default", "chat")
 		if err != nil {
 			model.WriteError(w, model.Internal(fmt.Errorf("failed to create session")))
 			return
@@ -182,6 +216,14 @@ func AIChat(w http.ResponseWriter, r *http.Request) {
 	backendName := service.GetSessionBackend(sessionID)
 	if backendName == "" {
 		writeLocalizedErrorf(w, r, http.StatusBadRequest, "SessionBackendNotFound")
+		return
+	}
+
+	// Verify the session belongs to the requesting project (ISS-180)
+	// For POST, sessionID is always from a DB-backed session (auto-created above or from cookie),
+	// so an empty sessionProject means the session doesn't exist — will fail at backendName check.
+	if sessionProject := service.GetSessionProjectPath(sessionID); sessionProject != "" && sessionProject != projectPath {
+		writeLocalizedError(w, r, model.Forbidden(nil, "AccessDenied"))
 		return
 	}
 
@@ -603,6 +645,13 @@ func executeStreamRun(
 					)
 				}
 			}
+		case <-ctx.Done():
+			// Context cancelled (user cancel or disconnect) — exit the event loop promptly.
+			// Without this branch, the goroutine blocks until the next event or 1s ticker.
+			slog.Info("executeStreamRun context cancelled, finalizing stream",
+				slog.String("session", sessionID),
+				slog.String("reason", ctx.Err().Error()))
+			return finalizeStreamRun(ctx, streamCh, projectPath, backendName, sessionID, agentID, chatReq, blocks, responseMetadata, rawOutput, eventCh, wallStart)
 		case <-flushTicker.C:
 			if len(blocks) > 0 {
 				if err := service.UpdateStreamingMessage(projectPath, backendName, sessionID, serializeBlocks()); err != nil {
@@ -782,9 +831,9 @@ func buildChatRequest(prompt, sessionID, projectPath, backendName, agentID, mode
 		if agent.Command != "" {
 			agentCommand = agent.Command
 		}
-		// Fall back to YAML config default when frontend didn't specify
-		if effectiveThinkingEffort == "" && agent.ThinkingEffort != "" {
-			effectiveThinkingEffort = agent.ThinkingEffort
+		// Fall back to agent's effective thinking effort when frontend didn't specify
+		if effectiveThinkingEffort == "" && agent.EffectiveThinkingEffort() != "" {
+			effectiveThinkingEffort = agent.EffectiveThinkingEffort()
 		}
 	}
 
@@ -854,7 +903,10 @@ func buildChatRequestFromQueue(qMsg model.QueuedMessage, sessionID, projectPath,
 		prompt = fmt.Sprintf("[User uploaded %d file(s): %s]\n%s", len(qMsg.Files), strings.Join(qMsg.Files, ", "), prompt)
 	}
 
-	return buildChatRequest(prompt, sessionID, projectPath, backendName, agentID, "", service.GetSessionThinkingEffort(sessionID), fileDir)
+	// Use session-persisted model (if user explicitly chose one) as modelOverride
+	// so queued messages respect the user's model choice, not just the agent default.
+	sessionModel := service.GetSessionModel(sessionID)
+	return buildChatRequest(prompt, sessionID, projectPath, backendName, agentID, sessionModel, service.GetSessionThinkingEffort(sessionID), fileDir)
 }
 
 // CancelChat handles POST to cancel an ongoing AI stream for a session.
@@ -1038,7 +1090,7 @@ func convertAskQuestionBlocks(blocks []model.ContentBlock) []model.ContentBlock 
 		toolBlock := model.ContentBlock{
 			Type:  "tool_use",
 			Name:  "AskUserQuestion",
-			ID:    fmt.Sprintf("ask-%d", time.Now().UnixNano()%1000000),
+			ID:    "ask-" + uuid.New().String(),
 			Input: c.input,
 			Done:  true,
 		}

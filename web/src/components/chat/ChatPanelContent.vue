@@ -13,6 +13,7 @@
       :hasMore="session.hasMore.value"
       :loadingMore="session.loadingMore.value"
       :totalMessages="session.totalMessages.value"
+      :active="props.active"
       :pendingMessages="manager.pendingMessages.value"
       @touchstart="swipeSession.onTouchStart"
       @touchend="swipeSession.onTouchEnd"
@@ -26,6 +27,7 @@
       @send-message="handleToolSendMessage"
       @remove-pending="manager.handleRemovePending"
       @render-flush="scrollBottom()"
+      @toggle-summary="handleToggleSummary"
     />
 
     <!-- Session switching overlay — placed here to cover the entire message area -->
@@ -85,12 +87,12 @@
       @remove-file="removeFile"
       @add-attached="addAttachedFile"
       @remove-attached="removeAttachedFile"
-      @open-session-tab="session.openSessionTab"
+      @open-session-tab="identity.openSessionTab"
       @file-tag-click="handleFileTagClick"
       @toggle-auto-speech="autoSpeech.toggle"
-      @create-session="manager.createSession"
+      @create-session="() => manager.createSession()"
       @show-agent-selector="handleShowAgentSelector"
-      @delete-session="(id) => manager.deleteCurrentSession((draftId) => inputBarRef.value?.deleteDraft(draftId))"
+      @delete-session="() => manager.deleteCurrentSession((draftId) => inputBarRef.value?.deleteDraft(draftId))"
       @switch-model="handleSwitchModel"
       @switch-thinking-effort="handleSwitchThinkingEffort"
     />
@@ -124,18 +126,6 @@
     @file-open="handleFileOpenInOverlay"
     @send-message="handleToolSendMessage"
   />
-
-  <!-- Session Drawer — only open when chat tab is active -->
-  <SessionDrawer
-    ref="sessionDrawerRef"
-    :open="props.active && session.sessionDrawerOpen.value"
-    :currentSessionId="identity.currentSessionId.value"
-    :runningSessionIds="identity.runningSessions.value"
-    @close="session.sessionDrawerOpen.value = false"
-    @select="manager.switchSession"
-    @create="manager.createSession"
-    @delete="(sessionId, backend) => manager.deleteSession(sessionId, backend).then(() => inputBarRef.value?.deleteDraft(sessionId))"
-  />
 </template>
 
 <script setup>
@@ -143,7 +133,6 @@ import { ref, computed, watch, onUnmounted, onMounted, inject, provide, toRef, n
 import { useI18n } from 'vue-i18n'
 import { gt } from '@/composables/useLocale'
 import HeaderMarquee from '@/components/common/HeaderMarquee.vue'
-import SessionDrawer from '@/components/session/SessionDrawer.vue'
 import ChatMetadataModal from './ChatMetadataModal.vue'
 import ToolDetailOverlay from './ToolDetailOverlay.vue'
 import ChatInputBar from './ChatInputBar.vue'
@@ -151,10 +140,10 @@ import ChatMessageList from './ChatMessageList.vue'
 import { useChatRender } from '@/composables/useChatRender.ts'
 import { formatToolOutput } from '@/utils/renderToolDetail.ts'
 import { useChatStream } from '@/composables/useChatStream.ts'
-import { useChatSession } from '@/composables/useChatSession.ts'
+import { useChatSession, loadSessionsOnce } from '@/composables/useChatSession.ts'
 import { useSessionIdentity } from '@/composables/useSessionIdentity.ts'
 import { useSessionManager } from '@/composables/useSessionManager.ts'
-import { useAgents } from '@/composables/useAgents.ts'
+import { useAgents } from '@/composables/useAgents'
 import { useToast } from '@/composables/useToast.ts'
 import { useFilePathAnnotation } from '@/composables/useFilePathAnnotation.ts'
 import { useNotification } from '@/composables/useNotification.ts'
@@ -163,6 +152,7 @@ import { refreshCurrentFile } from '@/composables/useFileRefresh.ts'
 import { playNotificationSound } from '@/composables/useNotificationSound.ts'
 import { useAutoSpeech, extractSpeakableText } from '@/composables/useAutoSpeech.ts'
 import { useSwipeSession } from '@/composables/useSwipeSession.ts'
+import { useGlobalEvents } from '@/composables/useGlobalEvents'
 import { store } from '@/stores/app.ts'
 import { renderMarkdown } from '@/composables/useMarkdownRenderer.ts'
 
@@ -189,7 +179,6 @@ const loading = ref(false)
 // overflow after being hidden (display:none gives scrollHeight=0).
 const layoutRefreshKey = ref(0)
 const currentAgent = computed(() => getAgent(identity.currentAgentId.value) || null)
-const sessionDrawerRef = ref(null)
 const inputBarRef = ref(null)
 const messageListRef = ref(null)
 const metadataModal = ref({
@@ -263,6 +252,10 @@ function onStreamEnd(reason) {
         }
       }
     }
+    // Recalculate chatUnread after stream completes — the current session's
+    // unreadCount is now 0 (UpdateLastRead called by loadHistory), so
+    // chatUnread should be false if no other sessions have unread messages.
+    loadSessionsOnce()
   } else if (reason === 'cancelled') {
     // Backend already cleared queue; clear locally for immediate UI response
     manager.pendingMessages.value = []
@@ -382,7 +375,7 @@ provide('chatRender', {
   hasImagesInContent: render.hasImagesInContent,
 })
 provide('chatSession', { getAgentIcon, getAgentName })
-provide('chatUI', { closeSheet: () => switchTab('viewer') })
+provide('chatUI', { navigateToFileViewer: () => switchTab('viewer') })
 provide('autoSpeech', autoSpeech)
 provide('layoutRefreshKey', layoutRefreshKey)
 
@@ -390,7 +383,7 @@ provide('layoutRefreshKey', layoutRefreshKey)
 // immediate: true 确保首次挂载时（active 已为 true）也会加载历史记录
 watch(() => props.active, async (val) => {
   if (!val) {
-    session.sessionDrawerOpen.value = false
+    identity.sessionDrawerOpen.value = false
     toolDetailOverlay.value.show = false
   } else {
     // Open/Re-open: load history (with overlay) and fix stale layout state from v-show display:none
@@ -410,13 +403,14 @@ async function handleShowAgentSelector() {
     manager.createSession(agentsList.value[0].id)
     return
   }
-  sessionDrawerRef.value?.openAgentSelector()
+  identity.openAgentSelector()
 }
 
 function handleSwitchModel(model) {
   identity.currentModelId.value = model.id
   identity.currentModelName.value = model.name
-  identity.saveModelPref(identity.currentAgentId.value, model.id)
+  // Note: model switch is session-scoped only — does NOT update agent's default model.
+  // Agent default model is configured exclusively via the settings panel.
 }
 
 function handleSwitchThinkingEffort(level) {
@@ -583,26 +577,63 @@ function handleFileOpenInOverlay(filePath) {
   switchTab('viewer')
 }
 
-// Start global polling when component mounts
+// Wire up WS event handler for session_update
+const { onEvent } = useGlobalEvents()
+const removeEventHandler = onEvent((event, data) => {
+    if (event === 'session_update') {
+        session.onSessionEvent(data)
+    }
+})
+
+// Handle summary_update from WebSocket (dispatched by useGlobalEvents as custom event)
+function handleSummaryUpdate(e) {
+    const data = e.detail
+    if (!data?.targetID) return
+    const msgId = String(data.targetID)
+    const msg = messages.value.find(m => String(m.id) === msgId)
+    if (!msg) return
+    msg.summary = data.summary
+    // Auto-show summary if user hasn't manually toggled
+    if (msg.showingSummary !== true && msg.showingSummary !== false) {
+        // showingSummary was never set (undefined) — auto-set based on summary content
+        msg.showingSummary = data.summary != null && data.summary !== ''
+    } else if (data.summary != null && data.summary !== '') {
+        // If currently showing original and a new summary arrives, auto-switch to summary
+        if (!msg.showingSummary) {
+            msg.showingSummary = true
+        }
+    }
+}
+
+// Toggle summary/original view for a message
+function handleToggleSummary(msgId) {
+    const msg = messages.value.find(m => m.id === msgId)
+    if (!msg) return
+    msg.showingSummary = !msg.showingSummary
+}
+
+// Start one-time session load when component mounts
 onMounted(() => {
     // Request notification permission on mount
     notification.requestPermission().catch(err => {
         console.warn('Failed to request notification permission:', err)
     })
 
-    session.startGlobalPolling()
+    session.loadSessionsOnce()
     document.addEventListener('visibilitychange', session.handleVisibilityChange)
+    window.addEventListener('clawbench-summary-update', handleSummaryUpdate)
 })
 
 // Cleanup preview URLs on unmount
 onUnmounted(() => {
+    removeEventHandler()
     cleanupPreviewUrls()
     stream.disconnectStream()
     stream.stopPolling()
-    session.stopGlobalPolling()
     session.stopMsgCountPolling()
     document.removeEventListener('visibilitychange', session.handleVisibilityChange)
     document.removeEventListener('visibilitychange', manager._visibilityHandler)
+    window.removeEventListener('clawbench-summary-update', handleSummaryUpdate)
     notification.closeAll()
 })
 </script>

@@ -1,5 +1,11 @@
 <template>
   <div class="content-blocks">
+    <!-- Summary mode: render summary as a single text block -->
+    <template v-if="showingSummary && summary">
+      <div v-html="renderTextBlock(summary, msgId, 0, false)"></div>
+    </template>
+    <!-- Original content mode -->
+    <template v-else>
     <template v-for="(block, bi) in blocks" :key="bi">
       <!-- Thinking block -->
       <div v-if="block.type === 'thinking'" class="chat-thinking" @click.stop="handleThinkingClick(block)">
@@ -82,6 +88,7 @@
       <!-- Text block: streaming uses throttled render to avoid UI freeze -->
       <div v-else-if="block.type === 'text'" v-html="getBlockHtml(bi, block)"></div>
     </template>
+    </template>
     <!-- Loading dots while AI is still streaming (not when cancelled) -->
     <div v-if="streaming && !cancelled" class="placeholder-dots"><span></span><span></span><span></span></div>
     <!-- Cancelled marker -->
@@ -150,6 +157,8 @@ const props = defineProps({
   blockAskQuestions: { type: Object, default: () => ({}) },
   streaming: { type: Boolean, default: false },
   cancelled: { type: Boolean, default: false },
+  summary: { type: String, default: null },
+  showingSummary: { type: Boolean, default: false },
   // Render functions
   renderTextBlock: { type: Function, required: true },
   formatToolInput: { type: Function, required: true },
@@ -161,6 +170,7 @@ const props = defineProps({
   getAgentName: { type: Function, default: () => '' },
   // Performance: static block cache from useChatRender (Problem 6)
   staticBlockCache: { type: Object, default: null },
+  active: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['toggle-tool', 'show-tool-detail', 'show-thinking-detail', 'task-card-click', 'send-message', 'render-flush'])
@@ -197,8 +207,8 @@ function handleToolDetailClick(event) {
   // Try tool-specific action handler first (via data-tool-name on the .tool-detail container)
   const toolName = event.currentTarget.dataset?.toolName
   if (toolName && handleToolAction(toolName, event, emit)) return
-  // Allow file-open buttons to bubble
-  if (event.target.closest('.chat-file-open-btn')) {
+  // Allow file-open buttons and commit-hash elements to bubble
+  if (event.target.closest('.chat-file-open-btn') || event.target.closest('.chat-commit-hash, .chat-commit-open-btn') || event.target.closest('.chat-worktree-btn')) {
     return
   }
   event.stopPropagation()
@@ -213,6 +223,11 @@ const THROTTLE_MS = 300
 function flushBlockHtml() {
   _throttleTimer = null
   if (!_throttlePending) return
+  // Skip rendering when panel not visible
+  if (!props.active) {
+    _throttlePending = false
+    return
+  }
   _throttlePending = false
   const newCache = {}
   for (let i = 0; i < (props.blocks?.length || 0); i++) {
@@ -241,6 +256,10 @@ function getBlockHtml(bi, block) {
     }
     return props.renderTextBlock(block.text, props.msgId, bi, false)
   }
+  // Streaming + panel not visible: skip expensive markdown parsing
+  if (!props.active) {
+    return ''
+  }
   // Streaming: deferred rendering with throttling
   if (blockHtmlCache.value[bi] !== undefined) {
     if (!_throttleTimer) {
@@ -263,6 +282,15 @@ watch(() => props.streaming, (streaming, wasStreaming) => {
     if (_throttleTimer) { clearTimeout(_throttleTimer); _throttleTimer = null }
     _throttlePending = false
     blockHtmlCache.value = {}
+  }
+})
+
+// Reset cache when panel becomes active — allows re-render with fresh markdown
+watch(() => props.active, (active) => {
+  if (active) {
+    blockHtmlCache.value = {}
+    if (_throttleTimer) { clearTimeout(_throttleTimer); _throttleTimer = null }
+    _throttlePending = false
   }
 })
 
@@ -302,6 +330,10 @@ onUnmounted(() => {
   border-radius: 4px;
   margin-top: 4px;
 }
+
+
+
+
 
 .chat-error-card {
   display: flex;
@@ -668,6 +700,28 @@ onUnmounted(() => {
 }
 
 .content-blocks .chat-commit-open-btn:hover {
+  color: var(--accent-color, #4a90d9);
+  background: var(--bg-tertiary, #f0f0f0);
+}
+
+.content-blocks .chat-worktree-btn {
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--text-muted, #999);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1;
+  vertical-align: baseline;
+}
+
+.content-blocks .chat-worktree-switch-btn:hover {
   color: var(--accent-color, #4a90d9);
   background: var(--bg-tertiary, #f0f0f0);
 }

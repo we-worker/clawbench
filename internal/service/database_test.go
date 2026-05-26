@@ -3,6 +3,8 @@ package service
 import (
 	"database/sql"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"clawbench/internal/model"
@@ -12,10 +14,11 @@ import (
 )
 
 // setupTestDBForTTS creates an in-memory SQLite database with the tts_summaries table
-// for testing GetTTSSummary and SaveTTSSummary.
+// for testing TTS summary functions.
 func setupTestDBForTTS(t *testing.T) (*sql.DB, func()) {
 	t.Helper()
 	origDB := DB
+	origDBRead := DBRead
 
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -27,9 +30,19 @@ func setupTestDBForTTS(t *testing.T) (*sql.DB, func()) {
 
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS tts_summaries (
-			cache_key TEXT PRIMARY KEY,
-			summary TEXT NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			message_id   INTEGER NOT NULL,
+			tts_summary  TEXT NOT NULL,
+			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(message_id)
+		);
+		CREATE TABLE IF NOT EXISTS summaries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			target_type TEXT NOT NULL,
+			target_id   INTEGER NOT NULL,
+			summary     TEXT NOT NULL,
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(target_type, target_id)
 		);
 		CREATE TABLE IF NOT EXISTS chat_history (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +67,7 @@ func setupTestDBForTTS(t *testing.T) (*sql.DB, func()) {
 			model TEXT DEFAULT '',
 			session_type TEXT NOT NULL DEFAULT 'chat',
 			external_session_id TEXT DEFAULT '',
+			thinking_effort TEXT DEFAULT '',
 			deleted INTEGER NOT NULL DEFAULT 0,
 			last_read_at DATETIME,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -66,8 +80,10 @@ func setupTestDBForTTS(t *testing.T) (*sql.DB, func()) {
 	}
 
 	DB = db
+	DBRead = db // Same instance for :memory: SQLite — data is shared
 	teardown := func() {
 		DB = origDB
+		DBRead = origDBRead
 		db.Close()
 	}
 	return db, teardown
@@ -78,6 +94,7 @@ func setupTestDBForTTS(t *testing.T) (*sql.DB, func()) {
 func setupTestDBForQuickSend(t *testing.T) (*sql.DB, func()) {
 	t.Helper()
 	origDB := DB
+	origDBRead := DBRead
 
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -102,8 +119,10 @@ func setupTestDBForQuickSend(t *testing.T) (*sql.DB, func()) {
 	}
 
 	DB = db
+	DBRead = db // Same instance for :memory: SQLite — data is shared
 	teardown := func() {
 		DB = origDB
+		DBRead = origDBRead
 		db.Close()
 	}
 	return db, teardown
@@ -117,9 +136,13 @@ func TestSchema_SessionTypeColumnExists(t *testing.T) {
 	model.BinDir = tmpDir
 	defer func() { model.BinDir = origBinDir }()
 
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
 	err := InitDB()
 	assert.NoError(t, err)
-	defer DB.Close()
+	defer CloseDB()
 
 	columns := getTableColumns(t, DB, "chat_sessions")
 	assert.Contains(t, columns, "session_type", "chat_sessions should have session_type column")
@@ -131,9 +154,13 @@ func TestSchema_TaskExecutionsColumns(t *testing.T) {
 	model.BinDir = tmpDir
 	defer func() { model.BinDir = origBinDir }()
 
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
 	err := InitDB()
 	assert.NoError(t, err)
-	defer DB.Close()
+	defer CloseDB()
 
 	columns := getTableColumns(t, DB, "task_executions")
 	assert.Contains(t, columns, "session_id", "task_executions should have session_id column")
@@ -147,9 +174,13 @@ func TestSchema_NewIndexes(t *testing.T) {
 	model.BinDir = tmpDir
 	defer func() { model.BinDir = origBinDir }()
 
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
 	err := InitDB()
 	assert.NoError(t, err)
-	defer DB.Close()
+	defer CloseDB()
 
 	indexes := getIndexes(t, DB)
 	assert.Contains(t, indexes, "idx_executions_session", "idx_executions_session index should exist")
@@ -176,6 +207,46 @@ func getTableColumns(t *testing.T, db *sql.DB, table string) map[string]bool {
 	return cols
 }
 
+func TestSchema_SummariesTable(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	err := InitDB()
+	assert.NoError(t, err)
+	defer CloseDB()
+
+	columns := getTableColumns(t, DB, "summaries")
+	assert.Contains(t, columns, "target_type", "summaries should have target_type column")
+	assert.Contains(t, columns, "target_id", "summaries should have target_id column")
+	assert.Contains(t, columns, "summary", "summaries should have summary column")
+}
+
+func TestSchema_TTSSummariesNewSchema(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	err := InitDB()
+	assert.NoError(t, err)
+	defer CloseDB()
+
+	columns := getTableColumns(t, DB, "tts_summaries")
+	assert.Contains(t, columns, "message_id", "tts_summaries should have message_id column")
+	assert.Contains(t, columns, "tts_summary", "tts_summaries should have tts_summary column")
+	assert.NotContains(t, columns, "cache_key", "tts_summaries should NOT have cache_key column (old schema)")
+}
+
 // getIndexes returns a set of index names from sqlite_master.
 func getIndexes(t *testing.T, db *sql.DB) map[string]bool {
 	t.Helper()
@@ -190,6 +261,113 @@ func getIndexes(t *testing.T, db *sql.DB) map[string]bool {
 		indexes[name] = true
 	}
 	return indexes
+}
+
+// ---------- Read-write connection separation ----------
+
+func TestInitDB_ReadWriteSeparation(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	err := InitDB()
+	assert.NoError(t, err)
+
+	// DB (write pool) should be initialized
+	assert.NotNil(t, DB, "DB (write pool) should be initialized")
+
+	// DBRead (read pool) should be initialized
+	assert.NotNil(t, DBRead, "DBRead (read pool) should be initialized")
+
+	// Both should be different instances
+	assert.NotEqual(t, DB, DBRead, "DB and DBRead should be separate connections")
+
+	// Verify write pool has MaxOpenConns=1
+	stats := DB.Stats()
+	assert.Equal(t, 1, stats.MaxOpenConnections, "DB write pool should have MaxOpenConns=1")
+
+	// Verify read pool has MaxOpenConns=2
+	statsRead := DBRead.Stats()
+	assert.Equal(t, 2, statsRead.MaxOpenConnections, "DBRead pool should have MaxOpenConns=2")
+
+	// Verify both can query
+	var count int
+	err = DBRead.QueryRow("SELECT COUNT(*) FROM chat_sessions").Scan(&count)
+	assert.NoError(t, err, "DBRead should be able to query")
+
+	// Verify CloseDB closes both
+	CloseDB()
+}
+
+// TestCloseDB_NilDB verifies that CloseDB does not panic when DB and DBRead are nil.
+func TestCloseDB_NilDB(t *testing.T) {
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	DB = nil
+	DBRead = nil
+
+	// Should not panic
+	CloseDB()
+}
+
+// TestCloseDB_NilDBRead verifies that CloseDB does not panic when DBRead is nil but DB is not.
+func TestCloseDB_NilDBRead(t *testing.T) {
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	db, err := sql.Open("sqlite", ":memory:")
+	assert.NoError(t, err)
+	DB = db
+	DBRead = nil
+
+	// Should not panic, should close DB
+	CloseDB()
+}
+
+// ---------- Performance indexes ----------
+
+func TestSchema_HistorySessionIDIndex(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	err := InitDB()
+	assert.NoError(t, err)
+	defer CloseDB()
+
+	indexes := getIndexes(t, DB)
+	assert.True(t, indexes["idx_history_session_id"], "expected idx_history_session_id index to exist")
+}
+
+func TestSchema_TasksProjectIndex(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	err := InitDB()
+	assert.NoError(t, err)
+	defer CloseDB()
+
+	indexes := getIndexes(t, DB)
+	assert.True(t, indexes["idx_tasks_project"], "expected idx_tasks_project index to exist")
 }
 
 // ---------- Table creation ----------
@@ -435,13 +613,13 @@ func orphanCleanup(t *testing.T, db *sql.DB, isServerStartup bool) {
 	}
 }
 
-// ---------- TTS Summary cache ----------
+// ---------- TTS Summary cache (message_id-based) ----------
 
 func TestGetTTSSummary_NotFound(t *testing.T) {
 	_, teardown := setupTestDBForTTS(t)
 	defer teardown()
 
-	summary, found := GetTTSSummary("nonexistent-key")
+	summary, found := GetTTSSummaryByMessageID(9999)
 	assert.Equal(t, "", summary)
 	assert.False(t, found)
 }
@@ -450,10 +628,10 @@ func TestGetTTSSummary_Found(t *testing.T) {
 	_, teardown := setupTestDBForTTS(t)
 	defer teardown()
 
-	err := SaveTTSSummary("key-1", "hello world")
+	err := SaveTTSSummaryByMessageID(1, "hello world")
 	assert.NoError(t, err)
 
-	summary, found := GetTTSSummary("key-1")
+	summary, found := GetTTSSummaryByMessageID(1)
 	assert.Equal(t, "hello world", summary)
 	assert.True(t, found)
 }
@@ -462,10 +640,10 @@ func TestGetTTSSummary_FailedEntry(t *testing.T) {
 	_, teardown := setupTestDBForTTS(t)
 	defer teardown()
 
-	err := SaveTTSSummary("key-fail", "raw text")
+	err := SaveTTSSummaryByMessageID(2, "raw text")
 	assert.NoError(t, err)
 
-	summary, found := GetTTSSummary("key-fail")
+	summary, found := GetTTSSummaryByMessageID(2)
 	assert.Equal(t, "raw text", summary)
 	assert.True(t, found)
 }
@@ -474,13 +652,13 @@ func TestSaveTTSSummary_Upsert(t *testing.T) {
 	_, teardown := setupTestDBForTTS(t)
 	defer teardown()
 
-	err := SaveTTSSummary("key-upsert", "version 1")
+	err := SaveTTSSummaryByMessageID(3, "version 1")
 	assert.NoError(t, err)
 
-	err = SaveTTSSummary("key-upsert", "version 2")
+	err = SaveTTSSummaryByMessageID(3, "version 2")
 	assert.NoError(t, err)
 
-	summary, found := GetTTSSummary("key-upsert")
+	summary, found := GetTTSSummaryByMessageID(3)
 	assert.True(t, found)
 	assert.Equal(t, "version 2", summary)
 }
@@ -649,4 +827,582 @@ func TestGetChatQuickSend_OrderedBySortOrder(t *testing.T) {
 	assert.Equal(t, "C", items[0].Label)
 	assert.Equal(t, "A", items[1].Label)
 	assert.Equal(t, "B", items[2].Label)
+}
+
+// ---------- Forwarded ports schema: host, local_port columns ----------
+
+func TestSchema_ForwardedPortsColumns(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	err := InitDB()
+	assert.NoError(t, err)
+	defer CloseDB()
+
+	columns := getTableColumns(t, DB, "forwarded_ports")
+	assert.Contains(t, columns, "local_port", "forwarded_ports should have local_port column")
+	assert.Contains(t, columns, "port", "forwarded_ports should have port column")
+	assert.Contains(t, columns, "host", "forwarded_ports should have host column")
+	assert.Contains(t, columns, "name", "forwarded_ports should have name column")
+	assert.Contains(t, columns, "protocol", "forwarded_ports should have protocol column")
+}
+
+func TestSchema_ForwardedPortsMigration_HostColumn(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	// Create DB with old schema (no host column)
+	err := InitDB()
+	assert.NoError(t, err)
+
+	// Verify host column exists after migration
+	columns := getTableColumns(t, DB, "forwarded_ports")
+	assert.Contains(t, columns, "host", "host column should exist after migration")
+
+	CloseDB()
+}
+
+func TestSchema_ForwardedPortsMigration_LocalPortColumn(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	// Create DB with schema that includes all columns
+	err := InitDB()
+	assert.NoError(t, err)
+
+	// Insert a row and verify local_port defaults correctly
+	_, err = DB.Exec("INSERT INTO forwarded_ports (local_port, port, host, name, protocol) VALUES (8080, 8080, '', 'test', 'http')")
+	assert.NoError(t, err)
+
+	var localPort, port int
+	var host string
+	err = DB.QueryRow("SELECT local_port, port, host FROM forwarded_ports WHERE local_port = 8080").Scan(&localPort, &port, &host)
+	assert.NoError(t, err)
+	assert.Equal(t, 8080, localPort)
+	assert.Equal(t, 8080, port)
+	assert.Equal(t, "", host)
+
+	CloseDB()
+}
+
+func TestSchema_ForwardedPortsMigration_LocalPortBackfill(t *testing.T) {
+	// Simulate migration: old table without local_port → add column + backfill
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	// First init creates the full schema
+	err := InitDB()
+	assert.NoError(t, err)
+
+	// Insert with local_port = port (backward compatible default)
+	_, err = DB.Exec("INSERT INTO forwarded_ports (local_port, port, host, name, protocol) VALUES (3000, 3000, '', 'app', 'http')")
+	assert.NoError(t, err)
+
+	var localPort, port int
+	err = DB.QueryRow("SELECT local_port, port FROM forwarded_ports WHERE port = 3000").Scan(&localPort, &port)
+	assert.NoError(t, err)
+	assert.Equal(t, port, localPort, "local_port should equal port for backward compatibility")
+
+	CloseDB()
+}
+
+func TestSchema_ForwardedPortsMigration_HostDefaultValue(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	err := InitDB()
+	assert.NoError(t, err)
+
+	// Insert without specifying host — should default to empty string
+	_, err = DB.Exec("INSERT INTO forwarded_ports (local_port, port, name, protocol) VALUES (5173, 5173, 'vite', 'http')")
+	assert.NoError(t, err)
+
+	var host string
+	err = DB.QueryRow("SELECT host FROM forwarded_ports WHERE local_port = 5173").Scan(&host)
+	assert.NoError(t, err)
+	assert.Equal(t, "", host, "host should default to empty string")
+
+	CloseDB()
+}
+
+func TestSchema_ForwardedPortsMigration_HostWithCustomValue(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	err := InitDB()
+	assert.NoError(t, err)
+
+	// Insert with a custom host value
+	_, err = DB.Exec("INSERT INTO forwarded_ports (local_port, port, host, name, protocol) VALUES (8081, 8080, '192.168.1.100', 'remote', 'http')")
+	assert.NoError(t, err)
+
+	var host string
+	err = DB.QueryRow("SELECT host FROM forwarded_ports WHERE local_port = 8081").Scan(&host)
+	assert.NoError(t, err)
+	assert.Equal(t, "192.168.1.100", host)
+
+	CloseDB()
+}
+
+func TestSchema_ForwardedPortsMigration_Idempotent(t *testing.T) {
+	// Running InitDB twice should not fail (migrations are idempotent)
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	err := InitDB()
+	assert.NoError(t, err)
+	CloseDB()
+
+	// Re-init should not fail even though columns already exist
+	err = InitDB()
+	assert.NoError(t, err)
+	CloseDB()
+}
+
+func TestSchema_ForwardedPortsMigration_HostColumnFromOldSchema(t *testing.T) {
+	// Simulate upgrading from old schema without host column
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	// Step 1: Create DB with old schema (no host column, uses port as primary key)
+	dbDir := filepath.Join(tmpDir, ".clawbench")
+	assert.NoError(t, os.MkdirAll(dbDir, 0755))
+	db, err := sql.Open("sqlite", filepath.Join(dbDir, "ClawBench.db"))
+	assert.NoError(t, err)
+	db.SetMaxOpenConns(1)
+	db.Exec("PRAGMA journal_mode=WAL")
+	db.Exec("PRAGMA busy_timeout=5000")
+
+	// Create old-style table without host column and without local_port
+	// Other tables must have enough columns so InitDB's index creation succeeds
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS forwarded_ports (
+			port INTEGER PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			protocol TEXT NOT NULL DEFAULT 'http',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS chat_sessions (
+			id TEXT PRIMARY KEY,
+			project_path TEXT NOT NULL,
+			backend TEXT NOT NULL,
+			title TEXT NOT NULL,
+			session_type TEXT NOT NULL DEFAULT 'chat',
+			deleted INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(project_path, backend, id)
+		);
+		CREATE TABLE IF NOT EXISTS chat_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_path TEXT NOT NULL,
+			role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+			content TEXT NOT NULL,
+			session_id TEXT,
+			backend TEXT NOT NULL DEFAULT 'claude',
+			streaming INTEGER NOT NULL DEFAULT 0,
+			deleted INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS scheduled_tasks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_path TEXT NOT NULL,
+			name TEXT NOT NULL,
+			cron_expr TEXT NOT NULL,
+			agent_id TEXT NOT NULL,
+			prompt TEXT NOT NULL,
+			session_id TEXT DEFAULT '',
+			status TEXT DEFAULT 'active',
+			repeat_mode TEXT DEFAULT 'unlimited',
+			max_runs INTEGER DEFAULT 0,
+			last_run_at DATETIME,
+			next_run_at DATETIME,
+			run_count INTEGER DEFAULT 0,
+			last_read_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS task_executions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id INTEGER NOT NULL,
+			session_id TEXT NOT NULL,
+			trigger_type TEXT NOT NULL DEFAULT 'auto',
+			status TEXT NOT NULL DEFAULT 'running',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS tts_summaries (
+			cache_key TEXT PRIMARY KEY,
+			summary TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS terminal_quick_commands (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			label TEXT NOT NULL,
+			command TEXT NOT NULL,
+			hidden INTEGER NOT NULL DEFAULT 0,
+			auto_execute INTEGER NOT NULL DEFAULT 0,
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS chat_quick_send (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			label TEXT NOT NULL,
+			command TEXT NOT NULL,
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS recent_projects (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_path TEXT UNIQUE NOT NULL,
+			accessed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS ai_raw_responses (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id TEXT NOT NULL,
+			message_id INTEGER NOT NULL,
+			backend TEXT NOT NULL DEFAULT '',
+			raw_output TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	assert.NoError(t, err)
+
+	// Insert data with old schema (port is primary key)
+	_, err = db.Exec("INSERT INTO forwarded_ports (port, name, protocol) VALUES (8080, 'app', 'http')")
+	assert.NoError(t, err)
+	_, err = db.Exec("INSERT INTO forwarded_ports (port, name, protocol) VALUES (3000, 'web', 'https')")
+	assert.NoError(t, err)
+
+	db.Close()
+
+	// Step 2: Call InitDB which should detect missing columns and run migrations
+	err = InitDB()
+	assert.NoError(t, err)
+	defer CloseDB()
+
+	// Step 3: Verify host column was added
+	columns := getTableColumns(t, DB, "forwarded_ports")
+	assert.Contains(t, columns, "host", "host column should exist after migration")
+	assert.Contains(t, columns, "local_port", "local_port column should exist after migration")
+
+	// Step 4: Verify existing data is preserved and local_port is backfilled
+	rows, err := DB.Query("SELECT port, local_port, host, name FROM forwarded_ports ORDER BY port")
+	assert.NoError(t, err)
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		var port, localPort int
+		var host, name string
+		assert.NoError(t, rows.Scan(&port, &localPort, &host, &name))
+		assert.Equal(t, port, localPort, "local_port should equal port after backfill")
+		assert.Equal(t, "", host, "host should default to empty string after migration")
+		count++
+	}
+	assert.Equal(t, 2, count, "should have 2 rows after migration")
+}
+
+// ---------- Summaries (unified reading summaries) ----------
+
+// setupTestDBForSummaries creates an in-memory SQLite database with the summaries table
+// for testing SaveSummary and GetSummary.
+func setupTestDBForSummaries(t *testing.T) (*sql.DB, func()) {
+	t.Helper()
+	origDB := DB
+	origDBRead := DBRead
+
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open in-memory db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	db.Exec("PRAGMA journal_mode=WAL")
+	db.Exec("PRAGMA busy_timeout=5000")
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS summaries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			target_type TEXT NOT NULL,
+			target_id   INTEGER NOT NULL,
+			summary     TEXT NOT NULL,
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(target_type, target_id)
+		);
+	`)
+	if err != nil {
+		t.Fatalf("failed to create tables: %v", err)
+	}
+
+	DB = db
+	DBRead = db
+	teardown := func() {
+		DB = origDB
+		DBRead = origDBRead
+		db.Close()
+	}
+	return db, teardown
+}
+
+func TestGetSummary_NotFound(t *testing.T) {
+	_, teardown := setupTestDBForSummaries(t)
+	defer teardown()
+
+	summary, found := GetSummary("chat_message", 42)
+	assert.Equal(t, "", summary)
+	assert.False(t, found)
+}
+
+func TestSaveSummary_AndGetSummary(t *testing.T) {
+	_, teardown := setupTestDBForSummaries(t)
+	defer teardown()
+
+	err := SaveSummary("chat_message", 123, "This is a summary")
+	assert.NoError(t, err)
+
+	summary, found := GetSummary("chat_message", 123)
+	assert.Equal(t, "This is a summary", summary)
+	assert.True(t, found)
+}
+
+func TestSaveSummary_ShortText(t *testing.T) {
+	_, teardown := setupTestDBForSummaries(t)
+	defer teardown()
+
+	// Short text: save empty string
+	err := SaveSummary("chat_message", 456, "")
+	assert.NoError(t, err)
+
+	summary, found := GetSummary("chat_message", 456)
+	assert.Equal(t, "", summary)
+	assert.True(t, found)
+}
+
+func TestSaveSummary_DifferentTargetTypes(t *testing.T) {
+	_, teardown := setupTestDBForSummaries(t)
+	defer teardown()
+
+	// Same target_id, different target_type → different rows
+	err := SaveSummary("chat_message", 1, "chat summary")
+	assert.NoError(t, err)
+
+	err = SaveSummary("task_execution", 1, "task summary")
+	assert.NoError(t, err)
+
+	chatSummary, chatFound := GetSummary("chat_message", 1)
+	assert.Equal(t, "chat summary", chatSummary)
+	assert.True(t, chatFound)
+
+	taskSummary, taskFound := GetSummary("task_execution", 1)
+	assert.Equal(t, "task summary", taskSummary)
+	assert.True(t, taskFound)
+}
+
+func TestSaveSummary_Upsert(t *testing.T) {
+	_, teardown := setupTestDBForSummaries(t)
+	defer teardown()
+
+	err := SaveSummary("chat_message", 789, "version 1")
+	assert.NoError(t, err)
+
+	err = SaveSummary("chat_message", 789, "version 2")
+	assert.NoError(t, err)
+
+	summary, found := GetSummary("chat_message", 789)
+	assert.Equal(t, "version 2", summary)
+	assert.True(t, found)
+}
+
+// ---------- TTS Summaries (new table with message_id) ----------
+
+// setupTestDBForNewTTSSummaries creates an in-memory SQLite database with the new tts_summaries table
+// for testing GetTTSSummary and SaveTTSSummary with message_id.
+func setupTestDBForNewTTSSummaries(t *testing.T) (*sql.DB, func()) {
+	t.Helper()
+	origDB := DB
+	origDBRead := DBRead
+
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open in-memory db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	db.Exec("PRAGMA journal_mode=WAL")
+	db.Exec("PRAGMA busy_timeout=5000")
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS tts_summaries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			message_id   INTEGER NOT NULL,
+			tts_summary  TEXT NOT NULL,
+			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(message_id)
+		);
+	`)
+	if err != nil {
+		t.Fatalf("failed to create tables: %v", err)
+	}
+
+	DB = db
+	DBRead = db
+	teardown := func() {
+		DB = origDB
+		DBRead = origDBRead
+		db.Close()
+	}
+	return db, teardown
+}
+
+func TestGetTTSSummaryByMessageID_NotFound(t *testing.T) {
+	_, teardown := setupTestDBForNewTTSSummaries(t)
+	defer teardown()
+
+	summary, found := GetTTSSummaryByMessageID(42)
+	assert.Equal(t, "", summary)
+	assert.False(t, found)
+}
+
+func TestSaveTTSSummaryByMessageID_AndGet(t *testing.T) {
+	_, teardown := setupTestDBForNewTTSSummaries(t)
+	defer teardown()
+
+	err := SaveTTSSummaryByMessageID(123, "TTS summary for message 123")
+	assert.NoError(t, err)
+
+	summary, found := GetTTSSummaryByMessageID(123)
+	assert.Equal(t, "TTS summary for message 123", summary)
+	assert.True(t, found)
+}
+
+func TestSaveTTSSummaryByMessageID_Upsert(t *testing.T) {
+	_, teardown := setupTestDBForNewTTSSummaries(t)
+	defer teardown()
+
+	err := SaveTTSSummaryByMessageID(456, "version 1")
+	assert.NoError(t, err)
+
+	err = SaveTTSSummaryByMessageID(456, "version 2")
+	assert.NoError(t, err)
+
+	summary, found := GetTTSSummaryByMessageID(456)
+	assert.Equal(t, "version 2", summary)
+	assert.True(t, found)
+}
+
+// ---------- InitDB migration: tts_summaries cache_key → message_id ----------
+
+func TestInitDB_TTSSummariesMigrationFromOldSchema(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	// First: create a DB with the old schema (cache_key column)
+	dbPath := filepath.Join(tmpDir, ".clawbench", "clawbench.db")
+	os.MkdirAll(filepath.Dir(dbPath), 0755)
+
+	db, err := sql.Open("sqlite", dbPath)
+	assert.NoError(t, err)
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS tts_summaries (
+			cache_key TEXT PRIMARY KEY,
+			summary TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	assert.NoError(t, err)
+	db.Close()
+
+	// Now call InitDB — should detect cache_key column and migrate
+	err = InitDB()
+	assert.NoError(t, err)
+
+	// Verify new schema: should have message_id column, not cache_key
+	columns := getTableColumns(t, DB, "tts_summaries")
+	assert.Contains(t, columns, "message_id", "tts_summaries should have message_id column after migration")
+	assert.NotContains(t, columns, "cache_key", "tts_summaries should NOT have cache_key column after migration")
+
+	// Verify the new API works
+	err = SaveTTSSummaryByMessageID(100, "post-migration summary")
+	assert.NoError(t, err)
+	summary, found := GetTTSSummaryByMessageID(100)
+	assert.True(t, found)
+	assert.Equal(t, "post-migration summary", summary)
+
+	CloseDB()
+}
+
+func TestInitDB_TTSSummariesFreshInstall(t *testing.T) {
+	tmpDir := t.TempDir()
+	origBinDir := model.BinDir
+	model.BinDir = tmpDir
+	defer func() { model.BinDir = origBinDir }()
+
+	origDB := DB
+	origDBRead := DBRead
+	defer func() { DB = origDB; DBRead = origDBRead }()
+
+	// Fresh install: no tts_summaries table exists yet
+	err := InitDB()
+	assert.NoError(t, err)
+
+	// Verify new schema: should have message_id column
+	columns := getTableColumns(t, DB, "tts_summaries")
+	assert.Contains(t, columns, "message_id", "tts_summaries should have message_id column on fresh install")
+	assert.Contains(t, columns, "tts_summary", "tts_summaries should have tts_summary column on fresh install")
+
+	CloseDB()
 }

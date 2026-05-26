@@ -11,6 +11,7 @@ const API_TIMEOUT_MS = 10_000
 /** Options shared by all API helper functions */
 export interface ApiOptions {
     signal?: AbortSignal
+    body?: unknown
 }
 
 /**
@@ -65,7 +66,11 @@ export async function apiPost<T = unknown>(url: string, body: unknown, opts: Api
             signal,
         })
         const data = await resp.json().catch(() => ({})) as Record<string, unknown>
-        if (!resp.ok) throw new Error(data.error ? String(data.error) : resp.statusText)
+        if (!resp.ok) {
+            const err = new Error(data.error ? String(data.error) : resp.statusText)
+            if (data.msgKey) (err as Error & { msgKey?: string }).msgKey = String(data.msgKey)
+            throw err
+        }
         return data as T
     } finally {
         cleanup()
@@ -89,28 +94,40 @@ export async function apiPut<T = unknown>(url: string, body: unknown, opts: ApiO
     }
 }
 
+export async function apiPatch<T = unknown>(url: string, body: unknown, opts: ApiOptions = {}): Promise<T> {
+    const { signal, cleanup } = createSignal(opts)
+    try {
+        const resp = await fetch(url, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...localeHeaders() },
+            body: JSON.stringify(body),
+            signal,
+        })
+        const data = await resp.json().catch(() => ({})) as Record<string, unknown>
+        if (!resp.ok) throw new Error(data.error ? String(data.error) : resp.statusText)
+        return data as T
+    } finally {
+        cleanup()
+    }
+}
+
 export async function apiDelete<T = unknown>(url: string, opts: ApiOptions = {}): Promise<T> {
     const { signal, cleanup } = createSignal(opts)
     try {
-        const resp = await fetch(url, { method: 'DELETE', headers: localeHeaders(), signal })
-        if (!resp.ok) throw new Error(resp.statusText)
-        return resp.json()
+        const init: RequestInit = { method: 'DELETE', headers: localeHeaders(), signal }
+        if (opts.body !== undefined) {
+            init.headers = { 'Content-Type': 'application/json', ...localeHeaders() }
+            init.body = JSON.stringify(opts.body)
+        }
+        const resp = await fetch(url, init)
+        const data = await resp.json().catch(() => ({})) as Record<string, unknown>
+        if (!resp.ok) throw new Error(data.error ? String(data.error) : resp.statusText)
+        return data as T
     } finally {
         cleanup()
     }
 }
 
 export async function cancelChat(sessionId: string): Promise<void> {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS)
-    try {
-        const resp = await fetch(`/api/ai/chat/cancel?session_id=${encodeURIComponent(sessionId)}`, {
-            method: 'POST',
-            headers: localeHeaders(),
-            signal: controller.signal,
-        })
-        if (!resp.ok) throw new Error(resp.statusText)
-    } finally {
-        clearTimeout(timer)
-    }
+    await apiPost(`/api/ai/chat/cancel?session_id=${encodeURIComponent(sessionId)}`, {})
 }

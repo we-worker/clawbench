@@ -2,6 +2,8 @@
 
 # ClawBench —— 为移动端打造的AI工作台
 
+> 🎬 **演示视频**：[OpenClaw 和 Hermes 就是玩具，于是我写了一个能干活的](https://b23.tv/ewACF0h) — Bilibili
+
 <p>
   <img src="assets/logo.png" alt="ClawBench" width="96" height="96" align="left" style="margin-right:16px;">
 </p>
@@ -165,6 +167,7 @@ cp config/agents/claude.yaml.example config/agents/my-claude.yaml
 - **多选操作**：工具栏切换多选模式，批量复制/剪切/删除，移动端长按触发右键菜单
 - 文件上传（支持图片，大小和数量可配置）
 - 隐藏文件显示/隐藏切换
+- **下钻浏览 + 边缘滑动回退**：点击文件夹下钻进入，右边缘左滑返回上一级，移动端直觉操作
 
 ### 🎨 代码预览
 - 语法高亮，粘性行号，自动换行切换
@@ -188,10 +191,12 @@ cp config/agents/claude.yaml.example config/agents/my-claude.yaml
 - **模型选择持久化**：每个智能体的模型选择和思考档位自动保存到 localStorage，刷新/切换会话自动恢复
 - **定时任务**：AI 通过 CLI 子命令创建 Cron 调度，定时自动执行；独立标签页管理，4 级面包屑导航；频率预设（每小时/每天/每周/每月）+ 自定义 Cron 表达式；任务卡片内嵌聊天消息；执行级别已读追踪 + TTS 朗读；执行完成后自动摘要 + 完成通知（音效/震动/Toast）
 - **多会话管理**：创建、切换、删除独立会话，滑动切换
+- **滑动会话切换开关**：可在设置中开关聊天区域左右滑动切换会话，默认关闭避免滚动宽内容时误触
 - **图片上传**：支持上传图片与 AI 对话（多模态）
 - **断连保护**：消息立即落库，网络断开不丢失，15 秒心跳保活 + 30 秒超时自动重连（降级轮询时实时更新内容）
 - **自动恢复**：Claude / CodeBuddy / Qoder / DeepSeek / Pi 退出 Plan Mode 后自动发送"继续"
 - **消息队列**：AI 忙碌时消息排队，依次发送
+- **自动摘要**：会话完成后自动生成最后一条助手消息的摘要，底部横幅一键切换摘要/原文；TTS 朗读也使用摘要
 
 ### 🤖 AI 对话
 - **工具调用可视化**：名称、参数、执行结果实时展示，成功/失败状态一目了然
@@ -219,12 +224,19 @@ cp config/agents/claude.yaml.example config/agents/my-claude.yaml
 - **Git Diff 视图**：查看文件相对 HEAD 的变更，字符级高亮
 - 提交详情查看（作者、时间、提交信息）
 - 工作树变更视图（已暂存 / 未暂存文件）
+- **三标签页管理**：工作树 / 分支 / 标签三标签页统一管理，默认标签持久化到 localStorage
+- **滑动删除**：分支、工作树、标签支持左滑删除，安全保护（当前分支/默认分支/当前工作树不可删除）
+- **标签管理**：浏览项目标签，点击标签可 Checkout，脏工作树自动弹窗处理
 - Git 初始化（从 UI 一键 `git init`）
 
 ### 🔀 SSH 隧道端口转发
 - **远程开发**：在 Android App 上直接访问服务器本地端口
 - **全协议透明**：HTTP、HTTPS、WebSocket、SSE、gRPC，无需 URL 重写
+- **指定目标地址**：支持转发到任意可达主机（局域网/远程主机，不仅限 127.0.0.1）
+- **自动端口分配**：同一目标端口转发到不同主机时自动分配本地端口
+- **端口编辑**：支持修改已注册的端口转发配置
 - **Localhost URL 自动打开**：聊天中出现的 localhost URL（如 AI 启动的 Web 服务），App 模式下一键自动注册端口转发并通过 WebView 打开
+- **隧道健康检测与重连**：打开 localhost URL 前自动检测隧道健康状态，异常时自动重连；断开的隧道支持一键重连
 
 ### 💻 Web 终端
 - **交互式终端**：基于 PTY + WebSocket + xterm.js，浏览器内直接操作服务器终端
@@ -249,6 +261,7 @@ cp config/agents/claude.yaml.example config/agents/my-claude.yaml
 ### 🔔 通知
 - 通知音效 + 触觉反馈（AI 完成时提醒）
 - 浏览器推送通知
+- **任务完成推送**：定时任务执行完成后推送包含响应预览摘要，点击跳转至执行详情
 
 ### 🎨 主题
 - 亮色 / 暗色模式，跟随系统偏好
@@ -259,6 +272,7 @@ cp config/agents/claude.yaml.example config/agents/my-claude.yaml
 ### 🔒 安全
 - 可选密码保护（SHA-256 加盐）
 - 路径穿越防护，所有操作限制在项目目录内
+- Git 参数注入防护（SHA/分支名/标签名校验，`--` 分隔符）
 - 文件上传大小和数量可配置（默认 10MB / 20 个）
 - XSS 防护（DOMPurify 净化）
 - TLS 支持（需手动配置证书）

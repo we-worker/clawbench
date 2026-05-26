@@ -49,14 +49,35 @@
           :selected-commit="selectedCommit"
           @navigate="drillBack"
         />
-        <span class="drilldown-count">{{ t('git.history.fileCount', { count: files.length }) }}</span>
+        <span class="drilldown-count">{{ t('git.history.fileCount', { count: totalFileCount }) }}</span>
       </div>
       <GitCommitMeta :commit="selectedCommit" :is-working-tree="isWorkingTree" />
       <div class="drilldown-body">
         <div v-if="filesLoading" class="git-history-loading">
           <div class="spinner" style="width:24px;height:24px;border-width:2px;" />
         </div>
-        <div v-else-if="files.length === 0" class="git-history-empty">{{ t('git.history.noFileChanges') }}</div>
+        <div v-else-if="totalFileCount === 0" class="git-history-empty">{{ t('git.history.noFileChanges') }}</div>
+        <!-- Merge commit: grouped by parent branch -->
+        <div v-else-if="mergeGroups.length > 0" class="drilldown-list">
+          <div v-for="group in mergeGroups" :key="group.label" class="merge-group">
+            <div class="file-group-label">{{ t('git.history.mergedFrom', { label: group.label }) }} ({{ group.files.length }})</div>
+            <div
+              v-for="f in group.files"
+              :key="f.path + '-' + f.type"
+              class="drilldown-item"
+              @click="drillToFile(f)"
+            >
+              <span class="git-file-icon">
+                <Plus v-if="f.type === 'A'" :size="14" :stroke-width="2.5" />
+                <Minus v-else-if="f.type === 'D'" :size="14" :stroke-width="2.5" />
+                <FileText v-else :size="14" />
+              </span>
+              <span class="git-file-type-badge" :class="badgeClass(f)">{{ fileTypeLabel(f.type, false) }}</span>
+              <span class="git-file-path" :title="f.path">{{ f.path }}</span>
+            </div>
+          </div>
+        </div>
+        <!-- Regular commit or working tree -->
         <div v-else class="drilldown-list">
           <template v-if="hasStaged">
             <div class="file-group-label">{{ t('git.history.staged') }}</div>
@@ -133,6 +154,7 @@ import GitDiffView from './GitDiffView.vue'
 import GitBreadcrumb from './GitBreadcrumb.vue'
 import { renderDiff } from '@/utils/diff.ts'
 import { store } from '@/stores/app.ts'
+import { useCommitNavigation, consumePendingCommitNavigation } from '@/composables/useCommitNavigation.ts'
 const { t } = useI18n()
 
 const props = defineProps({
@@ -171,6 +193,7 @@ const selectedSHA = ref(null)
 // Files view (project mode only)
 const filesLoading = ref(false)
 const files = ref([])
+const mergeGroups = ref([])
 const selectedFilePath = ref(null)
 
 // Unified diff state
@@ -197,6 +220,13 @@ const unstagedFiles = computed(() => sortedFiles.value.filter(f => !f.staged))
 const hasStaged = computed(() => stagedFiles.value.length > 0)
 const hasUnstaged = computed(() => unstagedFiles.value.length > 0)
 
+const totalFileCount = computed(() => {
+  if (mergeGroups.value.length > 0) {
+    return mergeGroups.value.reduce((sum, g) => sum + g.files.length, 0)
+  }
+  return files.value.length
+})
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function fileTypeLabel(type, staged) {
@@ -214,6 +244,7 @@ function badgeClass(f) {
 function resetState() {
   commits.value = []
   files.value = []
+  mergeGroups.value = []
   hasMore.value = false
   selectedSHA.value = null
   selectedFilePath.value = null
@@ -240,6 +271,7 @@ async function loadProjectHistory() {
   hasMore.value = false
   selectedSHA.value = null
   files.value = []
+  mergeGroups.value = []
   selectedFilePath.value = null
   wtFiles.value = []
   isGit.value = true
@@ -383,6 +415,16 @@ async function onRefresh() {
   setTimeout(() => commitListRef.value?.observeList(), 100)
 }
 
+// ─── Shared commit navigation composable ─────────────────────────────────
+
+const { navigateToCommit, handleDrillBackToCommits } = useCommitNavigation({
+    commits,
+    selectedSHA,
+    currentView,
+    loadCommitFiles,
+    loadProjectHistory,
+})
+
 // ─── Drill-down navigation ──────────────────────────────────────────────────
 
 function onCommitSelect(c) {
@@ -394,6 +436,7 @@ function onCommitSelect(c) {
     if (c.sha === 'HEAD') {
       filesLoading.value = true
       files.value = wtFiles.value
+      mergeGroups.value = []
       filesLoading.value = false
     } else {
       loadCommitFiles(c.sha).catch(() => {})
@@ -405,27 +448,14 @@ function onCommitSelect(c) {
   }
 }
 
-// Navigate directly to a specific commit's files view
-// Used when clicking a commit hash link from chat
-function navigateToCommit(sha) {
-  selectedSHA.value = sha
-  currentView.value = 'files'
-  loadCommitFiles(sha).catch(() => {})
-}
-
-// Watch for commit navigation requests from chat (commit hash links)
-watch(() => store.state.commitNavigateSha, (sha) => {
-  if (!sha) return
-  store.state.commitNavigateSha = null // consume
-  navigateToCommit(sha)
-})
-
 function drillBack(view) {
   if (view === 'commits') {
     selectedSHA.value = null
     files.value = []
+    mergeGroups.value = []
     selectedFilePath.value = null
     diffState.value = { loading: false, empty: false, html: '' }
+    handleDrillBackToCommits()
   } else if (view === 'files') {
     selectedFilePath.value = null
     diffState.value = { loading: false, empty: false, html: '' }
@@ -444,13 +474,24 @@ function drillToFile(f) {
 async function loadCommitFiles(sha) {
   filesLoading.value = true
   files.value = []
+  mergeGroups.value = []
   try {
     const resp = await fetch(`/api/git/commit-files?sha=${encodeURIComponent(sha)}`)
     if (!resp.ok) { files.value = []; return }
     const data = await resp.json()
-    files.value = Array.isArray(data) ? data : []
+    if (data && data.merge === true && Array.isArray(data.groups)) {
+      mergeGroups.value = data.groups
+      files.value = []
+    } else if (Array.isArray(data)) {
+      files.value = data
+      mergeGroups.value = []
+    } else {
+      files.value = []
+      mergeGroups.value = []
+    }
   } catch {
     files.value = []
+    mergeGroups.value = []
   } finally {
     filesLoading.value = false
   }
@@ -514,6 +555,14 @@ watch(() => props.open, async (val) => {
     resetState()
     lastProjectRoot.value = currentProject
     lastFilePath.value = currentFile
+  }
+
+  // Check for pending commit navigation (from chat hash links)
+  const pendingSha = consumePendingCommitNavigation()
+  if (pendingSha) {
+    await navigateToCommit(pendingSha)
+    setTimeout(() => commitListRef.value?.observeList(), 100)
+    return
   }
 
   // Only load data if we have no commits loaded
@@ -652,5 +701,11 @@ watch(() => props.open, async (val) => {
   color: var(--text-muted, #999);
   padding: 8px 14px 4px;
   letter-spacing: 0.03em;
+}
+
+.merge-group + .merge-group {
+  border-top: 1px solid var(--border-color, #dee2e6);
+  margin-top: 4px;
+  padding-top: 4px;
 }
 </style>

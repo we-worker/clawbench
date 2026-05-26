@@ -2,14 +2,27 @@ package middleware
 
 import (
 	"crypto/subtle"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 
 	"clawbench/internal/model"
 )
 
+// IsLocalhost returns true if the request originates from the local machine.
+// Used for non-auth purposes (e.g. RAG CLI global search without project).
+// NOTE: This does NOT bypass Auth middleware — all requests need a valid cookie.
+func IsLocalhost(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
+}
+
 // Auth wraps a handler with password auth if configured.
-// When a password is configured, all requests require a valid "clawbench_session" cookie.
+// All requests (including localhost) require a valid "clawbench_session" cookie.
 func Auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// No password configured — open access
@@ -23,6 +36,7 @@ func Auth(next http.HandlerFunc) http.HandlerFunc {
 			next.ServeHTTP(w, r)
 			return
 		}
+		slog.Warn("auth: rejecting request", "path", r.URL.Path, "remote", r.RemoteAddr, "has_cookie", err == nil)
 		model.WriteError(w, model.Unauthorized(nil))
 	}
 }

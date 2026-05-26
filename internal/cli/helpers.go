@@ -21,18 +21,10 @@ import (
 // FindConfigPath searches for config.yaml in priority order:
 //  1. <BinDir>/config/config.yaml (green portable: next to binary)
 //  2. config/config.yaml (CWD-relative, standard layout)
-//  3. <BinDir>/config.yaml (legacy: next to binary)
-//  4. config.yaml (legacy: CWD root)
 func FindConfigPath(binDir string) string {
 	configPath := filepath.Join(binDir, "config", "config.yaml")
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		configPath = filepath.Join("config", "config.yaml")
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			configPath = filepath.Join(binDir, "config.yaml")
-			if _, err := os.Stat(configPath); os.IsNotExist(err) {
-				configPath = "config.yaml"
-			}
-		}
 	}
 	return configPath
 }
@@ -91,18 +83,8 @@ var httpClient = &http.Client{
 	},
 }
 
-func addSessionCookie(req *http.Request) {
-	if model.ConfigInstance.Password == "" {
-		return
-	}
-	req.AddCookie(&http.Cookie{
-		Name:  model.SessionCookie,
-		Value: model.SessionTokenForPassword(model.ConfigInstance.Password),
-	})
-}
-
 // httpDo performs an HTTP request to the server API.
-// CLI authenticates with the same session cookie the browser uses.
+// No auth needed — CLI runs on localhost which is auto-trusted by the server.
 func httpDo(method, path string, body any) (map[string]any, int, error) {
 	var reqBody io.Reader
 	if body != nil {
@@ -118,7 +100,6 @@ func httpDo(method, path string, body any) (map[string]any, int, error) {
 		return nil, 0, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	addSessionCookie(req)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -156,7 +137,6 @@ func httpDoWithProject(method, path string, body any, projectPath string) (map[s
 		return nil, 0, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	addSessionCookie(req)
 
 	// Set project cookie so server's requireProject() can extract it
 	if projectPath != "" {

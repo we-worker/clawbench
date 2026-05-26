@@ -1,12 +1,15 @@
 <template>
   <div class="task-history-page">
-    <!-- Header with breadcrumb -->
+    <!-- Header with breadcrumb + refresh -->
     <div class="history-header">
       <TaskBreadcrumb />
+      <button class="header-btn refresh-btn" :class="{ spinning: refreshing }" :disabled="refreshing || loading" @click="onRefresh" :title="t('common.refresh')">
+        <RefreshCw :size="14" />
+      </button>
     </div>
     <!-- History content -->
-    <div class="task-history-tab">
-    <div v-if="loading" class="history-empty">
+    <div ref="listRef" class="task-history-tab">
+    <div v-if="loading && allExecutions.length === 0" class="history-empty">
       <Loader2 class="spin-icon" :size="20" />
       <span>{{ t('common.loading') }}</span>
     </div>
@@ -25,11 +28,8 @@
               <template v-if="isRunning(exec)">
                 <span class="exec-running-dot"></span>
                 <span class="exec-running-label">{{ t('task.exec.running') }}</span>
-                <span class="exec-relative-time">{{ formatRelativeTime(exec.createdAt) }}</span>
               </template>
               <template v-else>
-                <span class="exec-absolute-time">{{ formatAbsoluteTime(exec.createdAt) }}</span>
-                <span class="exec-relative-time">{{ formatRelativeTime(exec.createdAt) }}</span>
                 <span v-if="isUnreadDisplay(exec)" class="exec-unread-dot"></span>
               </template>
               <span v-if="exec.triggerType === 'manual'" class="exec-trigger-type manual">{{ t('task.exec.manual') }}</span>
@@ -63,18 +63,24 @@
           </template>
         </div>
       </div>
+      <!-- Infinite scroll sentinel -->
+      <div ref="sentinelRef" class="history-list-sentinel"></div>
+      <div v-if="loadingMore" class="history-loading-more">
+        <Loader2 class="spin-icon" :size="14" />
+        <span>{{ t('common.loading') }}</span>
+      </div>
     </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onUnmounted, computed } from 'vue'
+import { ref, watch, onUnmounted, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Square, Loader2, History, Trash2 } from 'lucide-vue-next'
+import { Square, Loader2, History, Trash2, RefreshCw } from 'lucide-vue-next'
 import TaskBreadcrumb from '@/components/task/TaskBreadcrumb.vue'
 import { useTaskHistory } from '@/composables/useTaskHistory.ts'
-import { formatDuration, formatRelativeTime } from '@/utils/format.ts'
+import { formatDuration } from '@/utils/format.ts'
 
 const props = defineProps({
   task: Object,
@@ -84,15 +90,35 @@ const emit = defineEmits(['open-file'])
 
 const { t } = useI18n()
 
+const refreshing = ref(false)
+
+// Scroll container and sentinel refs for IntersectionObserver
+const listRef = ref(null)
+const sentinelRef = ref(null)
+let observer = null
+
+async function onRefresh() {
+  refreshing.value = true
+  try {
+    await Promise.all([loadExecutions(), loadRunningStatus()])
+  } finally {
+    refreshing.value = false
+  }
+}
+
 // Task history composable (ISS-011 + ISS-015 + ISS-016)
 const {
   loading,
+  loadingMore,
+  hasMore,
   allExecutions,
   executions,
   isRunning,
   isJustCompleted,
   locallyReadIds,
   loadExecutions,
+  loadMoreExecutions,
+  reloadExecutions,
   loadRunningStatus,
   cancelExecution,
   deleteExecution,
@@ -109,17 +135,20 @@ function formatTokens(meta) {
   return parts.join(' ')
 }
 
-function formatAbsoluteTime(createdAt) {
-  const d = new Date(createdAt)
-  const y = d.getFullYear()
-  const mo = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  const h = String(d.getHours()).padStart(2, '0')
-  const mi = String(d.getMinutes()).padStart(2, '0')
-  const s = String(d.getSeconds()).padStart(2, '0')
-  return `${y}-${mo}-${day} ${h}:${mi}:${s}`
+/** Set up IntersectionObserver for infinite scroll */
+function setupObserver() {
+  if (observer) {
+    observer.disconnect()
+    observer = null
+  }
+  if (!sentinelRef.value || !listRef.value) return
+  observer = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && hasMore.value && !loadingMore.value) {
+      loadMoreExecutions()
+    }
+  }, { threshold: 0.1, rootMargin: '100px', root: listRef.value })
+  observer.observe(sentinelRef.value)
 }
-
 
 let pollTimer = null
 
@@ -145,7 +174,7 @@ watch(() => props.task?.id, (newId) => {
     return
   }
   onTaskChange()
-  loadExecutions()
+  loadExecutions().then(() => nextTick(setupObserver))
   loadRunningStatus()
   startPolling()
 }, { immediate: true })
@@ -153,6 +182,10 @@ watch(() => props.task?.id, (newId) => {
 onUnmounted(() => {
   stopPolling()
   onTaskChange() // Abort in-flight requests (ISS-016)
+  if (observer) {
+    observer.disconnect()
+    observer = null
+  }
 })
 </script>
 
@@ -171,6 +204,42 @@ onUnmounted(() => {
   padding: 4px 8px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border-color, #e5e5e5);
+  gap: 6px;
+}
+
+.header-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 14px;
+  background: var(--bg-secondary, #f1f3f5);
+  color: var(--text-secondary, #666);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.header-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (hover: hover) {
+  .header-btn:hover:not(:disabled) {
+    background: var(--bg-tertiary, #eef1f4);
+    color: var(--accent-color, #0066cc);
+  }
+}
+
+.header-btn:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.header-btn.spinning svg {
+  animation: spin 1s linear infinite;
 }
 
 .task-history-tab {
@@ -269,33 +338,13 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-.exec-absolute-time {
-  font-size: 13px;
-  color: var(--text-primary, #1a1a1a);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.exec-relative-time {
-  font-size: 12px;
-  color: var(--text-muted, #9ca3af);
-  white-space: nowrap;
-}
-
-/* ── Unread dot ── */
+/* ── Unread dot (static) ── */
 .exec-unread-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--accent-color, #0066cc);
   flex-shrink: 0;
-  animation: exec-unread-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes exec-unread-pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0, 102, 204, 0.4); }
-  50% { opacity: 0.6; box-shadow: 0 0 6px 2px rgba(0, 102, 204, 0.2); }
 }
 
 .execution-item.unread {
@@ -517,5 +566,20 @@ onUnmounted(() => {
 
 .clear-all-btn:active {
   transform: scale(0.95);
+}
+
+/* ── Infinite scroll sentinel ── */
+.history-list-sentinel {
+  height: 1px;
+}
+
+.history-loading-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  color: var(--text-muted, #9ca3af);
+  font-size: 12px;
 }
 </style>

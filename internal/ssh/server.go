@@ -4,14 +4,17 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -119,39 +122,41 @@ func extractIP(addr net.Addr) string {
 
 // Server is an SSH server that supports local port forwarding (direct-tcpip channels).
 // It allows authenticated clients to create `-L` tunnels to forward local ports
-// to services running on the server (127.0.0.1).
+// to any reachable host:port (localhost, LAN, or remote).
 type Server struct {
-	mu             sync.Mutex
-	listener       net.Listener
-	hostKey        gossh.Signer
-	password       string
-	portReg        *service.ProxyRegistry
-	done           chan struct{}
-	fingerprint    string
-	addr           string
-	cfg            model.SSHConfig
-	connCount      int
-	activeChannels int
-	lastConnected  time.Time
-	authTracker    *authTracker
+	mu                sync.Mutex
+	listener          net.Listener
+	hostKey           gossh.Signer
+	password          string
+	passwordIsSHA256  bool
+	portReg           *service.ProxyRegistry
+	done              chan struct{}
+	fingerprint       string
+	addr              string
+	cfg               model.PortForwardConfig
+	connCount         int
+	activeChannels    int
+	lastConnected     time.Time
+	authTracker       *authTracker
 }
 
 // NewServer creates a new SSH tunnel server.
 // When cfg.Port is 0 (unset), defaults to mainPort+1 so SSH runs on an
 // adjacent port without requiring explicit configuration.
-func NewServer(cfg model.SSHConfig, mainPort int, password string, portReg *service.ProxyRegistry) *Server {
+func NewServer(cfg model.PortForwardConfig, mainPort int, password string, portReg *service.ProxyRegistry) *Server {
 	sshPort := cfg.Port
 	if sshPort == 0 {
 		sshPort = mainPort + 1
 	}
 
 	return &Server{
-		password:    password,
-		portReg:     portReg,
-		done:        make(chan struct{}),
-		addr:        fmt.Sprintf("0.0.0.0:%d", sshPort),
-		cfg:         cfg,
-		authTracker: newAuthTracker(),
+		password:         password,
+		passwordIsSHA256: model.IsSHA256Password(password),
+		portReg:          portReg,
+		done:             make(chan struct{}),
+		addr:             fmt.Sprintf("0.0.0.0:%d", sshPort),
+		cfg:              cfg,
+		authTracker:      newAuthTracker(),
 	}
 }
 
@@ -171,9 +176,21 @@ func (s *Server) ListenAndServe() error {
 				return nil, fmt.Errorf("ssh: too many authentication failures")
 			}
 
-			if c.User() == "clawbench" && subtle.ConstantTimeCompare(pass, []byte(s.password)) == 1 {
-				s.authTracker.reset(remoteIP)
-				return nil, nil
+			if c.User() == "clawbench" {
+				if s.passwordIsSHA256 {
+					// Password is stored as SHA-256 hash — hash the submitted password and compare
+					hash := sha256.Sum256([]byte(string(pass) + "clawbench-salt"))
+					candidate := hex.EncodeToString(hash[:])
+					if subtle.ConstantTimeCompare([]byte(candidate), []byte(s.password[len("sha256:"):])) == 1 {
+						s.authTracker.reset(remoteIP)
+						return nil, nil
+					}
+				} else {
+					if subtle.ConstantTimeCompare(pass, []byte(s.password)) == 1 {
+						s.authTracker.reset(remoteIP)
+						return nil, nil
+					}
+				}
 			}
 
 			s.authTracker.recordFailure(remoteIP)
@@ -250,11 +267,6 @@ func (s *Server) InitHostKey() error {
 	s.hostKey = signer
 	s.fingerprint = gossh.FingerprintSHA256(signer.PublicKey())
 	return nil
-}
-
-// Addr returns the SSH server listen address.
-func (s *Server) Addr() string {
-	return s.addr
 }
 
 // Port returns the SSH server port number.
@@ -351,6 +363,12 @@ func (s *Server) handleDirectTCPIP(newChannel gossh.NewChannel) {
 
 	targetPort := int(d.PortToConnect)
 
+	// Resolve the target host — normalize "localhost"/empty, resolve DNS hostnames
+	targetHost := d.HostToConnect
+	if targetHost == "" || targetHost == "localhost" {
+		targetHost = "127.0.0.1"
+	}
+
 	// Validate the target port — only check allowed range.
 	// SSH tunnels operate at the transport layer and don't need URL-rewriting
 	// metadata, so IsPortRegistered (which tracks protocol info for the HTTP
@@ -381,8 +399,8 @@ func (s *Server) handleDirectTCPIP(newChannel gossh.NewChannel) {
 	// Discard channel-specific requests
 	go gossh.DiscardRequests(requests)
 
-	// Connect to the local service
-	targetAddr := fmt.Sprintf("127.0.0.1:%d", targetPort)
+	// Connect to the target host:port
+	targetAddr := net.JoinHostPort(targetHost, strconv.Itoa(targetPort))
 	backend, err := net.Dial("tcp", targetAddr)
 	if err != nil {
 		slog.Debug("ssh: backend unreachable", slog.String("target", targetAddr), slog.String("err", err.Error()))
@@ -391,8 +409,8 @@ func (s *Server) handleDirectTCPIP(newChannel gossh.NewChannel) {
 	defer backend.Close()
 
 	slog.Debug("ssh: forwarding connection",
-		slog.Int("port", targetPort),
-		slog.String("originator", fmt.Sprintf("%s:%d", d.OriginatorAddress, d.OriginatorPort)),
+		slog.String("target", targetAddr),
+		slog.String("originator", net.JoinHostPort(d.OriginatorAddress, strconv.FormatUint(uint64(d.OriginatorPort), 10))),
 	)
 
 	// Bidirectional relay

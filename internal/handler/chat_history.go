@@ -28,12 +28,14 @@ func ServeChatHistory(w http.ResponseWriter, r *http.Request) {
 				}
 				if len(sessions) == 0 {
 					agentID := model.GetDefaultAgentID()
-					backend, defaultModel, _, _, ok := resolveAgentConfig(agentID)
+					backend, _, _, _, ok := resolveAgentConfig(agentID)
 					if !ok {
 				writeLocalizedErrorf(w, r, http.StatusServiceUnavailable, "NoAgentsAvailable")
 						return
 					}
-					sessionID, err = service.CreateSession(projectPath, backend, T(r, "NewSession"), agentID, defaultModel, "default", "chat")
+					// Don't pre-fill agent default model — leave empty so frontend
+					// falls back to global localStorage preference (cross-project).
+					sessionID, err = service.CreateSession(projectPath, backend, T(r, "NewSession"), agentID, "", "default", "chat")
 					if err != nil {
 						model.WriteError(w, model.Internal(fmt.Errorf("failed to create session")))
 						return
@@ -44,7 +46,13 @@ func ServeChatHistory(w http.ResponseWriter, r *http.Request) {
 				setSessionID(w, sessionID)
 			}
 		}
-		backend := service.GetSessionBackend(sessionID)
+	// ISS-077: Verify the session belongs to the requesting project
+	sessionProject := service.GetSessionProjectPath(sessionID)
+	if sessionProject != projectPath {
+		writeLocalizedError(w, r, model.Forbidden(nil, "AccessDenied"))
+		return
+	}
+	backend := service.GetSessionBackend(sessionID)
 		if backend == "" {
 		writeLocalizedErrorf(w, r, http.StatusNotFound, "SessionNotFound")
 			return
@@ -74,6 +82,11 @@ func ServeChatHistory(w http.ResponseWriter, r *http.Request) {
 		sessionID := req.SessionID
 		if sessionID == "" {
 			sessionID = getSessionID(r)
+		}
+		// ISS-077: Verify the session belongs to the requesting project
+		if sp := service.GetSessionProjectPath(sessionID); sp != projectPath {
+			writeLocalizedError(w, r, model.Forbidden(nil, "AccessDenied"))
+			return
 		}
 		backend := service.GetSessionBackend(sessionID)
 		if backend == "" {

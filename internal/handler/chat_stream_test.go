@@ -13,6 +13,7 @@ import (
 	"clawbench/internal/service"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // parseSSEEvents splits an SSE response body into individual event+data pairs.
@@ -130,7 +131,7 @@ func TestAIChatStream_ContentEvent(t *testing.T) {
 	events := parseSSEEvents(w.Body.String())
 	assert.Equal(t, "content", events[0]["event"])
 	var data map[string]string
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	assert.Equal(t, "hello world", data["content"])
 	assert.Equal(t, "done", events[1]["event"])
 }
@@ -155,7 +156,7 @@ func TestAIChatStream_ThinkingEvent(t *testing.T) {
 	events := parseSSEEvents(w.Body.String())
 	assert.Equal(t, "thinking", events[0]["event"])
 	var data map[string]string
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	assert.Equal(t, "let me think...", data["text"])
 }
 
@@ -182,7 +183,7 @@ func TestAIChatStream_ToolUseEvent(t *testing.T) {
 	events := parseSSEEvents(w.Body.String())
 	assert.Equal(t, "tool_use", events[0]["event"])
 	var data map[string]any
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	assert.Equal(t, "Read", data["name"])
 	assert.Equal(t, "t1", data["id"])
 	assert.Equal(t, true, data["done"])
@@ -213,7 +214,7 @@ func TestAIChatStream_ToolUseEventWithOutput(t *testing.T) {
 	events := parseSSEEvents(w.Body.String())
 	assert.Equal(t, "tool_use", events[0]["event"])
 	var data map[string]any
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	assert.Equal(t, "Bash", data["name"])
 	assert.Equal(t, "file1.go\nfile2.go", data["output"])
 	assert.Equal(t, "success", data["status"])
@@ -242,7 +243,7 @@ func TestAIChatStream_ToolResultEvent(t *testing.T) {
 	events := parseSSEEvents(w.Body.String())
 	assert.Equal(t, "tool_result", events[0]["event"])
 	var data map[string]any
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	assert.Equal(t, "t5", data["id"])
 	assert.Equal(t, "file contents here", data["output"])
 	assert.Equal(t, "success", data["status"])
@@ -271,7 +272,7 @@ func TestAIChatStream_ToolResultEventError(t *testing.T) {
 	events := parseSSEEvents(w.Body.String())
 	assert.Equal(t, "tool_result", events[0]["event"])
 	var data map[string]any
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	assert.Equal(t, "t6", data["id"])
 	assert.Equal(t, "command not found", data["output"])
 	assert.Equal(t, "error", data["status"])
@@ -324,7 +325,7 @@ func TestAIChatStream_ToolResultEventNoOutput(t *testing.T) {
 	events := parseSSEEvents(w.Body.String())
 	assert.Equal(t, "tool_result", events[0]["event"])
 	var data map[string]any
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	assert.Equal(t, "t7", data["id"])
 	assert.Nil(t, data["output"])
 	assert.Nil(t, data["status"])
@@ -353,7 +354,7 @@ func TestAIChatStream_ToolUseEvent_EmptyInput(t *testing.T) {
 	events := parseSSEEvents(w.Body.String())
 	assert.Equal(t, "tool_use", events[0]["event"])
 	var data map[string]any
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	input := data["input"].(map[string]any)
 	assert.Empty(t, input)
 }
@@ -403,7 +404,7 @@ func TestAIChatStream_MetadataEvent(t *testing.T) {
 	events := parseSSEEvents(w.Body.String())
 	assert.Equal(t, "metadata", events[0]["event"])
 	var data map[string]any
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	assert.Equal(t, "gpt-4", data["model"])
 }
 
@@ -469,7 +470,7 @@ func TestAIChatStream_ErrorEvent(t *testing.T) {
 	events := parseSSEEvents(w.Body.String())
 	assert.Equal(t, "error", events[0]["event"])
 	var data map[string]string
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	assert.Equal(t, "something broke", data["error"])
 }
 
@@ -491,9 +492,51 @@ func TestAIChatStream_ErrorEventWithReason(t *testing.T) {
 
 	events := parseSSEEvents(w.Body.String())
 	var data map[string]string
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	assert.Equal(t, "timeout", data["error"])
 	assert.Equal(t, "timeout", data["reason"])
+}
+
+func TestAIChatStream_ResumeSplitEvent(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	sessionID := "stream-resume-split"
+	ch := setupStreamSession(sessionID)
+	defer cleanupStreamSession(sessionID)
+
+	go func() {
+		ch <- ai.StreamEvent{Type: "content", Content: "phase 1 content"}
+		ch <- ai.StreamEvent{Type: "resume_split"}
+		ch <- ai.StreamEvent{Type: "content", Content: "phase 2 content"}
+		ch <- ai.StreamEvent{Type: "done"}
+	}()
+
+	req := newRequest(t, http.MethodGet, "/api/ai/chat/stream?session_id="+sessionID, nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	w := callHandler(AIChatStream, req)
+
+	events := parseSSEEvents(w.Body.String())
+	assert.Equal(t, 4, len(events), "expected content, resume_split, content, done events")
+
+	// First event: content from phase 1
+	assert.Equal(t, "content", events[0]["event"])
+	var data1 map[string]string
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data1))
+	assert.Equal(t, "phase 1 content", data1["content"])
+
+	// Second event: resume_split
+	assert.Equal(t, "resume_split", events[1]["event"])
+	assert.Equal(t, "{}", events[1]["data"])
+
+	// Third event: content from phase 2
+	assert.Equal(t, "content", events[2]["event"])
+	var data2 map[string]string
+	require.NoError(t, json.Unmarshal([]byte(events[2]["data"]), &data2))
+	assert.Equal(t, "phase 2 content", data2["content"])
+
+	// Final event: done
+	assert.Equal(t, "done", events[3]["event"])
 }
 
 func TestAIChatStream_WarningEvent(t *testing.T) {
@@ -518,7 +561,7 @@ func TestAIChatStream_WarningEvent(t *testing.T) {
 	assert.Len(t, events, 3)
 	assert.Equal(t, "warning", events[0]["event"])
 	var warnData map[string]string
-	json.Unmarshal([]byte(events[0]["data"]), &warnData)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &warnData))
 	assert.Equal(t, "slow response", warnData["text"])
 	assert.Equal(t, "timeout", warnData["reason"])
 	assert.Equal(t, "content", events[1]["event"])
@@ -548,7 +591,7 @@ func TestAIChatStream_QueueConsumeEvent(t *testing.T) {
 	events := parseSSEEvents(w.Body.String())
 	assert.Equal(t, "queue_consume", events[0]["event"])
 	var data map[string]any
-	json.Unmarshal([]byte(events[0]["data"]), &data)
+	require.NoError(t, json.Unmarshal([]byte(events[0]["data"]), &data))
 	assert.Equal(t, "hello", data["text"])
 	filePaths := data["filePaths"].([]any)
 	assert.Equal(t, "/test.go", filePaths[0])
@@ -626,10 +669,70 @@ func TestAIChatStream_ClientDisconnect(t *testing.T) {
 	AIChatStream(w, req)
 
 	// After SSE disconnect, the AI session should continue running
-	// (no ForceCancelSession called), so cancel reason should be empty
+	// (no ForceCancelSession called), but the disconnect reason is recorded
+	// so the session finalizer knows the SSE client went away.
 	reason := service.GetAndClearCancelReason(sessionID)
-	assert.Equal(t, "", reason)
+	assert.Equal(t, "disconnect", reason)
 	// Session should still be running
 	assert.True(t, service.IsSessionRunning(sessionID))
 	_ = ch
+}
+
+func TestAIChatStream_ClientDisconnectDuringStream(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	sessionID := "stream-disconnect-active"
+	ch := setupStreamSession(sessionID)
+	defer cleanupStreamSession(sessionID)
+
+	// Register a cancel function
+	_, cancel := context.WithCancel(context.Background())
+	service.RegisterSessionCancel(sessionID, cancel)
+
+	// Send a content event, then cancel the client context to simulate disconnect
+	go func() {
+		ch <- ai.StreamEvent{Type: "content", Content: "partial"}
+		// Give the SSE handler time to receive the content event
+		time.Sleep(100 * time.Millisecond)
+		// Cancel the client context (simulates disconnect)
+		// The SSE handler should detect ctx.Done() and record "disconnect" reason
+	}()
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	// Cancel after a short delay to allow content to be sent
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		cancel2()
+	}()
+
+	req := newRequest(t, http.MethodGet, "/api/ai/chat/stream?session_id="+sessionID, nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	req = req.WithContext(ctx2)
+
+	w := httptest.NewRecorder()
+	AIChatStream(w, req)
+
+	// After client disconnect, cancel reason should be "disconnect" (not "user")
+	reason := service.GetAndClearCancelReason(sessionID)
+	assert.Equal(t, "disconnect", reason)
+}
+
+// ---------- Session ownership validation (ISS-180) ----------
+
+func TestAIChatStream_SessionBelongsToDifferentProject(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	// Create a session that belongs to a different project
+	otherProject := "/other-project"
+	sessionID, err := service.CreateSession(otherProject, "claude", "Other Session", "claude", "", "default", "chat")
+	require.NoError(t, err)
+
+	// Try to stream that session using the current project's cookie
+	req := newRequest(t, http.MethodGet, "/api/ai/chat/stream?session_id="+sessionID, nil)
+	req = withProjectCookie(req, env.ProjectDir) // different project
+	w := callHandler(AIChatStream, req)
+
+	assertStatus(t, w, http.StatusForbidden)
 }

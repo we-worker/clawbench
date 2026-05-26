@@ -66,3 +66,11 @@ DirectoryNameRequired: Directory name required
 LineNumberOutOfRange: Line number out of range
 InvalidIndex: invalid index
 JobNotFound: job not found
+AgentNotFound: Agent not found
+InvalidModelForAgent: Invalid model for this agent
+InvalidThinkingEffort: Invalid thinking effort level for this agent
+InvalidSHA: Invalid commit SHA format
+InvalidBranchName: Invalid branch name
+PushTaskCompleted: AI Task Completed
+PushSessionEnded: AI session ended
+PushScheduledTaskDone: Scheduled task completed

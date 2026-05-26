@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,29 @@ import (
 	"clawbench/internal/service"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// threadSafeRecorder wraps httptest.ResponseRecorder with a mutex
+// to allow safe concurrent reads from the body while the handler is writing.
+// This prevents DATA RACE when SSE goroutines write to the recorder
+// while the test goroutine reads Body.String().
+type threadSafeRecorder struct {
+	*httptest.ResponseRecorder
+	mu sync.Mutex
+}
+
+func (r *threadSafeRecorder) Write(data []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ResponseRecorder.Write(data)
+}
+
+func (r *threadSafeRecorder) BodyString() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ResponseRecorder.Body.String()
+}
 
 // ---------- FileWatchSSE ----------
 
@@ -425,7 +448,7 @@ func TestFileWatchUpdate_Success(t *testing.T) {
 	sseReq := newRequest(t, http.MethodGet, "/api/file/watch?dir=", nil)
 	sseReq = sseReq.WithContext(ctx)
 	sseReq = withProjectCookie(sseReq, env.ProjectDir)
-	sseW := httptest.NewRecorder()
+	sseW := &threadSafeRecorder{ResponseRecorder: httptest.NewRecorder()}
 
 	sseDone := make(chan struct{})
 	go func() {
@@ -435,11 +458,11 @@ func TestFileWatchUpdate_Success(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	// Parse the connected event to get the clientId
-	sseEvents := parseSSEEvents(sseW.Body.String())
+	// Safely read the connected event to get the clientId
+	sseEvents := parseSSEEvents(sseW.BodyString())
 	assert.Len(t, sseEvents, 1)
 	var connectedData map[string]string
-	json.Unmarshal([]byte(sseEvents[0]["data"]), &connectedData)
+	require.NoError(t, json.Unmarshal([]byte(sseEvents[0]["data"]), &connectedData))
 	clientID := connectedData["clientId"]
 	assert.NotEmpty(t, clientID)
 
@@ -469,8 +492,7 @@ func TestFileWatchUpdate_Success(t *testing.T) {
 	<-sseDone
 
 	// Check SSE events
-	body2 := sseW.Body.String()
-	sseEvents2 := parseSSEEvents(body2)
+	sseEvents2 := parseSSEEvents(sseW.BodyString())
 
 	foundFileChange := false
 	for _, e := range sseEvents2 {
@@ -494,7 +516,7 @@ func TestFileWatchUpdate_EmptyDirResolvesToProjectRoot(t *testing.T) {
 	sseReq := newRequest(t, http.MethodGet, "/api/file/watch?dir=", nil)
 	sseReq = sseReq.WithContext(ctx)
 	sseReq = withProjectCookie(sseReq, env.ProjectDir)
-	sseW := httptest.NewRecorder()
+	sseW := &threadSafeRecorder{ResponseRecorder: httptest.NewRecorder()}
 
 	sseDone := make(chan struct{})
 	go func() {
@@ -504,9 +526,9 @@ func TestFileWatchUpdate_EmptyDirResolvesToProjectRoot(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	sseEvents := parseSSEEvents(sseW.Body.String())
+	sseEvents := parseSSEEvents(sseW.BodyString())
 	var connectedData map[string]string
-	json.Unmarshal([]byte(sseEvents[0]["data"]), &connectedData)
+	require.NoError(t, json.Unmarshal([]byte(sseEvents[0]["data"]), &connectedData))
 	clientID := connectedData["clientId"]
 
 	// Update with empty dir — should resolve to project root
@@ -530,7 +552,7 @@ func TestFileWatchUpdate_EmptyDirResolvesToProjectRoot(t *testing.T) {
 	cancel()
 	<-sseDone
 
-	sseEvents2 := parseSSEEvents(sseW.Body.String())
+	sseEvents2 := parseSSEEvents(sseW.BodyString())
 	foundDirChange := false
 	for _, e := range sseEvents2 {
 		if e["event"] == "dir_change" {

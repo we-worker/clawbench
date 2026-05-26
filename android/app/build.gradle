@@ -1,5 +1,6 @@
 plugins {
     id 'com.android.application'
+    id 'jacoco'
 }
 
 android {
@@ -10,8 +11,15 @@ android {
         applicationId "com.clawbench.app"
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName "1.0.0"
+        versionCode (project.hasProperty('versionCode') ? project.property('versionCode').toInteger() : 1)
+        versionName (project.hasProperty('versionName') ? project.property('versionName') : "dev")
+
+        // JPush manifest placeholders (AppKey set at runtime via JPushConfig)
+        manifestPlaceholders = [
+            JPUSH_PKGNAME: applicationId,
+            JPUSH_APPKEY: "",
+            JPUSH_CHANNEL: "developer-default"
+        ]
     }
 
     signingConfigs {
@@ -26,6 +34,12 @@ android {
     }
 
     applicationVariants.all { variant ->
+        // Debug: use different applicationId so it can coexist with release
+        if (variant.buildType.name == "debug") {
+            variant.outputs.all { output ->
+                outputFileName = "clawbench-android-debug.apk"
+            }
+        }
         if (variant.buildType.name == "release") {
             variant.outputs.all { output ->
                 outputFileName = "clawbench-android.apk"
@@ -43,12 +57,24 @@ android {
         debug {
             minifyEnabled false
             debuggable true
+            testCoverageEnabled true
+            applicationIdSuffix ".debug"
         }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
+    }
+
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+            returnDefaultValues = true
+            all {
+                jvmArgs '--add-opens', 'java.base/sun.misc=ALL-UNNAMED'
+            }
+        }
     }
 }
 
@@ -57,4 +83,34 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'com.github.mwiede:jsch:0.2.16'
+    implementation 'cn.jiguang.sdk:jpush:6.1.0'
+    implementation 'cn.jiguang.sdk:jcore:5.4.0'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.11.1'
+    testImplementation 'org.mockito:mockito-core:5.8.0'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+    testImplementation 'androidx.test:core:1.5.0'
+    testImplementation 'androidx.test.ext:junit:1.1.5'
+    // Real org.json implementation for unit tests (android.jar stubs return defaults with returnDefaultValues=true)
+    testImplementation 'org.json:json:20231013'
+}
+
+tasks.register('jacocoTestReport', JacocoReport) {
+    dependsOn 'testDebugUnitTest'
+    reports {
+        xml.required = true
+        html.required = true
+    }
+    def excludes = [
+        '**/R.class', '**/R$*.class', '**/BuildConfig.*',
+        '**/Manifest*.*'
+    ]
+    classDirectories.setFrom(files([
+        fileTree(dir: "$buildDir/intermediates/javac/debug/classes",
+                 excludes: excludes)
+    ]))
+    sourceDirectories.setFrom(files(['app/src/main/java']))
+    executionData.setFrom(files(["$buildDir/outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec"]))
 }

@@ -1,17 +1,17 @@
 <template>
   <div class="exec-detail-page">
-    <!-- Header: breadcrumb -->
+    <!-- Header: breadcrumb + refresh -->
     <div class="exec-detail-header">
       <TaskBreadcrumb />
+      <button class="header-btn refresh-btn" :class="{ spinning: refreshing }" :disabled="refreshing" @click="onRefresh" :title="t('common.refresh')">
+        <RefreshCw :size="14" />
+      </button>
     </div>
 
     <!-- Scrollable message content -->
     <div class="exec-detail-content" ref="contentRef" @click="handleContentClick">
       <!-- Summary / Original tab bar -->
-      <div v-if="hasSummary" class="exec-tab-bar">
-        <button class="exec-tab-btn" :class="{ active: activeTab === 'summary' }" @click="setTab('summary')">📌 总结</button>
-        <button class="exec-tab-btn" :class="{ active: activeTab === 'original' }" @click="setTab('original')">📄 原文</button>
-      </div>
+      <SummaryToggle v-if="hasSummary" mode="tab" :showing-summary="activeTab === 'summary'" i18n-prefix="task.exec" @toggle="setTab(activeTab === 'summary' ? 'original' : 'summary')" />
       <ChatMessageItem
         v-if="activeMsgData"
         :msg="activeMsgData"
@@ -61,14 +61,19 @@
 <script setup>
 import { ref, computed, watch, nextTick, provide, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RefreshCw } from 'lucide-vue-next'
 import TaskBreadcrumb from '@/components/task/TaskBreadcrumb.vue'
 import ChatMessageItem from '@/components/chat/ChatMessageItem.vue'
 import ToolDetailOverlay from '@/components/chat/ToolDetailOverlay.vue'
 import ChatMetadataModal from '@/components/chat/ChatMetadataModal.vue'
+import SummaryToggle from '@/components/common/SummaryToggle.vue'
 import { useChatRender } from '@/composables/useChatRender.ts'
-import { useAgents } from '@/composables/useAgents.ts'
+import { useAgents } from '@/composables/useAgents'
 import { useFilePathAnnotation } from '@/composables/useFilePathAnnotation.ts'
+import { useLocalhostUrlClickHandler } from '@/composables/useLocalhostAnnotation.ts'
+import { store as appStore } from '@/stores/app.ts'
 import { useAutoSpeech } from '@/composables/useAutoSpeech.ts'
+import { useTaskTab } from '@/composables/useTaskTab.ts'
 import { formatToolOutput } from '@/utils/renderToolDetail.ts'
 
 const props = defineProps({
@@ -79,9 +84,23 @@ const props = defineProps({
 const emit = defineEmits(['close', 'open-file'])
 
 const { t } = useI18n()
+const { refreshExecDetail } = useTaskTab()
 const theme = inject('theme', ref('light'))
 const { openFilePath, verifyFilePaths } = useFilePathAnnotation()
+const { handleLocalhostUrlClick } = useLocalhostUrlClickHandler()
 const switchTab = inject('switchTab', () => {})
+
+// ── Refresh logic ──
+const refreshing = ref(false)
+
+async function onRefresh() {
+  refreshing.value = true
+  try {
+    await refreshExecDetail()
+  } finally {
+    refreshing.value = false
+  }
+}
 
 // ── Agents (for getAgentIcon/getAgentName) ──
 const { agents: agentsList, getAgentIcon, getAgentName } = useAgents()
@@ -102,7 +121,7 @@ provide('chatRender', {
   hasImagesInContent: chatRender.hasImagesInContent,
 })
 provide('chatSession', { getAgentIcon, getAgentName })
-provide('chatUI', { closeSheet: () => emit('close') })
+provide('chatUI', { navigateToFileViewer: () => emit('close') })
 provide('autoSpeech', useAutoSpeech())
 provide('layoutRefreshKey', ref(0))
 
@@ -220,6 +239,34 @@ function showMetadata() {
 const contentRef = ref(null)
 
 function handleContentClick(event) {
+  // 1. Handle localhost URL clicks (icon button or <a> tag) — App mode only
+  if (handleLocalhostUrlClick(event)) return
+
+  // 2. Handle commit-hash clicks (span or button)
+  const commitEl = event.target.closest('.chat-commit-hash, .chat-commit-open-btn')
+  if (commitEl) {
+    event.preventDefault()
+    event.stopPropagation()
+    const sha = commitEl.getAttribute('data-commit-sha')
+    if (sha) {
+      window.dispatchEvent(new CustomEvent('navigate-to-commit', { detail: { sha } }))
+    }
+    return
+  }
+
+  // 3. Handle worktree action buttons
+  const wtBtn = event.target.closest('.chat-worktree-btn')
+  if (wtBtn) {
+    event.preventDefault()
+    event.stopPropagation()
+    const wtPath = wtBtn.getAttribute('data-worktree-path')
+    if (wtPath) {
+      appStore.setProject(wtPath)
+    }
+    return
+  }
+
+  // 4. Handle file-open buttons
   const btn = event.target.closest('.chat-file-open-btn')
   if (!btn) return
   event.preventDefault()
@@ -274,47 +321,49 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.header-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 14px;
+  background: var(--bg-secondary, #f1f3f5);
+  color: var(--text-secondary, #666);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.header-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (hover: hover) {
+  .header-btn:hover:not(:disabled) {
+    background: var(--bg-tertiary, #eef1f4);
+    color: var(--accent-color, #0066cc);
+  }
+}
+
+.header-btn:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.header-btn.spinning svg {
+  animation: exec-spin 1s linear infinite;
+}
+
+@keyframes exec-spin {
+  100% { transform: rotate(360deg); }
+}
+
 .exec-detail-content {
   flex: 1;
   overflow-y: auto;
   padding: 12px 8px;
-}
-
-.exec-tab-bar {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-  background: var(--bg-secondary, #f1f5f9);
-  border-radius: 8px;
-  padding: 3px;
-}
-
-.exec-tab-btn {
-  flex: 1;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary, #6b7280);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  text-align: center;
-}
-
-.exec-tab-btn.active {
-  background: var(--bg-primary, #ffffff);
-  color: var(--text-primary, #1a1a1a);
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-@media (hover: hover) {
-  .exec-tab-btn:not(.active):hover {
-    color: var(--text-primary, #1a1a1a);
-    background: var(--bg-tertiary, #e2e8f0);
-  }
 }
 
 .exec-detail-empty {

@@ -103,7 +103,7 @@ func (s *AnthropicSummarizer) DoSummarizePass(ctx context.Context, text, systemP
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return "", fmt.Errorf("anthropic API returned status %d (pass %d): %s", resp.StatusCode, pass, string(body))
 	}
 

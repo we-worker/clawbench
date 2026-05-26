@@ -16,6 +16,8 @@
         :blockAskQuestions="blockAskQuestions"
         :streaming="msg.streaming"
         :cancelled="msg.cancelled"
+        :summary="msg.summary"
+        :showingSummary="msg.showingSummary"
         :renderTextBlock="renderTextBlock"
         :formatToolInput="formatToolInput"
         :toolCallSummary="toolCallSummary"
@@ -25,6 +27,7 @@
         :getAgentIcon="getAgentIcon"
         :getAgentName="getAgentName"
         :staticBlockCache="staticBlockCache"
+        :active="active"
         @toggle-tool="$emit('toggle-tool', $event)"
         @show-tool-detail="$emit('show-tool-detail', $event)"
         @show-thinking-detail="$emit('show-thinking-detail', $event)"
@@ -55,9 +58,9 @@
     <div v-if="msg.role === 'assistant' && !msg.streaming && (msgText || msg.blocks?.length)" class="chat-meta-bar">
       <span class="chat-meta-info">
         <span v-if="msg.metadata?.wallMs" class="chat-meta-duration">{{ formatDuration(msg.metadata.wallMs) }}</span>
-        <span v-if="msg.createdAt" :class="msg.metadata?.wallMs ? 'chat-meta-sep' : ''">{{ formatMessageTime(msg.createdAt) }}</span>
       </span>
       <div class="chat-meta-actions">
+        <SummaryToggle v-if="msg.summary && !msg.streaming" mode="button" :showing-summary="msg.showingSummary" i18n-prefix="chat.message" @toggle="$emit('toggle-summary', msg.id)" />
         <button v-if="msgText" ref="speakBtnRef" class="chat-info-btn chat-speak-btn" :class="{ active: autoSpeech.isActive(msg.id), loading: autoSpeech.isGeneratingText(msg.id) }" @click.stop="handleSpeak">
           <!-- Generating states: summarizing / synthesizing -->
           <template v-if="autoSpeech.isGeneratingText(msg.id)">
@@ -83,7 +86,6 @@
     <!-- Bottom bar for user messages -->
     <div v-if="msg.role === 'user'" class="chat-meta-bar chat-meta-bar-user">
       <span class="chat-meta-info">
-        <span v-if="msg.createdAt">{{ formatMessageTime(msg.createdAt) }}</span>
       </span>
       <button class="chat-info-btn chat-info-btn-user" @click="$emit('show-metadata', msg)" :title="t('chat.message.viewDetails')">
         <Info :size="14" />
@@ -102,6 +104,7 @@ import { store } from '@/stores/app.ts'
 import { extractSpeakableText } from '@/composables/useAutoSpeech.ts'
 import ContentBlocks from './ContentBlocks.vue'
 import FileAttachmentList from './FileAttachmentList.vue'
+import SummaryToggle from '@/components/common/SummaryToggle.vue'
 
 
 const { t } = useI18n()
@@ -115,9 +118,10 @@ const props = defineProps({
   agents: Array,
   shouldCollapse: Boolean,
   staticBlockCache: Object,
+  active: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['toggle-tool', 'show-tool-detail', 'show-thinking-detail', 'show-metadata', 'file-tag-click', 'expand', 'collapse', 'task-card-click', 'send-message', 'render-flush'])
+const emit = defineEmits(['toggle-tool', 'show-tool-detail', 'show-thinking-detail', 'show-metadata', 'file-tag-click', 'expand', 'collapse', 'task-card-click', 'send-message', 'render-flush', 'toggle-summary'])
 
 const autoSpeech = inject('autoSpeech')
 const layoutRefreshKey = inject('layoutRefreshKey', ref(0))
@@ -214,7 +218,7 @@ function handleCollapse() {
 const chatRender = inject('chatRender', {})
 const chatSession = inject('chatSession', {})
 
-const { renderTextBlock, formatMessageTime, toolCallSummary, formatToolInput, humanizeCron, repeatLabel, truncate, hasImagesInContent } = chatRender
+const { renderTextBlock, toolCallSummary, formatToolInput, humanizeCron, repeatLabel, truncate, hasImagesInContent } = chatRender
 const { getAgentIcon, getAgentName } = chatSession
 </script>
 

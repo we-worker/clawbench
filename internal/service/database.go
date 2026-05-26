@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"clawbench/internal/model"
 
@@ -14,6 +15,10 @@ import (
 )
 
 var DB *sql.DB
+
+// DBRead is the read-only connection pool (MaxOpenConns=2) for SELECT queries.
+// In WAL mode, reads never block writes and vice versa.
+var DBRead *sql.DB
 
 // InitDB initializes the SQLite database with latest schema.
 // When runFromServer is true (server startup), orphaned streaming messages
@@ -126,14 +131,25 @@ func InitDB(runFromServer ...bool) error {
 		CREATE INDEX IF NOT EXISTS idx_executions_session ON task_executions(session_id);
 		CREATE INDEX IF NOT EXISTS idx_sessions_type ON chat_sessions(session_type, project_path, deleted);
 
-		CREATE TABLE IF NOT EXISTS tts_summaries (
-			cache_key TEXT PRIMARY KEY,
-			summary TEXT NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		-- Covering index for session-based queries (GetChatMessageCount, GetAssistantMessageCount,
+		-- unread subquery, GetChatHistoryPaged) — avoids full table scan through large content rows.
+		CREATE INDEX IF NOT EXISTS idx_history_session_id ON chat_history(session_id, deleted, role, streaming, created_at);
+		-- Index for task listing by project
+		CREATE INDEX IF NOT EXISTS idx_tasks_project ON scheduled_tasks(project_path, created_at DESC);
+
+		CREATE TABLE IF NOT EXISTS summaries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			target_type TEXT NOT NULL,
+			target_id   INTEGER NOT NULL,
+			summary     TEXT NOT NULL,
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(target_type, target_id)
 		);
 
 		CREATE TABLE IF NOT EXISTS forwarded_ports (
-			port INTEGER PRIMARY KEY,
+			local_port INTEGER PRIMARY KEY,
+			port INTEGER NOT NULL,
+			host TEXT NOT NULL DEFAULT '',
 			name TEXT NOT NULL DEFAULT '',
 			protocol TEXT NOT NULL DEFAULT 'http',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -193,6 +209,29 @@ func InitDB(runFromServer ...bool) error {
 		}
 	}
 
+	// Migrate: add host column to forwarded_ports for custom target host
+	var hasForwardedPortHost int
+	DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('forwarded_ports') WHERE name='host'").Scan(&hasForwardedPortHost)
+	if hasForwardedPortHost == 0 {
+		if _, err := DB.Exec("ALTER TABLE forwarded_ports ADD COLUMN host TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("failed to add host column to forwarded_ports: %w", err)
+		}
+	}
+
+	// Migrate: add local_port column for auto-assigned local port
+	// For existing rows, local_port = port (backward compatible)
+	var hasForwardedPortLocalPort int
+	DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('forwarded_ports') WHERE name='local_port'").Scan(&hasForwardedPortLocalPort)
+	if hasForwardedPortLocalPort == 0 {
+		if _, err := DB.Exec("ALTER TABLE forwarded_ports ADD COLUMN local_port INTEGER"); err != nil {
+			return fmt.Errorf("failed to add local_port column to forwarded_ports: %w", err)
+		}
+		// Backfill: local_port = port for existing rows
+		if _, err := DB.Exec("UPDATE forwarded_ports SET local_port = port WHERE local_port IS NULL"); err != nil {
+			return fmt.Errorf("failed to backfill local_port in forwarded_ports: %w", err)
+		}
+	}
+
 	// Clean up orphaned streaming messages from previous crashes/restarts.
 	// Any message with streaming=1 at startup can never be finalized since
 	// its stream no longer exists. Mark them as cancelled so the UI shows
@@ -200,6 +239,65 @@ func InitDB(runFromServer ...bool) error {
 	// SKIP when called from CLI subcommands (task/rag) — the server process
 	// may still be actively streaming, and these are NOT orphaned messages.
 	isServerStartup := len(runFromServer) > 0 && runFromServer[0]
+
+	// Migrate: replace old tts_summaries table (cache_key) with new schema (message_id).
+	// The old table has cache_key as primary key; the new table uses message_id.
+	// Since we don't do backward compatibility, drop the old table if it exists
+	// and recreate with the new schema.
+	var hasTTSCacheKey int
+	DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('tts_summaries') WHERE name='cache_key'").Scan(&hasTTSCacheKey)
+	if hasTTSCacheKey > 0 {
+		// Old table exists with cache_key — drop and recreate
+		if _, err := DB.Exec("DROP TABLE tts_summaries"); err != nil {
+			return fmt.Errorf("failed to drop old tts_summaries table: %w", err)
+		}
+		if _, err := DB.Exec(`
+			CREATE TABLE tts_summaries (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				message_id   INTEGER NOT NULL,
+				tts_summary  TEXT NOT NULL,
+				created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE(message_id)
+			);
+		`); err != nil {
+			return fmt.Errorf("failed to create new tts_summaries table: %w", err)
+		}
+	}
+	// Create new tts_summaries table if it doesn't exist yet (fresh install)
+	var hasTTSSummaries int
+	DB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='tts_summaries'").Scan(&hasTTSSummaries)
+	if hasTTSSummaries == 0 {
+		if _, err := DB.Exec(`
+			CREATE TABLE tts_summaries (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				message_id   INTEGER NOT NULL,
+				tts_summary  TEXT NOT NULL,
+				created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE(message_id)
+			);
+		`); err != nil {
+			return fmt.Errorf("failed to create tts_summaries table: %w", err)
+		}
+	}
+
+	// Initialize read connection pool for concurrent reads (WAL mode).
+	// WAL contract: DB (MaxOpenConns=1) serializes writes; DBRead (MaxOpenConns=2)
+	// allows concurrent reads that never block writes and vice versa.
+	// Both pools must use WAL mode + busy_timeout for this to work correctly.
+	DBRead, err = sql.Open("sqlite", dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open read database: %w", err)
+	}
+	DBRead.SetMaxOpenConns(2)
+	DBRead.SetMaxIdleConns(2)           // match MaxOpenConns to avoid churn
+	DBRead.SetConnMaxLifetime(0)        // unlimited — SQLite file DB, no reconnection needed
+	DBRead.SetConnMaxIdleTime(30 * time.Minute) // close idle conns after 30min
+	if _, err := DBRead.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		return fmt.Errorf("failed to set read DB WAL mode: %w", err)
+	}
+	if _, err := DBRead.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		return fmt.Errorf("failed to set read DB busy_timeout: %w", err)
+	}
 	if isServerStartup {
 		rows, err := DB.Query("SELECT id, content FROM chat_history WHERE streaming = 1")
 		if err != nil {
@@ -252,13 +350,23 @@ func InitDB(runFromServer ...bool) error {
 	return nil
 }
 
-// GetTTSSummary looks up a cached TTS summary by cache key.
-// Returns (summary, found).
-func GetTTSSummary(cacheKey string) (string, bool) {
+// CloseDB closes both write and read database connections.
+func CloseDB() {
+	if DB != nil {
+		DB.Close()
+	}
+	if DBRead != nil {
+		DBRead.Close()
+	}
+}
+
+// GetSummary looks up a reading summary by target type and target ID.
+// Returns (summary, found). Empty summary = text was too short.
+func GetSummary(targetType string, targetID int64) (string, bool) {
 	var summary string
-	err := DB.QueryRow(
-		"SELECT summary FROM tts_summaries WHERE cache_key = ?",
-		cacheKey,
+	err := DBRead.QueryRow(
+		"SELECT summary FROM summaries WHERE target_type = ? AND target_id = ?",
+		targetType, targetID,
 	).Scan(&summary)
 	if err != nil {
 		return "", false
@@ -266,11 +374,35 @@ func GetTTSSummary(cacheKey string) (string, bool) {
 	return summary, true
 }
 
-// SaveTTSSummary persists a TTS summary to the database.
-func SaveTTSSummary(cacheKey, summary string) error {
+// SaveSummary persists a reading summary for a target (chat message or task execution).
+// summary = "" means text was too short; non-empty is the actual summary.
+func SaveSummary(targetType string, targetID int64, summary string) error {
 	_, err := DB.Exec(
-		"INSERT OR REPLACE INTO tts_summaries (cache_key, summary, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-		cacheKey, summary,
+		"INSERT OR REPLACE INTO summaries (target_type, target_id, summary, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+		targetType, targetID, summary,
+	)
+	return err
+}
+
+// GetTTSSummaryByMessageID looks up a TTS summary by message ID.
+// Returns (ttsSummary, found).
+func GetTTSSummaryByMessageID(messageID int64) (string, bool) {
+	var ttsSummary string
+	err := DBRead.QueryRow(
+		"SELECT tts_summary FROM tts_summaries WHERE message_id = ?",
+		messageID,
+	).Scan(&ttsSummary)
+	if err != nil {
+		return "", false
+	}
+	return ttsSummary, true
+}
+
+// SaveTTSSummaryByMessageID persists a TTS summary for a chat message.
+func SaveTTSSummaryByMessageID(messageID int64, ttsSummary string) error {
+	_, err := DB.Exec(
+		"INSERT OR REPLACE INTO tts_summaries (message_id, tts_summary, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+		messageID, ttsSummary,
 	)
 	return err
 }
@@ -336,7 +468,7 @@ type crudHelpers[T any, E any] struct {
 
 // list returns all rows from the helper's table ordered by sort_order.
 func (h crudHelpers[T, E]) list() ([]T, error) {
-	rows, err := DB.Query("SELECT " + h.scanCols + " FROM " + h.table + " ORDER BY sort_order")
+	rows, err := DBRead.Query("SELECT " + h.scanCols + " FROM " + h.table + " ORDER BY sort_order")
 	if err != nil {
 		return nil, err
 	}

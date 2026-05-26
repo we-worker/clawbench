@@ -25,11 +25,13 @@
       :untracked="untracked"
       :count-label="mode === 'file' ? t('git.history.records') : t('git.history.commitRecords')"
       :selected-s-h-a="selectedSHA"
+      :refresh-hint="refreshHint"
       @select="onCommitSelect"
       @search="onSearch"
       @load-more="loadMoreCommits"
       @init-git="initGitRepo"
       @refresh="onRefresh"
+      @manage="navigateToManage"
     />
 
     <!-- View: file list for selected commit (project mode only) -->
@@ -41,14 +43,35 @@
           :selected-commit="selectedCommit"
           @navigate="drillBack"
         />
-        <span class="drilldown-count">{{ t('git.history.fileCount', { count: files.length }) }}</span>
+        <span class="drilldown-count">{{ t('git.history.fileCount', { count: totalFileCount }) }}</span>
       </div>
       <GitCommitMeta :commit="selectedCommit" :is-working-tree="isWorkingTree" />
       <div class="drilldown-body">
         <div v-if="filesLoading" class="git-history-loading">
           <div class="spinner" style="width:24px;height:24px;border-width:2px;" />
         </div>
-        <div v-else-if="files.length === 0" class="git-history-empty">{{ t('git.history.noFileChanges') }}</div>
+        <div v-else-if="totalFileCount === 0" class="git-history-empty">{{ t('git.history.noFileChanges') }}</div>
+        <!-- Merge commit: grouped by parent branch -->
+        <div v-else-if="mergeGroups.length > 0" class="drilldown-list">
+          <div v-for="group in mergeGroups" :key="group.label" class="merge-group">
+            <div class="file-group-label">{{ t('git.history.mergedFrom', { label: group.label }) }} ({{ group.files.length }})</div>
+            <div
+              v-for="f in group.files"
+              :key="f.path + '-' + f.type"
+              class="drilldown-item"
+              @click="drillToFile(f)"
+            >
+              <span class="git-file-icon">
+                <Plus v-if="f.type === 'A'" :size="14" :stroke-width="2.5" />
+                <Minus v-else-if="f.type === 'D'" :size="14" :stroke-width="2.5" />
+                <FileText v-else :size="14" />
+              </span>
+              <span class="git-file-type-badge" :class="badgeClass(f)">{{ fileTypeLabel(f.type, false) }}</span>
+              <span class="git-file-path" :title="f.path">{{ f.path }}</span>
+            </div>
+          </div>
+        </div>
+        <!-- Regular commit or working tree -->
         <div v-else class="drilldown-list">
           <template v-if="hasStaged">
             <div class="file-group-label">{{ t('git.history.staged') }}</div>
@@ -110,19 +133,30 @@
         />
       </div>
     </div>
+
+    <!-- View: worktree & branch management -->
+    <div v-else-if="currentView === 'manage'" class="drilldown-page">
+      <div class="drilldown-header">
+        <GitBreadcrumb mode="project" current-view="manage" @navigate="drillBack" />
+      </div>
+      <GitManageContent />
+    </div>
   </div>
 </template>
 
 <script setup>
 import { GitBranch, Plus, Minus, FileText } from 'lucide-vue-next'
-import { ref, computed, inject, onMounted, watch } from 'vue'
+import { ref, computed, inject, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GitCommitList from './GitCommitList.vue'
 import GitCommitMeta from './GitCommitMeta.vue'
 import GitDiffView from './GitDiffView.vue'
 import GitBreadcrumb from './GitBreadcrumb.vue'
+import GitManageContent from './GitManageContent.vue'
 import { renderDiff } from '@/utils/diff.ts'
 import { store } from '@/stores/app.ts'
+import { useCommitNavigation, consumePendingCommitNavigation, pendingSha as pendingCommitSha, consumePendingManageNavigation, pendingManageView } from '@/composables/useCommitNavigation.ts'
+import { useFeatureBackHandler } from '@/composables/useEdgeSwipeBack'
 const { t } = useI18n()
 
 const switchTab = inject('switchTab', () => {})
@@ -133,6 +167,10 @@ const props = defineProps({
     default: 'project', // 'project' | 'file'
   },
   file: Object, // { path, name } — used when mode === 'file'
+  active: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['open-file'])
@@ -154,12 +192,13 @@ const isGit = ref(false)
 const initLoading = ref(false)
 const untracked = ref(false)
 
-const currentView = ref('commits') // 'commits' | 'files' | 'diff'
+const currentView = ref('commits') // 'commits' | 'files' | 'diff' | 'manage'
 const selectedSHA = ref(null)
 
 // Files view (project mode only)
 const filesLoading = ref(false)
 const files = ref([])
+const mergeGroups = ref([])
 const selectedFilePath = ref(null)
 
 // Unified diff state
@@ -186,6 +225,13 @@ const unstagedFiles = computed(() => sortedFiles.value.filter(f => !f.staged))
 const hasStaged = computed(() => stagedFiles.value.length > 0)
 const hasUnstaged = computed(() => unstagedFiles.value.length > 0)
 
+const totalFileCount = computed(() => {
+  if (mergeGroups.value.length > 0) {
+    return mergeGroups.value.reduce((sum, g) => sum + g.files.length, 0)
+  }
+  return files.value.length
+})
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function fileTypeLabel(type, staged) {
@@ -203,6 +249,7 @@ function badgeClass(f) {
 function resetState() {
   commits.value = []
   files.value = []
+  mergeGroups.value = []
   hasMore.value = false
   selectedSHA.value = null
   selectedFilePath.value = null
@@ -215,6 +262,8 @@ function resetState() {
   wtFiles.value = []
   lastProjectRoot.value = null
   lastFilePath.value = null
+  hasLoadedMore.value = false
+  refreshHint.value = false
 }
 
 // Expose commitSearch for the search watcher
@@ -229,6 +278,7 @@ async function loadProjectHistory() {
   hasMore.value = false
   selectedSHA.value = null
   files.value = []
+  mergeGroups.value = []
   selectedFilePath.value = null
   wtFiles.value = []
   isGit.value = true
@@ -267,6 +317,9 @@ async function loadProjectHistory() {
       commits.value = histCommits
     }
     hasMore.value = data.hasMore
+    // Record git state after successful load
+    lastGitState.value = { branch: store.state.gitBranch, head: store.state.gitHead, dirty: store.state.gitDirty }
+    refreshHint.value = false
   } catch {
     error.value = t('git.history.loadError')
   } finally {
@@ -308,6 +361,7 @@ async function loadFileHistory(filePath) {
 async function loadMoreCommits() {
   if (loadingMore.value || !hasMore.value || !isGit.value) return
   loadingMore.value = true
+  hasLoadedMore.value = true
   try {
     // Count only git commits (exclude WT node) for the skip parameter,
     // since WT is a frontend-only entry not present in git log output.
@@ -328,6 +382,7 @@ async function loadMoreCommits() {
 async function onSearch(q) {
   if (!q.trim() || !isGit.value || props.mode === 'file') return
   searchLoading.value = true
+  if (hasMore.value) hasLoadedMore.value = true
   try {
     while (hasMore.value) {
       const gitCount = commits.value.filter(c => !c.isWT).length
@@ -363,6 +418,8 @@ async function initGitRepo() {
 
 async function onRefresh() {
   commitSearch.value = ''
+  hasLoadedMore.value = false
+  refreshHint.value = false
   if (commitListRef.value) commitListRef.value.commitSearch = ''
   if (props.mode === 'file' && props.file?.path) {
     await loadFileHistory(props.file.path)
@@ -372,7 +429,58 @@ async function onRefresh() {
   setTimeout(() => commitListRef.value?.observeList(), 100)
 }
 
+// ─── Shared commit navigation composable ─────────────────────────────────
+
+const { navigateToCommit, handleDrillBackToCommits } = useCommitNavigation({
+    commits,
+    selectedSHA,
+    currentView,
+    loadCommitFiles,
+    loadProjectHistory,
+})
+
+// Register back handler for git drill-down navigation
+// canGoBack: active tab AND not on the commit list (root view)
+useFeatureBackHandler(
+    'git-history',
+    () => props.active && currentView.value !== 'commits',
+    () => drillBack('commits'),
+)
+
+// Ensure IntersectionObserver is set up whenever user returns to the commits view.
+// This covers the case where observeList() was skipped due to early returns
+// (e.g. entering via Header branch badge → manage view → back to commits).
+watch(currentView, (view) => {
+  if (view === 'commits') {
+    nextTick(() => commitListRef.value?.observeList())
+  }
+})
+
+// Watch for commit navigation requests from chat (handles the case where
+// the history tab is already active and a commit hash link is clicked)
+watch(pendingCommitSha, async (sha) => {
+  if (!sha || !props.active) return
+  const consumed = consumePendingCommitNavigation()
+  if (consumed) {
+    await navigateToCommit(consumed)
+  }
+})
+
+// Watch for manage-view navigation requests from branch badge click
+// (handles the case where the history tab is already active)
+watch(pendingManageView, async (pending) => {
+  if (!pending || !props.active) return
+  const consumed = consumePendingManageNavigation()
+  if (consumed) {
+    currentView.value = 'manage'
+  }
+})
+
 // ─── Drill-down navigation ──────────────────────────────────────────────────
+
+function navigateToManage() {
+  currentView.value = 'manage'
+}
 
 function onCommitSelect(c) {
   selectedSHA.value = c.sha
@@ -383,6 +491,7 @@ function onCommitSelect(c) {
     if (c.sha === 'HEAD') {
       filesLoading.value = true
       files.value = wtFiles.value
+      mergeGroups.value = []
       filesLoading.value = false
     } else {
       loadCommitFiles(c.sha).catch(() => {})
@@ -394,26 +503,14 @@ function onCommitSelect(c) {
   }
 }
 
-// Navigate directly to a specific commit's files view
-function navigateToCommit(sha) {
-  selectedSHA.value = sha
-  currentView.value = 'files'
-  loadCommitFiles(sha).catch(() => {})
-}
-
-// Watch for commit navigation requests from chat (commit hash links)
-watch(() => store.state.commitNavigateSha, (sha) => {
-  if (!sha) return
-  store.state.commitNavigateSha = null // consume
-  navigateToCommit(sha)
-})
-
 function drillBack(view) {
   if (view === 'commits') {
     selectedSHA.value = null
     files.value = []
+    mergeGroups.value = []
     selectedFilePath.value = null
     diffState.value = { loading: false, empty: false, html: '' }
+    handleDrillBackToCommits()
   } else if (view === 'files') {
     selectedFilePath.value = null
     diffState.value = { loading: false, empty: false, html: '' }
@@ -432,13 +529,24 @@ function drillToFile(f) {
 async function loadCommitFiles(sha) {
   filesLoading.value = true
   files.value = []
+  mergeGroups.value = []
   try {
     const resp = await fetch(`/api/git/commit-files?sha=${encodeURIComponent(sha)}`)
     if (!resp.ok) { files.value = []; return }
     const data = await resp.json()
-    files.value = Array.isArray(data) ? data : []
+    if (data && data.merge === true && Array.isArray(data.groups)) {
+      mergeGroups.value = data.groups
+      files.value = []
+    } else if (Array.isArray(data)) {
+      files.value = data
+      mergeGroups.value = []
+    } else {
+      files.value = []
+      mergeGroups.value = []
+    }
   } catch {
     files.value = []
+    mergeGroups.value = []
   } finally {
     filesLoading.value = false
   }
@@ -480,6 +588,51 @@ async function loadDiff() {
 const lastProjectRoot = ref(null)
 const lastFilePath = ref(null)
 
+// Track git state for auto-refresh on tab re-entry
+const lastGitState = ref({ branch: '', head: '', dirty: false })
+
+// Whether the refresh button should pulse to indicate stale data
+const refreshHint = ref(false)
+
+// Whether the user has loadMore'd beyond the first page
+const hasLoadedMore = ref(false)
+
+// When tab becomes active, check if git state changed or pending navigation
+watch(() => props.active, async (nowActive) => {
+  if (!nowActive || props.mode !== 'project') return
+
+  // Check for pending manage-view navigation (from branch badge click)
+  if (consumePendingManageNavigation()) {
+    currentView.value = 'manage'
+    return
+  }
+
+  // Check for pending commit navigation (from chat hash links)
+  const pendingSha = consumePendingCommitNavigation()
+  if (pendingSha) {
+    await navigateToCommit(pendingSha)
+    return
+  }
+
+  await store.loadGitBranch()
+  const cur = { branch: store.state.gitBranch, head: store.state.gitHead, dirty: store.state.gitDirty }
+  const changed = lastGitState.value.branch &&
+    (cur.branch !== lastGitState.value.branch ||
+     cur.head !== lastGitState.value.head ||
+     cur.dirty !== lastGitState.value.dirty)
+  if (changed) {
+    if (hasLoadedMore.value) {
+      // User has extra data loaded — don't auto-refresh, just hint
+      refreshHint.value = true
+    } else {
+      // Only first page — safe to auto-refresh
+      await loadProjectHistory()
+      nextTick(() => commitListRef.value?.observeList())
+    }
+  }
+  lastGitState.value = { ...cur }
+})
+
 onMounted(async () => {
   const currentProject = store.state.projectRoot
   const currentFile = props.file?.path
@@ -491,6 +644,23 @@ onMounted(async () => {
     resetState()
     lastProjectRoot.value = currentProject
     lastFilePath.value = currentFile
+  }
+
+  // If navigating from branch badge click, go directly to manage view
+  if (consumePendingManageNavigation()) {
+    currentView.value = 'manage'
+    if (commits.value.length === 0 && !error.value) {
+      await loadProjectHistory()
+    }
+    return
+  }
+
+  // If navigating from a commit hash link, go directly to that commit
+  const pendingSha = consumePendingCommitNavigation()
+  if (pendingSha) {
+    await navigateToCommit(pendingSha)
+    setTimeout(() => commitListRef.value?.observeList(), 100)
+    return
   }
 
   if (commits.value.length === 0 && !error.value) {
@@ -635,5 +805,11 @@ onMounted(async () => {
   color: var(--text-muted, #999);
   padding: 8px 14px 4px;
   letter-spacing: 0.03em;
+}
+
+.merge-group + .merge-group {
+  border-top: 1px solid var(--border-color, #dee2e6);
+  margin-top: 4px;
+  padding-top: 4px;
 }
 </style>

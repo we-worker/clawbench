@@ -45,6 +45,7 @@ func setupTestEnv(t *testing.T) (*testEnv, func()) {
 	origToken := model.SessionToken
 	origWatch := model.WatchDir
 	origDB := service.DB
+	origDBRead := service.DBRead
 	origAgents := model.Agents
 	origAgentList := model.AgentList
 
@@ -86,6 +87,7 @@ func setupTestEnv(t *testing.T) (*testEnv, func()) {
 			model TEXT DEFAULT '',
 			session_type TEXT NOT NULL DEFAULT 'chat',
 			external_session_id TEXT DEFAULT '',
+			thinking_effort TEXT DEFAULT '',
 			deleted INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -130,6 +132,14 @@ func setupTestEnv(t *testing.T) (*testEnv, func()) {
 		CREATE INDEX IF NOT EXISTS idx_history_session ON chat_history(project_path, backend, session_id, created_at);
 		CREATE INDEX IF NOT EXISTS idx_sessions_project_backend ON chat_sessions(project_path, backend);
 		CREATE INDEX IF NOT EXISTS idx_executions_session ON task_executions(session_id);
+		CREATE TABLE IF NOT EXISTS summaries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			target_type TEXT NOT NULL,
+			target_id   INTEGER NOT NULL,
+			summary     TEXT NOT NULL,
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(target_type, target_id)
+		);
 		CREATE TABLE IF NOT EXISTS ai_raw_responses (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			session_id TEXT NOT NULL,
@@ -139,9 +149,11 @@ func setupTestEnv(t *testing.T) (*testEnv, func()) {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE TABLE IF NOT EXISTS tts_summaries (
-			cache_key TEXT PRIMARY KEY,
-			summary TEXT NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			message_id   INTEGER NOT NULL,
+			tts_summary  TEXT NOT NULL,
+			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(message_id)
 		);
 		CREATE TABLE IF NOT EXISTS terminal_quick_commands (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,6 +179,7 @@ func setupTestEnv(t *testing.T) (*testEnv, func()) {
 	}
 
 	service.DB = db
+	service.DBRead = db // Same instance for :memory: SQLite — data is shared
 
 	// Register mock agents so GetDefaultAgentID() works
 	model.Agents = map[string]*model.Agent{
@@ -189,6 +202,7 @@ func setupTestEnv(t *testing.T) (*testEnv, func()) {
 		model.Agents = origAgents
 		model.AgentList = origAgentList
 		service.DB = origDB
+		service.DBRead = origDBRead
 		db.Close()
 	}
 

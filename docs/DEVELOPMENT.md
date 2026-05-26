@@ -117,20 +117,23 @@ cd clawbench
 | `chat.page_size` | 20 | 懒加载每页消息条数 |
 | `chat.collapsed_height` | 150 | 历史消息折叠高度 px |
 | `session.max_count` | 10 | 每项目会话上限 |
+| `recent_projects.max_count` | 10 | 标题栏下拉显示的最近项目数量上限 |
 | `terminal.enabled` | true | Web 终端默认启用 |
 | `terminal.idle_timeout` | 10m | 终端空闲超时 |
 | `terminal.max_sessions` | 10 | 每项目终端会话上限 |
-| `proxy.enabled` | true | 端口转发默认启用 |
-| `proxy.allowed_ports` | `1024-65535` | 允许转发的端口范围 |
-| `ssh.enabled` | true | SSH 隧道默认启用 |
+| `port_forward.enabled` | true | 端口转发默认启用 |
+| `port_forward.port` | 0 (auto) | SSH 端口（0 = 主端口+1） |
+| `port_forward.host_key` | (auto) | Host key 文件路径 |
+| `port_forward.allowed_ports` | (all) | 允许转发的端口范围 |
 | `tts.engine` | edge | Edge TTS 免费无限制 |
-| `tts.summarize_backend` | simple | 纯文本清洗，零延迟 |
 | `tts.speed` | 1.0 | 正常语速 |
 | `tts.max_cache_files` | 100 | TTS 语音缓存文件最大数量；超出时自动删除最旧的（-1=不限） |
 | `tts.inline_code_max_len` | 100 | 行内代码保留最大字符数（rune），超出则删除 |
 | `tts.max_summarize_runes` | 10000 | 总结输入最大字符数，超出截取尾部 |
-| `tasks.summarize_backend` | (空) | 任务执行摘要后端，空则禁用；可用值同 `tts.summarize_backend` |
-| `tasks.summarize_model` | (空) | 任务摘要模型，空则使用后端默认模型 |
+| `summarize.backend` | simple | 统一总结后端（TTS 语音 + 定时任务共用），零延迟 |
+| `summarize.model` | (空) | 总结模型，空则使用后端默认模型 |
+| `summarize.api` | (空) | API 子配置（backend 为 api 时使用），含 base_url/key/format |
+| `summarize.chat_summary` | true | 会话完成后自动生成最后助手消息摘要（`*bool`，nil=true） |
 
 **自动密码机制**：未配置 `password` 时，系统自动生成随机 UUID 作为密码，保存到 `.clawbench/auto-password`（权限 0600）。重启时复用已保存的密码，不会重新生成。配置 `password` 后自动删除该文件。启动脚本会从文件读取并显示密码。
 
@@ -211,16 +214,12 @@ tls:
   cert_file: "/path/to/fullchain.pem"   # 证书文件
   key_file: "/path/to/privkey.pem"      # 私钥文件
 
-# 端口转发配置（默认启用，端口范围 1024-65535）
-proxy:
-  enabled: true
-  allowed_ports: "1024-65535"
-
-# SSH 隧道配置（默认启用）
-ssh:
-  enabled: true
-  port: 0                       # SSH 端口（0 = 自动 = 主端口+1）
-  host_key: ""                  # Host key 文件路径（空 = 自动生成）
+# 端口转发 + SSH 隧道配置（默认启用，已合并为 port_forward）
+port_forward:
+  enabled: true                    # 启用 SSH 隧道服务（默认: true）
+  port: 0                          # SSH 端口（0 = 自动 = 主端口+1）
+  host_key: ""                     # Host key 文件路径（空 = 自动生成）
+  allowed_ports: ""                # 允许转发的端口范围（空 = 允许所有）
 
 # Chat UI 配置（默认 initial_messages: 20, page_size: 20, collapsed_height: 150）
 chat:
@@ -373,6 +372,7 @@ clawbench/
 │   ├── service/                 # 业务逻辑
 │   │   ├── database.go          # SQLite 初始化
 │   │   ├── chat.go              # 聊天历史管理
+│   │   ├── summary.go           # 聊天自动摘要（AsyncSummarize + summaries 表）
 │   │   ├── scheduler.go         # 定时任务调度
 │   │   ├── uuid.go              # UUID 工具
 │   │   └── logger.go            # 文件日志（按天轮转）
@@ -382,6 +382,9 @@ clawbench/
 │   ├── ssh/                     # SSH 隧道服务器
 │   │   ├── server.go            # SSH 服务器（direct-tcpip 端口转发）
 │   │   └── server_test.go       # 测试
+│   ├── proxy/                   # HTTP 反向代理 + 端口转发逻辑
+│   │   ├── reverse_proxy.go     # HTTP 反向代理（解决 SSH 隧道 Host header 不匹配）
+│   │   └── reverse_proxy_test.go # 测试
 │   ├── cli/                     # CLI 子命令（AI 智能体自服务）
 │   │   ├── task.go              # 定时任务子命令（create/update/delete/pause/resume/trigger/list/get/list-agents；--prompt 支持 @path 语法）
 │   │   ├── migrate.go           # 一次性数据库迁移（task_executions 内容→chat_history）
@@ -415,6 +418,8 @@ clawbench/
 │       ├── anthropic.go         # Anthropic Messages API 总结
 │       ├── strip_markdown.go    # Markdown 剥离
 │       ├── task.go              # 任务执行摘要生成
+├── web/src/components/common/  # 通用组件
+│   ├── SummaryToggle.vue        # 摘要切换（按钮/标签模式）
 ├── config/                      # 配置目录
 │   ├── rules.md                 # 智能体共享规则和 CLI 参考
 │   ├── agents/                  # Agent 配置

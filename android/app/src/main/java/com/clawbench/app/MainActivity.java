@@ -17,7 +17,6 @@ import android.os.Environment;
 import android.os.PowerManager;
 import android.provider.MediaStore;
 import android.provider.Settings;
-import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
@@ -30,6 +29,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -42,6 +42,9 @@ import android.widget.Toast;
 import android.content.pm.PackageManager;
 import android.Manifest;
 
+import cn.jpush.android.api.JPushInterface;
+import cn.jpush.android.data.JPushConfig;
+
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
@@ -51,10 +54,24 @@ import org.json.JSONArray;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.security.cert.X509Certificate;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 /**
  * Main Activity: hosts a fullscreen WebView that connects to the ClawBench server.
@@ -64,7 +81,7 @@ import java.util.Set;
  * - WebView hidden during connection attempts — no ugly error pages shown
  * - WebView with JS, DOM storage, and media autoplay enabled
  * - JavaScript interface for native bridge (port forwarding, SSH password)
- * - Port forwarding via SSH tunnels (PortForwardService) — transparent localhost access
+ * - Port forwarding via SSH tunnels (BackgroundService) — transparent localhost access
  * - Proper back navigation within WebView
  * - SSL error handling with user confirmation
  */
@@ -76,7 +93,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "ClawBench";
     private static final String LOGIN_HTML_URL = "file:///android_asset/login.html";
 
-    private WebView webView;
+    static MainActivity instance;
+
+    WebView webView;
     private ProgressBar progressBar;
     private SharedPreferences prefs;
 
@@ -89,6 +108,16 @@ public class MainActivity extends AppCompatActivity {
     // Android WebView calls onPageFinished() even for failed loads, so
     // without this guard the browser error page would flash briefly.
     private boolean loadErrorPending = false;
+
+    // Connection timeout runnable: if the remote page hasn't loaded within
+    // TIMEOUT_MS, navigate back to the login page. Prevents the user from
+    // being stuck on a black screen when the server is unreachable or slow.
+    private Runnable connectionTimeoutRunnable;
+    private static final int CONNECTION_TIMEOUT_MS = 15_000;
+
+    // Pending error message to deliver to the login page once it finishes loading.
+    // Replaces the old fixed 300ms delay — see showLoginPage() and onPageFinished().
+    private String pendingLoginErrorMessage = null;
 
     // File chooser state for WebView <input type="file"> support
     private ValueCallback<Uri[]> filePathCallback;
@@ -140,12 +169,25 @@ public class MainActivity extends AppCompatActivity {
                 cameraImageUri = null;
             });
 
-    // Set of ports currently being forwarded (thread-safe for access from WebView background threads)
-    final Set<Integer> forwardedPorts = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    // Map of ports currently being forwarded: port -> host (thread-safe for access from WebView background threads)
+    final Map<Integer, String> forwardedPorts = new java.util.concurrent.ConcurrentHashMap<>();
 
     // Volume key interception mode: when true, volume up/down are forwarded to WebView
     // as JS calls instead of adjusting system volume. Controlled by the terminal panel.
     private volatile boolean volumeKeyMode = false;
+
+    // Whether JPush push notifications are available (fetched from server config).
+    // When true, WebSocket can be disconnected on background (push will notify the user).
+    // When false, WebSocket stays alive in background for real-time events.
+    volatile boolean pushAvailable = false;
+    // When true, the server has JPush enabled (even if JPush SDK hasn't finished
+    // initializing yet). Used by native WS to suppress duplicate notifications
+    // during the window between JPush config fetch and SDK initialization.
+    volatile boolean jpushEnabledOnServer = false;
+
+    // Pending navigation from a notification tap that occurred before the WebView
+    // was loaded (cold start). Consumed by WebAppInterface.getPendingNavigation().
+    public org.json.JSONObject pendingNavigation = null;
 
     // Fullscreen video state: managed by WebChromeClient.onShowCustomView/onHideCustomView
     private View customView;
@@ -156,11 +198,13 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Keep screen on while app is in foreground (AI may take time to respond)
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        instance = this;
 
-        // Initialize trust-all SSL for self-signed HTTPS servers (used by PortForwardService)
-        PortForwardService.initTrustAllSSL();
+        // Check if launched from notification
+        logLaunchIntent(getIntent());
+
+        // Initialize trust-all SSL for self-signed HTTPS servers (used by BackgroundService)
+        BackgroundService.initTrustAllSSL();
 
         setContentView(R.layout.activity_main);
 
@@ -172,20 +216,27 @@ public class MainActivity extends AppCompatActivity {
         // Request notification permission (Android 13+) — required for foreground service notification
         requestNotificationPermission();
 
-        // Auto-restore PortForwardService if there are previously saved ports.
+        // Auto-restore BackgroundService if there are previously saved ports.
         // This ensures the SSH tunnel and its notification are active immediately on cold start,
         // without waiting for the WebView to load and syncToNative() to fire.
-        restorePortForwardServiceIfNeeded();
+        restoreBackgroundServiceIfNeeded();
 
         setupWebView();
 
         // Auto-connect if there's a saved URL (user has configured before).
         // This preserves the original behavior: returning users go straight
         // to the app. Only first-time users see the login page.
+
+        // Fetch JPush config from server and init JPush at runtime.
+        // AppKey is no longer baked into the APK — it comes from /api/push/config.
+        fetchPushConfig();
+
+        // Load saved URL or show configuration dialog
         String savedUrl = prefs.getString(KEY_SERVER_URL, null);
         if (savedUrl != null) {
             webView.setVisibility(View.INVISIBLE);
             webView.loadUrl(savedUrl);
+            startConnectionTimeout();
         } else {
             webView.loadUrl(LOGIN_HTML_URL);
         }
@@ -375,13 +426,14 @@ public class MainActivity extends AppCompatActivity {
                     request.addRequestHeader("Cookie", cookies);
                 }
                 request.setMimeType(mimetype);
-                request.setTitle(getFileNameFromUrl(url));
+                String fileName = getDownloadFileName(url, contentDisposition);
+                request.setTitle(fileName);
                 request.setDescription(getString(R.string.download_description));
                 request.allowScanningByMediaScanner();
                 request.setNotificationVisibility(
                         DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
                 request.setDestinationInExternalPublicDir(
-                        Environment.DIRECTORY_DOWNLOADS, "ClawBench/" + getFileNameFromUrl(url));
+                        Environment.DIRECTORY_DOWNLOADS, "ClawBench/" + fileName);
 
                 DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
                 dm.enqueue(request);
@@ -394,16 +446,52 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Extract a file name from a /api/local-file/ URL.
-     * Falls back to "download" if parsing fails.
+     * Determine the download file name.
+     * Priority: Content-Disposition header > URL path (without query params) > "download".
      */
-    private String getFileNameFromUrl(String url) {
+    private String getDownloadFileName(String url, String contentDisposition) {
+        // 1. Try Content-Disposition header (sent by server with attachment; filename="...")
+        if (contentDisposition != null && !contentDisposition.isEmpty()) {
+            // Parse filename*= (RFC 5987) first, then filename=
+            String name = parseContentDispositionFilename(contentDisposition);
+            if (name != null && !name.isEmpty()) return name;
+        }
+        // 2. Fallback: extract from URL path, stripping query parameters
         String decoded = Uri.decode(url);
+        // Remove query string and fragment
+        int queryIdx = decoded.indexOf('?');
+        if (queryIdx >= 0) decoded = decoded.substring(0, queryIdx);
+        int fragmentIdx = decoded.indexOf('#');
+        if (fragmentIdx >= 0) decoded = decoded.substring(0, fragmentIdx);
         int lastSlash = decoded.lastIndexOf('/');
         if (lastSlash >= 0 && lastSlash < decoded.length() - 1) {
             return decoded.substring(lastSlash + 1);
         }
         return "download";
+    }
+
+    /**
+     * Parse filename from Content-Disposition header.
+     * Supports: filename="..." and filename*=UTF-8''... (RFC 5987)
+     */
+    private String parseContentDispositionFilename(String contentDisposition) {
+        // Try filename*= (RFC 5987 encoded) first
+        java.util.regex.Matcher extMatcher = java.util.regex.Pattern.compile(
+                "filename\\*\\s*=\\s*(?:UTF-8|utf-8)''(.+?)(?:\\s*;|$)")
+                .matcher(contentDisposition);
+        if (extMatcher.find()) {
+            try {
+                return java.net.URLDecoder.decode(extMatcher.group(1), "UTF-8");
+            } catch (Exception ignored) {}
+        }
+        // Then try filename="..."
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(
+                "filename\\s*=\\s*\"?([^\";]+)\"?")
+                .matcher(contentDisposition);
+        if (matcher.find()) {
+            return matcher.group(1).trim();
+        }
+        return null;
     }
 
     /**
@@ -430,18 +518,37 @@ public class MainActivity extends AppCompatActivity {
     private void showLoginPage(String errorMessage) {
         webViewConnected = false;
         loadErrorPending = false;
+        cancelConnectionTimeout();
+        // Store error message for delivery after login page finishes loading.
+        // See onPageFinished() where pendingLoginErrorMessage is consumed.
+        pendingLoginErrorMessage = errorMessage;
         // Note: don't set View.INVISIBLE here — onPageStarted will set VISIBLE
         // for the login page URL, which is the correct time to show it.
         webView.loadUrl(LOGIN_HTML_URL);
-        if (errorMessage != null) {
-            // The page needs a moment to load before we can call JS on it.
-            // We'll defer the error display via a delayed runnable.
-            webView.postDelayed(() -> {
-                if (!isFinishing() && !isDestroyed()) {
-                    String escaped = errorMessage.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n");
-                    webView.evaluateJavascript("if(typeof onConnectError==='function'){onConnectError('" + escaped + "')}", null);
-                }
-            }, 300);
+    }
+
+    /**
+     * Start a connection timeout timer. If the remote page hasn't loaded
+     * within CONNECTION_TIMEOUT_MS, navigate back to the login page.
+     */
+    private void startConnectionTimeout() {
+        cancelConnectionTimeout();
+        connectionTimeoutRunnable = () -> {
+            if (!isFinishing() && !isDestroyed() && !webViewConnected) {
+                AppLog.w(TAG, "Connection timeout — returning to login page");
+                showLoginPage("连接超时，请检查服务器地址和网络连接。");
+            }
+        };
+        webView.postDelayed(connectionTimeoutRunnable, CONNECTION_TIMEOUT_MS);
+    }
+
+    /**
+     * Cancel any pending connection timeout timer.
+     */
+    private void cancelConnectionTimeout() {
+        if (connectionTimeoutRunnable != null) {
+            webView.removeCallbacks(connectionTimeoutRunnable);
+            connectionTimeoutRunnable = null;
         }
     }
 
@@ -458,14 +565,139 @@ public class MainActivity extends AppCompatActivity {
         // Save URL and password
         prefs.edit().putString(KEY_SERVER_URL, url).apply();
         if (password != null && !password.isEmpty()) {
-            PortForwardService.setPassword(this, password);
+            BackgroundService.setPassword(this, password);
+        }
+
+        // Fetch JPush config now that we have a server URL.
+        // On first launch, onCreate's fetchPushConfig() skips because URL is empty.
+        if (!pushAvailable) {
+            fetchPushConfig();
         }
 
         if (isNetworkAvailable()) {
-            webView.loadUrl(url);
+            // Pre-authenticate with server before navigating WebView.
+            // This sets the clawbench_session cookie so the Vue app
+            // won't show a second web login page.
+            if (password != null && !password.isEmpty()) {
+                authenticateAndNavigate(url, password);
+            } else {
+                // No password — navigate directly (server may have no auth)
+                webView.loadUrl(url);
+                startConnectionTimeout();
+            }
         } else {
             // No network — go back to login page with error
             showLoginPage("网络不可用，请检查网络连接。");
+        }
+    }
+
+    /**
+     * Pre-authenticate with the server before navigating the WebView.
+     * POSTs /login with the password, extracts the Set-Cookie header,
+     * injects it into WebView's CookieManager, then loads the URL.
+     * On failure (wrong password, SSL error, network error), falls back
+     * to direct navigation so WebView can handle it (e.g. SSL confirmation).
+     */
+    private void authenticateAndNavigate(String url, String password) {
+        new Thread(() -> {
+            try {
+                AuthResult result = performLoginRequest(url, password);
+                handleAuthResponse(result.statusCode, url, result.cookies);
+            } catch (Exception e) {
+                // SSL error (self-signed cert), network error, etc.
+                // Fall back to direct WebView navigation — it may handle
+                // SSL via onReceivedSslError user confirmation.
+                AppLog.w(TAG, "Pre-auth failed, falling back to direct navigation", e);
+                runOnUiThread(() -> {
+                    webView.loadUrl(url);
+                    startConnectionTimeout();
+                });
+            }
+        }).start();
+    }
+
+    /**
+     * Perform the HTTP POST /login request.
+     * Extracted for testability — can be overridden in tests to mock network calls.
+     *
+     * @param url      the server base URL
+     * @param password the password to authenticate with
+     * @return AuthResult with status code and Set-Cookie headers
+     */
+    AuthResult performLoginRequest(String url, String password) throws Exception {
+        OkHttpClient client = new OkHttpClient.Builder()
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
+
+        String escapedPwd = password.replace("\\", "\\\\").replace("\"", "\\\"");
+        String jsonBody = "{\"password\":\"" + escapedPwd + "\"}";
+        RequestBody body = RequestBody.create(jsonBody,
+                MediaType.parse("application/json; charset=utf-8"));
+
+        Request request = new Request.Builder()
+                .url(url + "/login")
+                .post(body)
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            java.util.List<String> cookies = response.headers("Set-Cookie");
+            return new AuthResult(response.code(), cookies);
+        }
+    }
+
+    /**
+     * Result of the pre-authentication POST /login request.
+     */
+    static class AuthResult {
+        final int statusCode;
+        final java.util.List<String> cookies;
+
+        AuthResult(int statusCode, java.util.List<String> cookies) {
+            this.statusCode = statusCode;
+            this.cookies = cookies;
+        }
+    }
+
+    /**
+     * Handle the server's response to the pre-authentication POST /login.
+     * Extracted from authenticateAndNavigate for testability.
+     *
+     * @param statusCode HTTP status code from the login response
+     * @param url        the server URL to navigate to on success/fallback
+     * @param cookies    Set-Cookie headers from the response (may be empty)
+     */
+    void handleAuthResponse(int statusCode, String url, java.util.List<String> cookies) {
+        if (statusCode == 200) {
+            // Extract Set-Cookie and inject into WebView CookieManager
+            if (cookies != null && !cookies.isEmpty()) {
+                try {
+                    CookieManager cm = CookieManager.getInstance();
+                    for (String cookie : cookies) {
+                        cm.setCookie(url, cookie);
+                    }
+                    cm.flush();
+                } catch (Exception e) {
+                    // CookieManager may be unavailable in test environments
+                    AppLog.w(TAG, "Failed to inject auth cookie", e);
+                }
+            }
+            // Auth success — navigate WebView (cookie already set)
+            runOnUiThread(() -> {
+                webView.loadUrl(url);
+                startConnectionTimeout();
+            });
+        } else if (statusCode == 401) {
+            // Wrong password — go back to login page with error
+            runOnUiThread(() -> showLoginPage("密码错误，请检查登录密码。"));
+        } else if (statusCode == 429) {
+            runOnUiThread(() -> showLoginPage("尝试次数过多，请稍后再试。"));
+        } else {
+            // Unexpected status — still try navigating
+            runOnUiThread(() -> {
+                webView.loadUrl(url);
+                startConnectionTimeout();
+            });
         }
     }
 
@@ -478,7 +710,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @SuppressWarnings("deprecation")
-    private boolean isNetworkAvailable() {
+    boolean isNetworkAvailable() {
         ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm == null) return false;
         NetworkInfo ni = cm.getActiveNetworkInfo();
@@ -487,7 +719,7 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Request POST_NOTIFICATIONS runtime permission on Android 13+ (API 33+).
-     * Required for the PortForwardService foreground notification to be visible.
+     * Required for the BackgroundService foreground notification to be visible.
      */
     private void requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -509,16 +741,16 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * If there are previously saved forwarded ports in SharedPreferences,
-     * start the PortForwardService immediately so the SSH tunnel and its
+     * start the BackgroundService immediately so the SSH tunnel and its
      * notification are active on cold start.
      * This avoids the gap where no notification shows until the WebView
      * finishes loading and syncToNative() fires.
      */
-    private void restorePortForwardServiceIfNeeded() {
+    private void restoreBackgroundServiceIfNeeded() {
         Set<String> savedPorts = prefs.getStringSet("forwarded_ports", null);
         if (savedPorts != null && !savedPorts.isEmpty()) {
-            AppLog.i(TAG, "Cold start: restoring PortForwardService with " + savedPorts.size() + " saved ports");
-            PortForwardService.start(this);
+            AppLog.i(TAG, "Cold start: restoring BackgroundService with " + savedPorts.size() + " saved ports");
+            BackgroundService.start(this);
         }
     }
 
@@ -532,28 +764,241 @@ public class MainActivity extends AppCompatActivity {
             }
             return;
         }
-        // If currently on the login page, don't navigate back in WebView history.
-        // The login page is the "root" state — pressing back should exit the app.
+        // If currently on the login page, allow the system back gesture (exit app)
         String currentUrl = webView.getUrl();
         if (currentUrl != null && currentUrl.equals(LOGIN_HTML_URL)) {
             super.onBackPressed();
             return;
         }
-        if (webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            // No more WebView history — just exit the app.
-            // Server reconfiguration is available via the gear menu in the web UI
-            // when the page fails to load, rather than through a back-gesture dialog.
-            super.onBackPressed();
+        // If the WebView is not connected (stuck on black screen or error),
+        // go back to the login page instead of exiting the app.
+        if (!webViewConnected) {
+            showLoginPage(null);
+            return;
         }
+        // Delegate to JS: dispatch a clawbench-back-press event.
+        // The JS layer checks if any drill-down page can navigate back.
+        // If it can, the JS handler calls goBack() and sets __clawbenchBackHandled = true.
+        // If not, we fall back to the default behavior (super.onBackPressed)
+        // so that non-drill-down pages (chat, terminal, etc.) retain the normal
+        // Android back/edge-swipe-to-exit behavior.
+        webView.evaluateJavascript(
+            "(function() {" +
+            "  if (typeof window.__clawbenchBackHandled === 'undefined') window.__clawbenchBackHandled = false;" +
+            "  window.__clawbenchBackHandled = false;" +
+            "  window.dispatchEvent(new CustomEvent('clawbench-back-press'));" +
+            "  return window.__clawbenchBackHandled;" +
+            "})()",
+            result -> {
+                boolean handled = "true".equals(result);
+                if (!handled) {
+                    // No JS handler consumed the back press — fall back to default behavior.
+                    // This allows the system edge-swipe-to-exit to work on pages
+                    // without drill-down navigation (chat, terminal, etc.).
+                    super.onBackPressed();
+                }
+            }
+        );
     }
 
     @Override
     protected void onDestroy() {
-        // Do NOT stop PortForwardService here — it should survive Activity lifecycle
+        // Do NOT stop BackgroundService here — it should survive Activity lifecycle
         // so the SSH tunnel continues running when the app is in background.
+        cancelConnectionTimeout();
+        instance = null; // Clear static reference to prevent memory leak / stale access
         super.onDestroy();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        pauseWebView();
+        // App going to background — if JPush is not available, start native WS
+        // so we still get notifications when Android kills the WebView process.
+        // Check both pushAvailable (SDK ready) and jpushEnabledOnServer (config fetched)
+        // to avoid starting native WS when JPush will handle notifications anyway.
+        if (!pushAvailable && !jpushEnabledOnServer && webViewConnected) {
+            BackgroundService.startNativeEventWs(this);
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        resumeWebView();
+        // App returning to foreground — stop native WS (WebView WS handles events)
+        BackgroundService.stopNativeEventWs(this);
+        // Handle notification tap intent + re-dispatch pending navigation
+        handleResumeIntent();
+    }
+
+    /** Pause WebView rendering and JS timers to release CPU/GPU resources. */
+    void pauseWebView() {
+        webView.onPause();
+        webView.pauseTimers();
+    }
+
+    /** Resume WebView rendering and JS timers when returning to foreground. */
+    void resumeWebView() {
+        webView.onResume();
+        webView.resumeTimers();
+    }
+
+    /**
+     * Handle notification intent and re-dispatch pending navigation on resume.
+     * Extracted from onResume() for testability (lifecycle methods call super which
+     * requires Android framework, making them untestable in pure JUnit).
+     */
+    void handleResumeIntent() {
+        Intent intent = getIntent();
+        AppLog.i(TAG, "MainActivity: onResume intent=" + intent
+                + ", action=" + (intent != null ? intent.getAction() : "null")
+                + ", extras=" + (intent != null ? intent.getExtras() : "null"));
+        handleNotificationIntent(intent);
+        redispatchPendingNavigation();
+    }
+
+    /**
+     * Re-dispatch pending navigation if it wasn't consumed yet.
+     * (e.g., CustomEvent was dispatched while WebView was paused/suspended)
+     */
+    void redispatchPendingNavigation() {
+        if (pendingNavigation != null && webView != null) {
+            AppLog.i(TAG, "MainActivity: onResume - re-dispatching pendingNavigation=" + pendingNavigation.toString());
+            final String jsArg = pendingNavigation.toString();
+            // Choose event name based on navigation type: task vs session
+            String eventName = pendingNavigation.has("taskId") ? "clawbench-open-task" : "clawbench-open-session";
+            AppLog.i(TAG, "MainActivity: onResume - dispatching " + eventName);
+            webView.evaluateJavascript(
+                "window.dispatchEvent(new CustomEvent('" + eventName + "', { detail: " + jsArg + " }))",
+                result -> {
+                    AppLog.i(TAG, "MainActivity: onResume re-dispatch evaluateJavascript result=" + result);
+                    pendingNavigation = null;
+                }
+            );
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleNotificationIntent(intent);
+    }
+
+    /**
+     * Handle intent extras from notification taps.
+     * For session notifications: dispatches clawbench-open-session event (navigate to chat).
+     * For task notifications: dispatches clawbench-open-task event (navigate to task execution detail).
+     */
+    void handleNotificationIntent(Intent intent) {
+        AppLog.i(TAG, "MainActivity: handleNotificationIntent called, intent=" + intent);
+        if (intent == null) {
+            AppLog.i(TAG, "MainActivity: handleNotificationIntent - intent is null, skipping");
+            return;
+        }
+        String sessionId = intent.getStringExtra("session_id");
+        String taskId = intent.getStringExtra("task_id");
+        String executionId = intent.getStringExtra("execution_id");
+        String eventType = intent.getStringExtra("event_type");
+        String projectPath = intent.getStringExtra("project_path");
+        AppLog.i(TAG, "MainActivity: handleNotificationIntent - sessionId=" + sessionId
+                + ", taskId=" + taskId + ", executionId=" + executionId
+                + ", eventType=" + eventType + ", projectPath=" + projectPath);
+
+        // Also dump all intent extras for debugging
+        Bundle extras = intent.getExtras();
+        if (extras != null) {
+            for (String key : extras.keySet()) {
+                AppLog.i(TAG, "MainActivity: intent extra: " + key + "=" + extras.get(key));
+            }
+        }
+
+        // Determine navigation type: task notification vs session notification
+        boolean isTaskNotification = taskId != null || "task_update".equals(eventType);
+
+        if (isTaskNotification && taskId != null) {
+            // Task notification: navigate to task execution detail
+            AppLog.i(TAG, "MainActivity: handleNotificationIntent - task notification, dispatching clawbench-open-task");
+            try {
+                org.json.JSONObject detail = new org.json.JSONObject();
+                detail.put("taskId", taskId);
+                if (executionId != null) detail.put("executionId", executionId);
+                if (sessionId != null) detail.put("sessionId", sessionId);
+                if (projectPath != null) detail.put("projectPath", projectPath);
+                // Store as pending navigation for cold-start fallback (getPendingNavigation bridge)
+                pendingNavigation = detail;
+                AppLog.i(TAG, "MainActivity: stored pendingNavigation=" + detail.toString());
+                if (webView != null) {
+                    AppLog.i(TAG, "MainActivity: webView available, dispatching clawbench-open-task event");
+                    webView.evaluateJavascript(
+                        "window.dispatchEvent(new CustomEvent('clawbench-open-task', { detail: " + detail.toString() + " }))",
+                        result -> {
+                            AppLog.i(TAG, "MainActivity: clawbench-open-task evaluateJavascript result=" + result);
+                            pendingNavigation = null;
+                        }
+                    );
+                } else {
+                    AppLog.w(TAG, "MainActivity: webView is null, cannot dispatch event (pendingNavigation stored for cold-start)");
+                }
+            } catch (Exception e) {
+                AppLog.w(TAG, "MainActivity: failed to dispatch clawbench-open-task event from notification", e);
+            }
+            // Clear extras so we don't re-dispatch on subsequent onResume
+            intent.removeExtra("task_id");
+            intent.removeExtra("execution_id");
+            intent.removeExtra("event_type");
+            intent.removeExtra("session_id");
+            intent.removeExtra("project_path");
+            AppLog.i(TAG, "MainActivity: cleared intent extras to prevent re-dispatch");
+        } else if (sessionId != null) {
+            // Session notification: navigate to chat session
+            AppLog.i(TAG, "MainActivity: handleNotificationIntent - session_id found, dispatching navigation");
+            try {
+                org.json.JSONObject detail = new org.json.JSONObject();
+                detail.put("sessionId", sessionId);
+                if (projectPath != null) detail.put("projectPath", projectPath);
+                // Store as pending navigation for cold-start fallback (getPendingNavigation bridge)
+                pendingNavigation = detail;
+                AppLog.i(TAG, "MainActivity: stored pendingNavigation=" + detail.toString());
+                if (webView != null) {
+                    AppLog.i(TAG, "MainActivity: webView available, dispatching clawbench-open-session event");
+                    webView.evaluateJavascript(
+                        "window.dispatchEvent(new CustomEvent('clawbench-open-session', { detail: " + detail.toString() + " }))",
+                        result -> {
+                            AppLog.i(TAG, "MainActivity: evaluateJavascript result=" + result);
+                            // JS event dispatched successfully — clear pendingNavigation
+                            // so onResume re-dispatch won't fire again
+                            pendingNavigation = null;
+                        }
+                    );
+                } else {
+                    AppLog.w(TAG, "MainActivity: webView is null, cannot dispatch event (pendingNavigation stored for cold-start)");
+                }
+            } catch (Exception e) {
+                AppLog.w(TAG, "MainActivity: failed to dispatch open-session event from notification", e);
+            }
+            // Clear extras so we don't re-dispatch on subsequent onResume
+            intent.removeExtra("session_id");
+            intent.removeExtra("project_path");
+            intent.removeExtra("event_type");
+            AppLog.i(TAG, "MainActivity: cleared intent extras to prevent re-dispatch");
+        } else {
+            AppLog.i(TAG, "MainActivity: handleNotificationIntent - no session_id or task_id in intent extras");
+        }
+    }
+
+    /**
+     * Log launch intent extras (session_id/project_path from notification).
+     * Extracted from onCreate() for testability.
+     */
+    void logLaunchIntent(Intent launchIntent) {
+        if (launchIntent != null) {
+            String sid = launchIntent.getStringExtra("session_id");
+            String pp = launchIntent.getStringExtra("project_path");
+            AppLog.i(TAG, "MainActivity: onCreate intent extras: session_id=" + sid + ", project_path=" + pp);
+        }
     }
 
     /**
@@ -576,6 +1021,111 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         return super.dispatchKeyEvent(event);
+    }
+
+    // --- JPush Runtime Init ---
+
+    /**
+     * Fetch JPush configuration (AppKey, enabled flag) from the server's /api/push/config endpoint.
+     * If JPush is enabled on the server, initializes JPush with the runtime AppKey.
+     * If JPush is not configured, skips init — the app will keep WebSocket alive in background
+     * instead of relying on push notifications.
+     *
+     * This runs on a background thread (OkHttp callback) and posts JPush init back to main thread.
+     */
+    // Guards against double JPush init (onCreate + connectToServer race).
+    private volatile boolean jpushInitStarted = false;
+
+    void fetchPushConfig() {
+        String serverUrl = prefs.getString(KEY_SERVER_URL, "");
+        if (serverUrl.isEmpty()) {
+            AppLog.w(TAG, "No server URL configured, skipping push config fetch");
+            return;
+        }
+
+        if (jpushInitStarted) {
+            AppLog.i(TAG, "JPush init already started, skipping duplicate fetchPushConfig");
+            return;
+        }
+        jpushInitStarted = true;
+
+        new Thread(() -> {
+            try {
+                java.net.URL url = new java.net.URL(serverUrl + "/api/push/config");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+
+                // Trust self-signed certs for localhost connections (SSH tunnel / dev)
+                // Same logic as WebViewClient.onReceivedSslError — cert hostname won't match localhost
+                if (conn instanceof HttpsURLConnection && isLocalhostUrl(serverUrl)) {
+                    TrustManager[] trustAll = { new X509TrustManager() {
+                        public void checkClientTrusted(X509Certificate[] c, String a) {}
+                        public void checkServerTrusted(X509Certificate[] c, String a) {}
+                        public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                    }};
+                    SSLContext sc = SSLContext.getInstance("TLS");
+                    sc.init(null, trustAll, new java.security.SecureRandom());
+                    ((HttpsURLConnection) conn).setSSLSocketFactory(sc.getSocketFactory());
+                    ((HttpsURLConnection) conn).setHostnameVerifier((hostname, session) -> true);
+                }
+
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+
+                int responseCode = conn.getResponseCode();
+                if (responseCode != 200) {
+                    AppLog.w(TAG, "Push config endpoint returned " + responseCode);
+                    conn.disconnect();
+                    return;
+                }
+
+                java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(conn.getInputStream()));
+                StringBuilder response = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    response.append(line);
+                }
+                reader.close();
+                conn.disconnect();
+
+                // Parse JSON response
+                String jsonStr = response.toString();
+                org.json.JSONObject json = new org.json.JSONObject(jsonStr);
+                boolean jpushEnabled = json.optBoolean("jpush_enabled", false);
+                String jpushAppKey = json.optString("jpush_app_key", "");
+
+                // Mark server-side JPush status immediately, even before SDK init.
+                // This lets native WS suppress notifications during the init window.
+                if (jpushEnabled && !jpushAppKey.isEmpty()) {
+                    jpushEnabledOnServer = true;
+                    AppLog.i(TAG, "JPush enabled on server, initializing with AppKey: " + jpushAppKey.substring(0, 4) + "...");
+                    runOnUiThread(() -> {
+                        JPushInterface.setDebugMode(false);
+                        JPushConfig config = new JPushConfig();
+                        config.setjAppKey(jpushAppKey);
+                        JPushInterface.init(this, config);
+                        // NOTE: pushAvailable is NOT set to true here.
+                        // JPushInterface.init() is asynchronous — the SDK validates the AppKey
+                        // with the JPush server before registration succeeds. Setting
+                        // pushAvailable=true now would cause BackgroundService to disconnect
+                        // the native WS prematurely, even if init fails (e.g. 1005 error).
+                        // Instead, pushAvailable is set in JPushReceiver.onRegister() only
+                        // after the SDK confirms successful registration.
+                        AppLog.i(TAG, "JPush init called with server-provided AppKey, awaiting onRegister callback");
+                    });
+                } else {
+                    AppLog.i(TAG, "JPush not configured on server — will keep WebSocket alive in background");
+                }
+            } catch (Exception e) {
+                AppLog.w(TAG, "Failed to fetch push config: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    /** Check if a URL points to localhost (SSH tunnel / local dev). */
+    private boolean isLocalhostUrl(String url) {
+        return url != null && (url.contains("//localhost:") || url.contains("//127.0.0.1:"));
     }
 
     // --- WebView Client ---
@@ -604,7 +1154,16 @@ public class MainActivity extends AppCompatActivity {
         public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
             if (LOGIN_HTML_URL.equals(url)) {
-                // Login page — already visible from onPageStarted.
+                // Login page finished loading — deliver any pending error message.
+                // This is more reliable than a fixed delay (the old 300ms approach)
+                // because it waits for the page to actually be ready.
+                cancelConnectionTimeout();
+                if (pendingLoginErrorMessage != null) {
+                    String msg = pendingLoginErrorMessage;
+                    pendingLoginErrorMessage = null;
+                    String escaped = msg.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n");
+                    view.evaluateJavascript("if(typeof onConnectError==='function'){onConnectError('" + escaped + "')}", null);
+                }
             } else if (loadErrorPending) {
                 // Error was received during this page load — don't show the WebView.
                 // The delayed showLoginPage() will handle the transition.
@@ -612,6 +1171,7 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 // Remote page finished loading successfully — show the WebView.
                 webViewConnected = true;
+                cancelConnectionTimeout();
                 view.setVisibility(View.VISIBLE);
             }
         }
@@ -645,13 +1205,7 @@ public class MainActivity extends AppCompatActivity {
             }
             String serverUrl = prefs.getString(KEY_SERVER_URL, "");
             if (serverUrl.startsWith("https://")) {
-                new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("SSL 证书验证失败")
-                        .setMessage("服务器使用了自签名证书，连接可能不安全。\n\n仅当您信任该服务器时才继续。")
-                        .setPositiveButton("信任并继续", (dialog, which) -> handler.proceed())
-                        .setNegativeButton("取消连接", (dialog, which) -> handler.cancel())
-                        .setCancelable(false)
-                        .show();
+                showSslConfirmationDialog(handler);
             } else {
                 handler.cancel();
             }
@@ -679,6 +1233,98 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }, 600);
             }
+        }
+
+        @Override
+        public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
+            super.onReceivedHttpError(view, request, errorResponse);
+            // Only handle main frame HTTP errors (4xx/5xx) during initial connection.
+            // Once the app is loaded (webViewConnected), HTTP errors are handled by the
+            // Vue frontend (e.g., 401 redirects to login within the SPA).
+            if (request.isForMainFrame() && !webViewConnected) {
+                int statusCode = errorResponse.getStatusCode();
+                AppLog.w(TAG, "Main frame HTTP error during connection: " + statusCode);
+                loadErrorPending = true;
+                view.setVisibility(View.INVISIBLE);
+                String msg;
+                if (statusCode == 401 || statusCode == 403) {
+                    msg = "认证失败，请检查密码是否正确。";
+                } else if (statusCode >= 500) {
+                    msg = "服务器错误 (" + statusCode + ")，请稍后重试。";
+                } else if (statusCode >= 400) {
+                    msg = "请求错误 (" + statusCode + ")，请检查服务器地址。";
+                } else {
+                    msg = "连接失败，请检查服务器地址和网络连接。";
+                }
+                view.postDelayed(() -> {
+                    if (!isFinishing() && !isDestroyed() && !webViewConnected && loadErrorPending) {
+                        showLoginPage(msg);
+                    }
+                }, 600);
+            }
+        }
+
+        @Override
+        public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+            // WebView renderer crashed (OOM, GPU failure, etc.)
+            // Reset state and recover by showing the login page.
+            AppLog.e(TAG, "WebView renderer crashed! didCrash=" + detail.didCrash());
+            webViewConnected = false;
+            loadErrorPending = false;
+            cancelConnectionTimeout();
+            // The WebView is in an unusable state — destroy and recreate it.
+            // Simply showing the login page won't work because the renderer is dead.
+            runOnUiThread(() -> recreateWebViewAfterCrash(view));
+            return true; // We handled the crash — don't let the default behavior show a blank screen
+        }
+    }
+
+    /**
+     * Show SSL confirmation dialog for non-localhost HTTPS servers.
+     * Separated from WebViewClient for testability — the logic branches are tested
+     * in WebViewClient; this method only handles the UI dialog creation.
+     */
+    void showSslConfirmationDialog(SslErrorHandler handler) {
+        final boolean[] handlerUsed = {false};
+        new AlertDialog.Builder(this)
+                .setTitle("SSL 证书验证失败")
+                .setMessage("服务器使用了自签名证书，连接可能不安全。\n\n仅当您信任该服务器时才继续。")
+                .setPositiveButton("信任并继续", (dialog, which) -> {
+                    handlerUsed[0] = true;
+                    handler.proceed();
+                })
+                .setNegativeButton("取消连接", (dialog, which) -> {
+                    handlerUsed[0] = true;
+                    handler.cancel();
+                })
+                .setOnDismissListener(dialog -> {
+                    if (!handlerUsed[0]) {
+                        handler.cancel();
+                    }
+                })
+                .setCancelable(false)
+                .show();
+    }
+
+    /**
+     * Recreate the WebView after a renderer crash.
+     * Separated for testability — the core state reset happens in onRenderProcessGone
+     * before this is called. This method only handles the UI recovery.
+     */
+    void recreateWebViewAfterCrash(WebView crashedView) {
+        try {
+            android.view.ViewGroup parent = (android.view.ViewGroup) crashedView.getParent();
+            int index = parent.indexOfChild(crashedView);
+            parent.removeView(crashedView);
+            crashedView.destroy();
+            WebView newView = new WebView(this);
+            parent.addView(newView, index);
+            webView = newView;
+            setupWebView();
+            showLoginPage("页面渲染异常，请重新连接。");
+        } catch (Exception e) {
+            AppLog.e(TAG, "Failed to recreate WebView after crash", e);
+            finish();
         }
     }
 
@@ -708,12 +1354,12 @@ public class MainActivity extends AppCompatActivity {
 
         /**
          * Check whether the SSH tunnel is currently connected.
-         * Queries the PortForwardService's SSH session state.
+         * Queries the BackgroundService's SSH session state.
          * Returns true if connected, false if disconnected or service not running.
          */
         @JavascriptInterface
         public boolean isTunnelConnected() {
-            return PortForwardService.isTunnelConnected();
+            return BackgroundService.isTunnelConnected();
         }
 
         /**
@@ -724,7 +1370,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public String getTunnelError() {
-            String err = PortForwardService.getLastError();
+            String err = BackgroundService.getLastError();
             return err != null ? err : "";
         }
 
@@ -735,21 +1381,22 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public String getTunnelErrorType() {
-            String type = PortForwardService.getErrorType();
+            String type = BackgroundService.getErrorType();
             return type != null ? type : "";
         }
 
         /**
          * Add a port to be forwarded via SSH tunnel.
-         * The PortForwardService creates a local port forward: localhost:{port} → server:{port}
+         * The BackgroundService creates a local port forward: localhost:{port} → server:{port}
          * WebView can then access http://localhost:{port} directly.
          * Also requests battery optimization exemption on first port forward.
          */
         @JavascriptInterface
-        public void addForwardedPort(int port) {
+        public void addForwardedPort(int localPort, int targetPort, String host) {
+            AppLog.i(TAG, "addForwardedPort: localPort=" + localPort + ", targetPort=" + targetPort + ", host=" + host);
             activity.runOnUiThread(() -> {
-                activity.forwardedPorts.add(port);
-                PortForwardService.addForwardedPort(activity, port);
+                activity.forwardedPorts.put(localPort, host != null ? host : "");
+                BackgroundService.addForwardedPort(activity, localPort, targetPort, host != null ? host : "");
 
                 // Request battery optimization exemption if not already granted.
                 // Re-check every time in case the user previously dismissed the dialog.
@@ -776,14 +1423,14 @@ public class MainActivity extends AppCompatActivity {
                         Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
                         intent.setData(Uri.parse("urn:android:pkg:" + packageName));
                         activity.startActivity(intent);
-                        PortForwardService.setBatteryOptRequested(activity);
+                        BackgroundService.setBatteryOptRequested(activity);
                         AppLog.i(TAG, "Requested battery optimization exemption");
                     } catch (Exception e) {
                         AppLog.w(TAG, "Failed to request battery optimization exemption", e);
                     }
                 } else {
                     // Already whitelisted, just mark as requested
-                    PortForwardService.setBatteryOptRequested(activity);
+                    BackgroundService.setBatteryOptRequested(activity);
                 }
             }
         }
@@ -795,27 +1442,38 @@ public class MainActivity extends AppCompatActivity {
         public void removeForwardedPort(int port) {
             activity.runOnUiThread(() -> {
                 activity.forwardedPorts.remove(port);
-                PortForwardService.removeForwardedPort(activity, port);
+                BackgroundService.removeForwardedPort(activity, port);
             });
         }
 
         /**
-         * Stop the PortForwardService and disconnect SSH.
+         * Stop the BackgroundService and disconnect SSH.
          * Called from WebView when server reports no forwarded ports,
          * to avoid running an idle foreground service with no work to do.
          */
         @JavascriptInterface
-        public void stopPortForwardService() {
+        public void stopBackgroundService() {
             activity.runOnUiThread(() -> {
-                AppLog.i(TAG, "WebView requested PortForwardService stop (no ports on server)");
+                AppLog.i(TAG, "WebView requested BackgroundService stop (no ports on server)");
                 activity.forwardedPorts.clear();
-                PortForwardService.stop(activity);
+                BackgroundService.stop(activity);
             });
         }
 
         @JavascriptInterface
         public String getForwardedPorts() {
-            return new JSONArray(activity.forwardedPorts).toString();
+            try {
+                JSONArray arr = new JSONArray();
+                for (Map.Entry<Integer, String> entry : activity.forwardedPorts.entrySet()) {
+                    org.json.JSONObject obj = new org.json.JSONObject();
+                    obj.put("port", entry.getKey());
+                    obj.put("host", entry.getValue());
+                    arr.put(obj);
+                }
+                return arr.toString();
+            } catch (Exception e) {
+                return "[]";
+            }
         }
 
         @JavascriptInterface
@@ -875,9 +1533,11 @@ public class MainActivity extends AppCompatActivity {
          * Called from the port forwarding panel "open" button.
          */
         @JavascriptInterface
-        public void openInBrowser(int port, String protocol) {
+        public void openInBrowser(int port, String protocol, String host) {
+            AppLog.i(TAG, "openInBrowser: port=" + port + ", protocol=" + protocol + ", host=" + host);
             activity.runOnUiThread(() -> {
                 String scheme = "https".equalsIgnoreCase(protocol) ? "https" : "http";
+                // External browser accesses the SSH tunnel on localhost, not the original host
                 String url = scheme + "://localhost:" + port;
                 Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -891,14 +1551,55 @@ public class MainActivity extends AppCompatActivity {
          * Called from the port forwarding panel "open" button (preferred over openInBrowser).
          */
         @JavascriptInterface
-        public void openInSandbox(int port, String protocol) {
+        public void openInSandbox(int port, String protocol, String host) {
+            AppLog.i(TAG, "openInSandbox: port=" + port + ", protocol=" + protocol + ", host=" + host);
             activity.runOnUiThread(() -> {
                 String scheme = "https".equalsIgnoreCase(protocol) ? "https" : "http";
                 Intent intent = new Intent(activity, BrowserActivity.class);
                 intent.putExtra("port", port);
                 intent.putExtra("protocol", scheme);
+                intent.putExtra("host", host != null ? host : "");
                 activity.startActivity(intent);
             });
+        }
+
+        /**
+         * Test whether a local forwarded port is reachable by attempting a TCP connect.
+         * Uses a short timeout (3s) since we're connecting to localhost.
+         * Returns true if the port accepts a TCP connection, false otherwise.
+         * Used by the frontend to verify tunnel health before opening a port.
+         */
+        @JavascriptInterface
+        public boolean testPortReachable(int port) {
+            if (port <= 0 || port > 65535) return false;
+            try (java.net.Socket socket = new java.net.Socket()) {
+                socket.connect(new java.net.InetSocketAddress("127.0.0.1", port), 3000);
+                return true;
+            } catch (Exception e) {
+                AppLog.d(TAG, "testPortReachable: port " + port + " unreachable: " + e.getMessage());
+                return false;
+            }
+        }
+
+        /**
+         * Force-reconnect the SSH tunnel.
+         * Disconnects the current (possibly stale) session and establishes a new one.
+         * Returns true if reconnection succeeded (port forwards re-established),
+         * false if reconnection failed or timed out.
+         * This is a blocking call (up to 15s) — runs on the JavaBridge thread.
+         */
+        @JavascriptInterface
+        public boolean reconnectTunnel() {
+            if (!BackgroundService.isRunning()) {
+                AppLog.w(TAG, "reconnectTunnel: BackgroundService not running");
+                return false;
+            }
+            try {
+                return BackgroundService.forceReconnect(15000);
+            } catch (Exception e) {
+                AppLog.e(TAG, "reconnectTunnel: failed", e);
+                return false;
+            }
         }
 
         /**
@@ -916,7 +1617,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void setSSHPassword(String pwd) {
-            PortForwardService.setPassword(activity, pwd);
+            BackgroundService.setPassword(activity, pwd);
         }
 
         /**
@@ -979,6 +1680,54 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public void setVolumeKeyMode(boolean enabled) {
             activity.volumeKeyMode = enabled;
+        }
+
+        /**
+         * Get the JPush registration ID for push notifications.
+         * The WebView calls this on WS connect to register the device for push.
+         */
+        @JavascriptInterface
+        public String getPushRegistrationId() {
+            return JPushInterface.getRegistrationID(activity);
+        }
+
+        /**
+         * Check whether push notifications are available.
+         * Returns true if JPush was initialized with a valid AppKey from the server.
+         * When push is available, the frontend can safely disconnect WebSocket on background;
+         * when not available, WebSocket must stay alive for real-time events.
+         */
+        @JavascriptInterface
+        public boolean isPushAvailable() {
+            return activity.pushAvailable;
+        }
+
+        /**
+         * Open a chat session by dispatching an event to the WebView.
+         * Called by JPushReceiver when a push notification is tapped.
+         */
+        @JavascriptInterface
+        public void openSession(String sessionId) {
+            activity.runOnUiThread(() -> {
+                activity.webView.evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('clawbench-open-session', { detail: { sessionId: '" + sessionId + "' } }))",
+                    null
+                );
+            });
+        }
+
+        /**
+         * Returns pending navigation data from a notification tap that occurred
+         * before the WebView was loaded (cold start). Returns null if none pending.
+         * Called by the frontend on mount to handle deferred deep links.
+         */
+        @JavascriptInterface
+        public String getPendingNavigation() {
+            org.json.JSONObject nav = activity.pendingNavigation;
+            activity.pendingNavigation = null;
+            String result = nav != null ? nav.toString() : null;
+            AppLog.i(TAG, "MainActivity: getPendingNavigation called, returning=" + result);
+            return result;
         }
 
         /**

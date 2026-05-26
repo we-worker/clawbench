@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import {
   registerSessionActions,
+  registerSessionDrawerRef,
   useSessionIdentity,
 } from '@/composables/useSessionIdentity.ts'
 
@@ -197,6 +198,25 @@ describe('identity refs', () => {
     runningSessions.value.clear()
   })
 
+  it('runningSessionsVersion is exposed and can be incremented', () => {
+    const { runningSessionsVersion } = useSessionIdentity()
+    const initial = runningSessionsVersion.value
+    runningSessionsVersion.value = initial + 1
+    expect(runningSessionsVersion.value).toBe(initial + 1)
+    // Clean up
+    runningSessionsVersion.value = initial
+  })
+
+  it('runningSessionsVersion is shared across instances', () => {
+    const instance1 = useSessionIdentity()
+    const instance2 = useSessionIdentity()
+    const initial = instance1.runningSessionsVersion.value
+    instance1.runningSessionsVersion.value = initial + 5
+    expect(instance2.runningSessionsVersion.value).toBe(initial + 5)
+    // Clean up
+    instance1.runningSessionsVersion.value = initial
+  })
+
   it('currentSessionId is writable and shared across instances', () => {
     const instance1 = useSessionIdentity()
     const instance2 = useSessionIdentity()
@@ -206,5 +226,46 @@ describe('identity refs', () => {
 
     // Clean up
     instance1.currentSessionId.value = ''
+  })
+
+  it('sessionDrawerOpen is exposed and defaults to false', () => {
+    const { sessionDrawerOpen } = useSessionIdentity()
+    expect(sessionDrawerOpen.value).toBe(false)
+  })
+
+  it('openSessionTab sets sessionDrawerOpen to true', () => {
+    const { sessionDrawerOpen, openSessionTab } = useSessionIdentity()
+    expect(sessionDrawerOpen.value).toBe(false)
+    openSessionTab()
+    expect(sessionDrawerOpen.value).toBe(true)
+    // Clean up
+    sessionDrawerOpen.value = false
+  })
+
+  it('openAgentSelector delegates to registered drawer ref', () => {
+    const mockOpenAgentSelector = vi.fn()
+    registerSessionDrawerRef({ openAgentSelector: mockOpenAgentSelector })
+    const { openAgentSelector } = useSessionIdentity()
+    openAgentSelector()
+    expect(mockOpenAgentSelector).toHaveBeenCalled()
+  })
+
+  it('openAgentSelector does nothing when no drawer ref registered', () => {
+    registerSessionDrawerRef(null)
+    const { openAgentSelector } = useSessionIdentity()
+    // Should not throw
+    expect(() => openAgentSelector()).not.toThrow()
+  })
+
+  it('registerSessionDrawerRef can be updated', () => {
+    const firstRef = { openAgentSelector: vi.fn() }
+    const secondRef = { openAgentSelector: vi.fn() }
+    registerSessionDrawerRef(firstRef)
+    const { openAgentSelector } = useSessionIdentity()
+    openAgentSelector()
+    expect(firstRef.openAgentSelector).toHaveBeenCalled()
+    registerSessionDrawerRef(secondRef)
+    openAgentSelector()
+    expect(secondRef.openAgentSelector).toHaveBeenCalled()
   })
 })

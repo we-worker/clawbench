@@ -14,6 +14,7 @@ import (
 	i18npkg "clawbench/internal/i18n"
 	"clawbench/internal/middleware"
 	"clawbench/internal/model"
+	"clawbench/internal/ws"
 )
 
 // loc returns the Localizer for the current request.
@@ -218,6 +219,9 @@ func RegisterRoutes(mux *http.ServeMux) {
 	register("/dialog/project", middleware.Auth(ServeProjectDialog))
 	register("/api/me", ServeAuthCheck)
 	register("/api/watch-dir", middleware.Auth(ServeWatchDir))
+	register("/api/config", middleware.Auth(ServeConfig))
+	register("/api/config/restart", middleware.Auth(ServeConfigRestart))
+	register("/api/config/password", middleware.Auth(ServeConfigPassword))
 	register("/api/projects", middleware.Auth(ServeProjects))
 	register("/api/project", middleware.Auth(ServeProjectSet))
 	register("/api/ai/chat", middleware.Auth(AIChat))
@@ -236,6 +240,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 	register("/api/file/thumb", middleware.Auth(FileThumb))
 	register("/api/file/", middleware.Auth(GetFile))
 	register("/api/git/branch", middleware.Auth(ServeGitBranch))
+	register("/api/git/branches", middleware.Auth(ServeGitBranches))
 	register("/api/git/project-history", middleware.Auth(ServeGitProjectHistory))
 	register("/api/git/init", middleware.Auth(ServeGitInit))
 	register("/api/git/file-diff", middleware.Auth(ServeGitFileDiff))
@@ -245,10 +250,15 @@ func RegisterRoutes(mux *http.ServeMux) {
 	register("/api/git/status", middleware.Auth(ServeGitStatus))
 	register("/api/git/working-tree", middleware.Auth(ServeGitWorkingTreeFiles))
 	register("/api/git/verify-commits", middleware.Auth(ServeGitVerifyCommits))
+	register("/api/git/verify-worktrees", middleware.Auth(ServeGitVerifyWorktrees))
+	register("/api/git/worktrees", middleware.Auth(ServeGitWorktrees))
+	register("/api/git/checkout", middleware.Auth(ServeGitCheckout))
+	register("/api/git/tags", middleware.Auth(ServeGitTags))
 	register("/api/file/rename", middleware.Auth(ServeFileRename))
 	register("/api/file/edit-line", middleware.Auth(ServeFileEditLine))
 	register("/api/file/delete", middleware.Auth(ServeFileDelete))
 	register("/api/file/batch-delete", middleware.Auth(ServeFileBatchDelete))
+	register("/api/file/batch-exists", middleware.Auth(ServeFileBatchExists))
 	register("/api/file/create", middleware.Auth(ServeFileCreate))
 	register("/api/file/copy", middleware.Auth(ServeFileCopy))
 	register("/api/dir/create", middleware.Auth(ServeDirCreate))
@@ -279,8 +289,17 @@ func RegisterRoutes(mux *http.ServeMux) {
 	register("/api/proxy/ports", middleware.Auth(ServeProxyPortAction))
 	register("/api/proxy/detect", middleware.Auth(ServeProxyDetect))
 
+	// Push config — intentionally unauthenticated:
+	// Android native layer calls this before WebView loads (no cookies)
+	// to discover JPush AppKey at runtime. Only exposes enabled flag and
+	// AppKey — no secrets or credentials.
+	register("/api/push/config", ServePushConfig)
+
+	// Push registration is now done via WS "register" message (see events.go).
+	// No need for a separate HTTP endpoint.
+
 	// SSH tunnel info — intentionally unauthenticated:
-	// 1. Android PortForwardService.fetchSSHPort() calls this from native Java
+	// 1. Android BackgroundService.fetchSSHPort() calls this from native Java
 	//    (no WebView cookies available) to discover the SSH port before connecting.
 	// 2. Without this, fetchSSHPort gets 401, falls back to httpPort+1 (wrong port),
 	//    and SSH tunnel silently fails with no error reported to the user.
@@ -295,6 +314,11 @@ func RegisterRoutes(mux *http.ServeMux) {
 	register("/api/terminal/config", middleware.Auth(TerminalConfigHandler))
 	register("/api/terminal/quick-commands", middleware.Auth(ServeQuickCommands))
 	register("/api/terminal/quick-commands/", middleware.Auth(ServeQuickCommandByID))
+
+	// Global event WebSocket (replaces polling for session/task status)
+	register("/api/ai/events/ws", middleware.Auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws.EventsHandler(w, r)
+	})))
 
 	// Chat quick-send (CRUD for quick-send presets stored in database)
 	register("/api/chat/quick-send", middleware.Auth(ServeChatQuickSend))

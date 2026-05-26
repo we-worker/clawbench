@@ -1,10 +1,11 @@
 package handler
 
 import (
-	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -31,11 +32,11 @@ type loginLimiter struct {
 }
 
 const (
-	maxLoginFails       = 5
-	initialLoginBlock   = 5 * time.Minute
-	maxLoginBlock       = 1 * time.Hour
+	maxLoginFails    = 5
+	initialLoginBlock = 5 * time.Minute
+	maxLoginBlock     = 1 * time.Hour
 	loginCleanupInterval = 10 * time.Minute
-	loginRecordTTL       = 30 * time.Minute
+	loginRecordTTL    = 30 * time.Minute
 )
 
 var (
@@ -112,17 +113,10 @@ func (l *loginLimiter) cleanupLoop() {
 	}
 }
 
-func extractIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
 // --- Auth handlers ---
 
 // ServeAuthCheck returns 200 if the session cookie is valid, 401 otherwise.
+// All requests (including localhost) require a valid cookie.
 func ServeAuthCheck(w http.ResponseWriter, r *http.Request) {
 	if model.SessionToken == "" {
 		// No password set, always authenticated
@@ -145,7 +139,10 @@ func ServeLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost {
-		remoteIP := extractIP(r)
+		remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if remoteIP == "" {
+			remoteIP = r.RemoteAddr
+		}
 
 		// Rate limiting check (ISS-003c)
 		limiter := getLoginLimiter()
@@ -156,34 +153,47 @@ func ServeLogin(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var body struct{ Password string }
-		json.NewDecoder(r.Body).Decode(&body)
+		// ISS-118: Limit request body to 4KB to prevent memory exhaustion DoS.
+		// A password never needs more than a few hundred bytes.
+		limitedReader := io.LimitReader(r.Body, 4*1024)
+		json.NewDecoder(limitedReader).Decode(&body)
 
-		// Use bcrypt for password verification (ISS-003a)
+		// Password verification (ISS-003a)
 		var authenticated bool
 		if model.SessionToken == "" {
 			// No password configured
 			authenticated = true
+		} else if model.PasswordIsSHA256 {
+			// Password stored as SHA-256 hash — hash the submitted password and compare
+			hash := sha256.Sum256([]byte(body.Password + "clawbench-salt"))
+			candidate := hex.EncodeToString(hash[:])
+			authenticated = subtle.ConstantTimeCompare([]byte(candidate), []byte(model.SessionToken)) == 1
 		} else if model.PasswordHash != nil {
-			// bcrypt verification
+			// bcrypt verification (plaintext password in config)
 			authenticated = bcrypt.CompareHashAndPassword(model.PasswordHash, []byte(body.Password)) == nil
 		} else {
-			// Fallback: SHA-256 for backward compatibility (shouldn't happen after startup fix)
-			token := model.SessionTokenForPassword(body.Password)
-			authenticated = subtle.ConstantTimeCompare([]byte(token), []byte(model.SessionToken)) == 1
+			// No bcrypt hash available — bcrypt generation must have failed at startup.
+			// Reject the login rather than falling back to insecure comparison.
+			slog.Error("password hash not available, rejecting login", slog.String("remoteIP", remoteIP))
+			writeLocalizedError(w, r, model.Internal(nil))
+			limiter.recordFailure(remoteIP)
+			return
 		}
 
 		if authenticated {
 			limiter.reset(remoteIP)
-			// Generate session token (used as cookie value, not password hash)
+			// Generate session token (SHA-256 of password + salt — used as cookie value, not password hash)
 			sessionToken := model.SessionToken
 			if sessionToken == "" {
-				sessionToken = model.SessionTokenForPassword(body.Password)
+				hash := sha256.Sum256([]byte(body.Password + "clawbench-salt"))
+				sessionToken = hex.EncodeToString(hash[:])
 			}
 			http.SetCookie(w, &http.Cookie{
 				Name:     model.SessionCookie,
 				Value:    sessionToken,
 				Path:     "/",
 				HttpOnly: true,
+				Secure:   r.TLS != nil,
 				MaxAge:   int(7 * 24 * 3600),
 				SameSite: http.SameSiteLaxMode,
 			})
@@ -197,14 +207,4 @@ func ServeLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeLocalizedErrorf(w, r, http.StatusMethodNotAllowed, "MethodNotAllowed")
-}
-
-// GenerateSecureRandom produces cryptographically secure random bytes.
-// Panics on failure (ISS-003d) — random generation failure is a fatal security error.
-func GenerateSecureRandom(n int) ([]byte, error) {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return nil, fmt.Errorf("crypto/rand.Read failed: %w", err)
-	}
-	return b, nil
 }

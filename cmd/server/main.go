@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -25,6 +27,8 @@ import (
 	"clawbench/internal/speech"
 	"clawbench/internal/summarize"
 	"clawbench/internal/terminal"
+	"clawbench/internal/push"
+	"clawbench/internal/ws"
 )
 
 // multiHandler sends log records to multiple handlers
@@ -65,6 +69,58 @@ func (h *multiHandler) WithGroup(name string) slog.Handler {
 		newHandlers[i] = handler.WithGroup(name)
 	}
 	return &multiHandler{handlers: newHandlers}
+}
+
+// buildLogHandlers constructs the list of slog handlers for the multi-handler.
+// If fileHandler is nil (e.g., file logging failed to initialize), only the
+// text handler is used; otherwise both are included.
+func buildLogHandlers(textHandler, fileHandler slog.Handler) []slog.Handler {
+	handlers := []slog.Handler{textHandler}
+	if fileHandler != nil {
+		handlers = append(handlers, fileHandler)
+	}
+	return handlers
+}
+
+// ensureWatchDir creates the watch directory if it doesn't exist.
+// Logs a warning on failure instead of exiting, since the server can still
+// function without file watching.
+func ensureWatchDir(dir string) {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		slog.Warn("failed to create watch directory", slog.String("dir", dir), slog.String("err", err.Error()))
+	}
+}
+
+// generateBcryptHash creates a bcrypt hash of the given password.
+// If bcrypt generation fails (e.g., password too long), it logs a warning
+// and returns nil, causing the auth system to fall back to SHA256.
+func generateBcryptHash(password string) []byte {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		slog.Warn("failed to generate bcrypt hash, password verification will use SHA256 fallback", slog.String("err", err.Error()))
+		return nil
+	}
+	return hash
+}
+
+// makeRestartFunc returns the function called when a server restart is requested.
+// Under a supervisor (systemd/Docker), it just triggers graceful shutdown and
+// lets the supervisor restart the process. Otherwise, it launches a sentinel
+// process that waits for this process to exit, then starts a new one.
+func makeRestartFunc(shutdown func()) func() {
+	return func() {
+		if handler.IsRunningUnderSupervisor() {
+			slog.Info("running under supervisor, triggering graceful shutdown for restart")
+		} else {
+			cmd, err := handler.LaunchSentinelProcess()
+			if err != nil {
+				slog.Error("failed to launch sentinel process for restart", "err", err)
+				return
+			}
+			slog.Info("sentinel process launched for restart", "sentinel_pid", cmd.Process.Pid)
+		}
+		shutdown()
+	}
 }
 
 func main() {
@@ -116,8 +172,6 @@ func main() {
 	// Search for config in priority order:
 	// 1. <BinDir>/config/config.yaml (green portable: next to binary)
 	// 2. config/config.yaml (CWD-relative, standard layout)
-	// 3. <BinDir>/config.yaml (legacy: next to binary)
-	// 4. config.yaml (legacy: CWD root)
 	configPath := cli.FindConfigPath(model.BinDir)
 
 	data, err := os.ReadFile(configPath)
@@ -152,9 +206,11 @@ func main() {
 	model.UploadMaxFiles = cfg.Upload.MaxFiles
 	model.ChatInitialMessages = cfg.Chat.InitialMessages
 	model.ChatPageSize = cfg.Chat.PageSize
+	model.ChatSessionPageSize = cfg.Chat.SessionPageSize
 	model.ChatCollapsedHeight = cfg.Chat.CollapsedHeight
 	model.ChatSystemPromptInterval = cfg.Chat.SystemPromptInterval
 	model.SessionMaxCount = cfg.Session.MaxCount
+	model.RecentProjectsMaxCount = cfg.RecentProjects.MaxCount
 	model.TTSMaxCacheFiles = cfg.TTS.MaxCacheFiles
 
 	// Apply TTS text processing config (defaults applied in ApplyDefaults)
@@ -163,7 +219,7 @@ func main() {
 
 	// Initialize TTS summarizer from config
 	// Language is now per-request (sent from frontend), not configured at startup.
-	summarizeBackend := cfg.TTS.SummarizeBackend
+	summarizeBackend := cfg.Summarize.Backend
 
 	var ttsSummarizer summarize.Summarizer
 	if summarizeBackend == "simple" {
@@ -171,26 +227,13 @@ func main() {
 		slog.Info("tts summarizer configured",
 			slog.String("backend", "simple"),
 		)
-	} else if summarizeBackend == "mmx-cli" {
-		s := summarize.NewMMX()
-		if cfg.TTS.SummarizeModel != "" {
-			s.Model = cfg.TTS.SummarizeModel
-		}
-		ttsSummarizer = s
-		slog.Info("tts summarizer configured",
-			slog.String("backend", "mmx-cli"),
-			slog.String("model", s.Model),
-		)
 	} else if summarizeBackend == "api" {
-		if cfg.TTS.API.BaseURL == "" {
-			slog.Error("tts summarize_backend is \"api\" but tts.api.base_url is not configured")
+		if cfg.Summarize.API.BaseURL == "" {
+			slog.Error("summarize.backend is \"api\" but summarize.api.base_url is not configured")
 			os.Exit(1)
 		}
-		if cfg.TTS.API.Format == "anthropic" {
-			s := summarize.NewAnthropic(cfg.TTS.API.BaseURL, cfg.TTS.API.Key, cfg.TTS.API.Model)
-			if cfg.TTS.SummarizeModel != "" {
-				s.Model = cfg.TTS.SummarizeModel
-			}
+		if cfg.Summarize.API.Format == "anthropic" {
+			s := summarize.NewAnthropic(cfg.Summarize.API.BaseURL, cfg.Summarize.API.Key, cfg.Summarize.Model)
 			ttsSummarizer = s
 			slog.Info("tts summarizer configured",
 				slog.String("backend", "api"),
@@ -198,10 +241,7 @@ func main() {
 				slog.String("model", s.Model),
 			)
 		} else {
-			s := summarize.NewOpenAI(cfg.TTS.API.BaseURL, cfg.TTS.API.Key, cfg.TTS.API.Model)
-			if cfg.TTS.SummarizeModel != "" {
-				s.Model = cfg.TTS.SummarizeModel
-			}
+			s := summarize.NewOpenAI(cfg.Summarize.API.BaseURL, cfg.Summarize.API.Key, cfg.Summarize.Model)
 			ttsSummarizer = s
 			slog.Info("tts summarizer configured",
 				slog.String("backend", "api"),
@@ -212,17 +252,13 @@ func main() {
 	} else {
 		s, err := summarize.NewAIBackendSummarizer(summarizeBackend)
 		if err != nil {
-			slog.Error("failed to create AI backend summarizer, falling back to mmx-cli",
+			slog.Error("failed to create AI backend summarizer, falling back to simple",
 				slog.String("backend", summarizeBackend),
 				slog.String("error", err.Error()),
 			)
-			fallback := summarize.NewMMX()
-			if cfg.TTS.SummarizeModel != "" {
-				fallback.Model = cfg.TTS.SummarizeModel
-			}
-			ttsSummarizer = fallback
+			ttsSummarizer = summarize.NewSimple()
 		} else {
-			s.Model = cfg.TTS.SummarizeModel // empty = use backend default
+			s.Model = cfg.Summarize.Model // empty = use backend default
 			ttsSummarizer = s
 			slog.Info("tts summarizer configured",
 				slog.String("backend", summarizeBackend),
@@ -324,35 +360,34 @@ func main() {
 			slog.String("voice", m.Voice),
 		)
 	default:
-		p := speech.NewMiniMaxProvider()
-		if cfg.TTS.TTSModel != "" {
-			p.TTSModel = cfg.TTS.TTSModel
-		}
+		// Default to Edge TTS when engine is empty or unrecognized
+		p := speech.NewEdgeTTSProvider()
 		if cfg.TTS.Voice != "" {
-			p.TTSVoice = cfg.TTS.Voice
+			p.Voice = cfg.TTS.Voice
 		}
 		if cfg.TTS.Speed > 0 {
-			p.TTSSpeed = cfg.TTS.Speed
-		}
-		if cfg.TTS.Format != "" {
-			p.TTSFormat = cfg.TTS.Format
+			ratePercent := int((cfg.TTS.Speed - 1.0) * 100)
+			if ratePercent > 0 {
+				p.Rate = fmt.Sprintf("+%d%%", ratePercent)
+			} else if ratePercent < 0 {
+				p.Rate = fmt.Sprintf("%d%%", ratePercent)
+			}
 		}
 		ttsProvider = p
 		slog.Info("tts provider configured",
-			slog.String("engine", "minimax"),
-			slog.String("tts_model", p.TTSModel),
-			slog.String("voice", p.TTSVoice),
-			slog.Float64("speed", p.TTSSpeed),
+			slog.String("engine", "edge"),
+			slog.String("voice", p.Voice),
+			slog.String("rate", p.Rate),
 		)
 	}
 	handler.SetSpeechProvider(ttsProvider)
 
 	fileHandler, err := service.NewFileHandler(cfg.LogDir, "clawbench", cfg.LogMaxDays)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize file logger: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "Warning: failed to initialize file logger, logging to stderr only: %v\n", err)
+	} else {
+		defer fileHandler.Close()
 	}
-	defer fileHandler.Close()
 
 	// Log level from config (default: "info")
 	logLevel := slog.LevelInfo
@@ -368,7 +403,7 @@ func main() {
 	// Create a multi-writer for both stderr and file
 	textHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})
 	multiHandler := &multiHandler{
-		handlers: []slog.Handler{textHandler, fileHandler},
+		handlers: buildLogHandlers(textHandler, fileHandler),
 	}
 	slog.SetDefault(slog.New(multiHandler))
 	slog.Info("server starting")
@@ -402,37 +437,38 @@ func main() {
 		fmt.Printf("Auto-generated password: %s\n", autoPassword)
 	}
 
-	// Hash the password for session comparison
-	model.SessionToken = model.SessionTokenForPassword(cfg.Password)
-
-	// Generate bcrypt hash for secure password verification (ISS-003a)
-	if cfg.Password != "" {
-		bcryptHash, err := bcrypt.GenerateFromPassword([]byte(cfg.Password), bcrypt.DefaultCost)
-		if err != nil {
-			slog.Error("failed to generate bcrypt hash", slog.String("err", err.Error()))
-			os.Exit(1)
+	// Initialize password verification state
+	if sha256Hash := model.ParseSHA256Hash(cfg.Password); sha256Hash != "" {
+		// Password is stored as SHA-256 hash — use directly as SessionToken
+		model.SessionToken = sha256Hash
+		model.PasswordIsSHA256 = true
+		// No bcrypt: the SHA-256 hash IS the verifier for login/SSH
+		model.PasswordHash = nil
+	} else {
+		// Plaintext password (or auto-generated) — existing behavior
+		hash := sha256.Sum256([]byte(cfg.Password + "clawbench-salt"))
+		model.SessionToken = hex.EncodeToString(hash[:])
+		model.PasswordIsSHA256 = false
+		// Generate bcrypt hash for secure password verification (ISS-003a)
+		if cfg.Password != "" {
+			bcryptHash := generateBcryptHash(cfg.Password)
+			model.PasswordHash = bcryptHash
 		}
-		model.PasswordHash = bcryptHash
 	}
 
 	// Ensure the watch directory exists
-	if err := os.MkdirAll(model.WatchDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create watch directory: %v\n", err)
-		os.Exit(1)
-	}
+	ensureWatchDir(model.WatchDir)
 
 	// Initialize SQLite database (runFromServer=true: clean up orphaned streaming messages)
 	if err := service.InitDB(true); err != nil {
 		slog.Error("failed to initialize database", slog.String("err", err.Error()))
 		os.Exit(1)
 	}
+	defer service.CloseDB()
 
-	// Initialize RAG history memory system (if enabled)
-	if cfg.RAG.Enabled {
-		if err := rag.Init(cfg.RAG); err != nil {
-			slog.Error("failed to initialize RAG system", slog.String("err", err.Error()))
-			os.Exit(1)
-		}
+	// Initialize RAG history memory system (always enabled)
+	if err := rag.Init(cfg.RAG); err != nil {
+		slog.Warn("failed to initialize RAG system, search will be limited", slog.String("err", err.Error()))
 	}
 	// Always defer shutdown — cleanup worker may be running even without RAG
 	defer rag.Shutdown()
@@ -516,18 +552,22 @@ func main() {
 	// Initialize and start scheduler (MUST be after LoadAgents so model.Agents is populated)
 	scheduler := service.NewScheduler()
 
-	// Initialize task summarizer if configured (MUST be before scheduler.Start())
-	if cfg.Tasks.SummarizeBackend != "" {
+	// Initialize task summarizer if summarization backend is configured (MUST be before scheduler.Start())
+	if cfg.Summarize.Backend != "" && cfg.Summarize.Backend != "simple" {
 		taskSummarizer, err := initTaskSummarizer(cfg)
 		if err != nil {
 			slog.Warn("failed to create task summarizer, task summaries will be disabled",
-				slog.String("backend", cfg.Tasks.SummarizeBackend),
+				slog.String("backend", cfg.Summarize.Backend),
 				slog.String("err", err.Error()),
 			)
 		} else {
 			scheduler.SetTaskSummarizer(taskSummarizer)
+			// Also set the global instance for AsyncSummarize (chat messages + task executions)
+			service.SetTaskSummarizerInstance(taskSummarizer)
+			// Configure chat message auto-summarization based on config
+			service.SetChatSummaryEnabled(cfg.Summarize.IsChatSummaryEnabled())
 			slog.Info("task summarizer configured",
-				slog.String("backend", cfg.Tasks.SummarizeBackend),
+				slog.String("backend", cfg.Summarize.Backend),
 			)
 		}
 	}
@@ -539,6 +579,17 @@ func main() {
 	scheduler.Start()
 	defer scheduler.Stop()
 	service.GlobalScheduler = scheduler
+
+	// Start periodic cleanup of stale WS subscriptions (every 60s)
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if mgr := ws.GetManager(); mgr != nil {
+				mgr.CleanupStale()
+			}
+		}
+	}()
 
 	host := cfg.Host
 	addr := fmt.Sprintf("%s:%d", host, port)
@@ -552,7 +603,7 @@ func main() {
 	}
 
 	// Initialize RAG indexer (needs final port number)
-	if cfg.RAG.Enabled && rag.GlobalStore != nil {
+	if rag.GlobalStore != nil {
 		// Start RAG indexer
 		rag.StartIndexer(cfg.RAG)
 	}
@@ -560,14 +611,17 @@ func main() {
 	// Start cleanup worker for soft-deleted data (runs even without RAG)
 	rag.StartCleanupWorker(cfg.RAG)
 
-	// Initialize proxy service (port forwarding) — needs the final port number
-	proxyService := service.NewProxyRegistry(cfg.Proxy, port)
-	service.ProxyService = proxyService
-	defer proxyService.Stop()
+	// Initialize proxy service (port forwarding) and SSH tunnel server.
+	// ProxyRegistry is only created when SSH tunnel is enabled — it has no
+	// standalone purpose without the SSH tunnel to transport traffic.
+	if cfg.PortForward.Enabled {
+		proxyService := service.NewProxyRegistry(port)
+		// Always apply config — empty AllowedPorts means "allow all ports"
+		proxyService.SetAllowedPorts(cfg.PortForward.AllowedPorts)
+		service.ProxyService = proxyService
+		defer proxyService.Stop()
 
-	// Initialize SSH tunnel server
-	if cfg.SSH.Enabled {
-		sshServer := ssh.NewServer(cfg.SSH, port, cfg.Password, proxyService)
+		sshServer := ssh.NewServer(cfg.PortForward, port, cfg.Password, proxyService)
 		handler.SetSSHServer(sshServer)
 		go func() {
 			if err := sshServer.ListenAndServe(); err != nil {
@@ -575,6 +629,8 @@ func main() {
 			}
 		}()
 		defer sshServer.Close()
+	} else {
+		slog.Info("SSH tunnel and port forwarding disabled by config")
 	}
 
 	// Initialize file watcher for auto-refresh (non-critical — continue on failure)
@@ -597,8 +653,18 @@ func main() {
 		)
 	}
 
+	// Initialize WS event manager
+	jpushClient := push.NewJPushClient(cfg.Push.JPush)
+	ws.InitManager(jpushClient)
+	handler.SetPushClient(jpushClient)
+
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
+
+	// Wire up the restart function for POST /api/config/restart
+	// The sentinel process approach: launch a watcher that starts a new process
+	// after this one exits, then trigger graceful shutdown.
+	handler.SetRestartFunc(makeRestartFunc(selfSignalInterrupt))
 
 	srv := &http.Server{Addr: addr, Handler: mux}
 
@@ -630,6 +696,7 @@ func main() {
 		}
 	}()
 
+httpServer:
 	if !cfg.TLS.Enabled {
 		// TLS disabled: plain HTTP
 		slog.Info("starting with HTTP")
@@ -648,8 +715,8 @@ func main() {
 			keyFile = os.Getenv("KEY_FILE")
 		}
 		if certFile == "" || keyFile == "" {
-			slog.Error("TLS enabled but cert_file and key_file are not configured")
-			os.Exit(1)
+			slog.Warn("TLS enabled but cert_file and key_file are not configured, falling back to HTTP")
+			goto httpServer
 		}
 		slog.Info("starting with TLS", slog.String("cert", certFile))
 
@@ -671,11 +738,11 @@ func main() {
 	slog.Info("server stopped")
 }
 
-// initTaskSummarizer creates a TaskSummarizer based on the tasks.summarize_backend config.
+// initTaskSummarizer creates a TaskSummarizer based on the summarize.backend config.
 // Supports: AI CLI backends (claude/codebuddy/gemini/etc.), "api" (OpenAI/Anthropic HTTP), "simple".
 func initTaskSummarizer(cfg model.Config) (*summarize.TaskSummarizer, error) {
-	backend := cfg.Tasks.SummarizeBackend
-	modelName := cfg.Tasks.SummarizeModel
+	backend := cfg.Summarize.Backend
+	modelName := cfg.Summarize.Model
 
 	switch {
 	case backend == "simple":
@@ -690,16 +757,13 @@ func initTaskSummarizer(cfg model.Config) (*summarize.TaskSummarizer, error) {
 		return summarize.NewTaskSummarizerFromPipeline(pipeline), nil
 
 	case backend == "api":
-		if cfg.TTS.API.BaseURL == "" {
-			return nil, fmt.Errorf("tasks.summarize_backend is \"api\" but tts.api.base_url is not configured")
+		if cfg.Summarize.API.BaseURL == "" {
+			return nil, fmt.Errorf("summarize.backend is \"api\" but summarize.api.base_url is not configured")
 		}
 		// For API backends, create OpenAI/Anthropic summarizer and wrap its pass function
 		// in a pipeline with PreserveMarkdown=true and task-specific prompt.
-		if cfg.TTS.API.Format == "anthropic" {
-			s := summarize.NewAnthropic(cfg.TTS.API.BaseURL, cfg.TTS.API.Key, cfg.TTS.API.Model)
-			if modelName != "" {
-				s.Model = modelName
-			}
+		if cfg.Summarize.API.Format == "anthropic" {
+			s := summarize.NewAnthropic(cfg.Summarize.API.BaseURL, cfg.Summarize.API.Key, modelName)
 			pipeline := summarize.NewPipelineWithOpts(
 				s.DoSummarizePass,
 				summarize.TaskSummarizePrompt(),
@@ -707,10 +771,7 @@ func initTaskSummarizer(cfg model.Config) (*summarize.TaskSummarizer, error) {
 			)
 			return summarize.NewTaskSummarizerFromPipeline(pipeline), nil
 		}
-		s := summarize.NewOpenAI(cfg.TTS.API.BaseURL, cfg.TTS.API.Key, cfg.TTS.API.Model)
-		if modelName != "" {
-			s.Model = modelName
-		}
+		s := summarize.NewOpenAI(cfg.Summarize.API.BaseURL, cfg.Summarize.API.Key, modelName)
 		pipeline := summarize.NewPipelineWithOpts(
 			s.DoSummarizePass,
 			summarize.TaskSummarizePrompt(),

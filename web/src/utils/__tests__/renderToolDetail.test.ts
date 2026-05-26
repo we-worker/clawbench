@@ -1,10 +1,19 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { ref } from 'vue'
 import {
   formatToolInput,
+  formatToolOutput,
   shouldAutoExpandTool,
   registerToolRenderer,
+  registerToolActionHandler,
   handleToolAction,
 } from '@/utils/renderToolDetail.ts'
+
+// ── Mock for useAppMode (controlled via mutable ref) ──
+const mockIsAppMode = ref(false)
+vi.mock('@/composables/useAppMode.ts', () => ({
+  useAppMode: () => ({ isAppMode: mockIsAppMode }),
+}))
 
 // ── Helpers ──
 
@@ -367,5 +376,792 @@ describe('handleToolAction', () => {
     const event = new MouseEvent('click')
     const emit = vi.fn()
     expect(handleToolAction('UnknownTool', event, emit)).toBe(false)
+  })
+})
+
+// ────────────────────────────────────────────────────────────
+// formatToolOutput
+// ────────────────────────────────────────────────────────────
+
+describe('formatToolOutput', () => {
+  it('returns empty string for empty output', () => {
+    expect(formatToolOutput('')).toBe('')
+    expect(formatToolOutput('', 'Bash')).toBe('')
+  })
+
+  it('wraps Bash tool output in bash-output-body', () => {
+    const html = formatToolOutput('hello world', 'Bash')
+    expect(html).toContain('bash-output-body')
+    expect(html).toContain('<pre>')
+    expect(html).toContain('hello world')
+    expect(html).toContain('</pre>')
+  })
+
+  it('wraps non-Bash tool output in tool-output-default', () => {
+    const html = formatToolOutput('some result', 'Read')
+    expect(html).toContain('tool-output-default')
+    expect(html).toContain('<pre>')
+    expect(html).toContain('some result')
+    expect(html).toContain('</pre>')
+  })
+
+  it('wraps output without tool name in tool-output-default', () => {
+    const html = formatToolOutput('some result')
+    expect(html).toContain('tool-output-default')
+    expect(html).toContain('some result')
+  })
+
+  it('escapes HTML in output', () => {
+    const html = formatToolOutput('<script>alert(1)</script>', 'Bash')
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;')
+  })
+
+  it('Bash tool name is case-insensitive', () => {
+    const html = formatToolOutput('output', 'BASH')
+    expect(html).toContain('bash-output-body')
+    const html2 = formatToolOutput('output', 'bash')
+    expect(html2).toContain('bash-output-body')
+  })
+
+  it('annotates localhost URLs in Bash output when in App mode', () => {
+    mockIsAppMode.value = true
+    const html = formatToolOutput('Server running at http://localhost:3000/api', 'Bash')
+    expect(html).toContain('chat-url-open-btn')
+    expect(html).toContain('data-port="3000"')
+    expect(html).toContain('data-protocol="http"')
+    mockIsAppMode.value = false
+  })
+
+  it('does not annotate localhost URLs when not in App mode', () => {
+    mockIsAppMode.value = false
+    const html = formatToolOutput('Server running at http://localhost:3000/api', 'Bash')
+    expect(html).not.toContain('chat-url-open-btn')
+    expect(html).toContain('http://localhost:3000/api')
+  })
+
+  it('annotates localhost URLs in non-Bash output when in App mode', () => {
+    mockIsAppMode.value = true
+    const html = formatToolOutput('See http://127.0.0.1:8080/test', 'Read')
+    expect(html).toContain('chat-url-open-btn')
+    expect(html).toContain('data-port="8080"')
+    mockIsAppMode.value = false
+  })
+
+  it('handles invalid port in localhost URL', () => {
+    mockIsAppMode.value = true
+    const html = formatToolOutput('http://localhost:99999/path', 'Bash')
+    // Port > 65535 should not be annotated
+    expect(html).not.toContain('chat-url-open-btn')
+    mockIsAppMode.value = false
+  })
+
+  it('handles HTTPS localhost URL in App mode', () => {
+    mockIsAppMode.value = true
+    const html = formatToolOutput('https://localhost:443/secure', 'Bash')
+    expect(html).toContain('chat-url-open-btn')
+    expect(html).toContain('data-protocol="https"')
+    mockIsAppMode.value = false
+  })
+
+  it('un-escapes &amp; in localhost URL for data attributes', () => {
+    mockIsAppMode.value = true
+    // Output after escapeHtml: & in query string becomes &amp;
+    // annotateLocalhostInEscapedText un-escapes &amp; → & for rawUrl, then escapeHtml re-escapes for attributes
+    const html = formatToolOutput('http://localhost:3000/path?a=1&b=2', 'Bash')
+    expect(html).toContain('chat-url-open-btn')
+    // The rawUrl un-escapes &amp; back to & then escapeHtml in href/data-url re-escapes to &amp;
+    expect(html).toContain('data-url="http://localhost:3000/path?a=1&amp;b=2"')
+    mockIsAppMode.value = false
+  })
+})
+
+// ────────────────────────────────────────────────────────────
+// Edit renderer — deep tests
+// ────────────────────────────────────────────────────────────
+
+describe('Edit renderer (deep)', () => {
+  it('shows replace_all badge when replace_all is true', () => {
+    const html = formatToolInput({ file_path: 'a.ts', old_string: 'x', new_string: 'y', replace_all: true }, 'Edit')
+    expect(html).toContain('edit-diff-replace-all')
+  })
+
+  it('hides replace_all badge when replace_all is false', () => {
+    const html = formatToolInput({ file_path: 'a.ts', old_string: 'x', new_string: 'y', replace_all: false }, 'Edit')
+    expect(html).not.toContain('edit-diff-replace-all')
+  })
+
+  it('hides replace_all badge when replace_all is absent', () => {
+    const html = formatToolInput({ file_path: 'a.ts', old_string: 'x', new_string: 'y' }, 'Edit')
+    expect(html).not.toContain('edit-diff-replace-all')
+  })
+
+  it('renders multi-line old_string and new_string', () => {
+    const html = formatToolInput({
+      file_path: 'main.go',
+      old_string: 'line1\nline2\nline3',
+      new_string: 'new1\nnew2',
+    }, 'Edit')
+    // Should have 3 deletion lines and 2 addition lines
+    const delMatches = html.match(/edit-diff-del/g)
+    const addMatches = html.match(/edit-diff-add/g)
+    expect(delMatches?.length).toBe(3)
+    expect(addMatches?.length).toBe(2)
+  })
+
+  it('renders empty old_string (no deletion lines)', () => {
+    const html = formatToolInput({ file_path: 'a.ts', old_string: '', new_string: 'y' }, 'Edit')
+    expect(html).not.toContain('edit-diff-del')
+    expect(html).toContain('edit-diff-add')
+  })
+
+  it('renders empty new_string (no addition lines)', () => {
+    const html = formatToolInput({ file_path: 'a.ts', old_string: 'x', new_string: '' }, 'Edit')
+    expect(html).toContain('edit-diff-del')
+    expect(html).not.toContain('edit-diff-add')
+  })
+
+  it('strips ./ prefix from file path', () => {
+    const html = formatToolInput({ file_path: './src/main.ts', old_string: 'a', new_string: 'b' }, 'Edit')
+    expect(html).toContain('src/main.ts')
+  })
+
+  it('escapes HTML special characters in file path', () => {
+    const html = formatToolInput({ file_path: 'a<b>c.ts', old_string: 'x', new_string: 'y' }, 'Edit')
+    expect(html).toContain('a&lt;b&gt;c.ts')
+    expect(html).not.toContain('a<b>c.ts')
+  })
+
+  it('renders edit-diff-scroll wrapper', () => {
+    const html = formatToolInput({ file_path: 'a.ts', old_string: 'x', new_string: 'y' }, 'Edit')
+    expect(html).toContain('edit-diff-scroll')
+  })
+})
+
+// ────────────────────────────────────────────────────────────
+// Bash renderer — deep tests
+// ────────────────────────────────────────────────────────────
+
+describe('Bash renderer (deep)', () => {
+  it('does not crash when command is missing', () => {
+    const html = formatToolInput({}, 'Bash')
+    expect(html).toContain('bash-terminal-view')
+    expect(html).toContain('bash-prompt')
+  })
+
+  it('does not show description line when description is absent', () => {
+    const html = formatToolInput({ command: 'ls' }, 'Bash')
+    expect(html).not.toContain('bash-terminal-desc')
+  })
+
+  it('does not show description line when description is empty', () => {
+    const html = formatToolInput({ command: 'ls', description: '' }, 'Bash')
+    expect(html).not.toContain('bash-terminal-desc')
+  })
+
+  it('escapes HTML in description', () => {
+    const html = formatToolInput({ command: 'ls', description: '<b>bold</b>' }, 'Bash')
+    expect(html).toContain('&lt;b&gt;bold&lt;/b&gt;')
+    expect(html).not.toContain('<b>bold</b>')
+  })
+
+  it('highlights command with hljs', () => {
+    const html = formatToolInput({ command: 'echo "hello"' }, 'Bash')
+    // hljs highlight for bash should produce span elements
+    expect(html).toContain('bash-terminal-body')
+    expect(html).toContain('bash-prompt')
+  })
+
+  it('renders with empty command string', () => {
+    const html = formatToolInput({ command: '' }, 'Bash')
+    expect(html).toContain('bash-terminal-view')
+    expect(html).toContain('bash-prompt')
+  })
+})
+
+// ────────────────────────────────────────────────────────────
+// Read renderer — deep tests
+// ────────────────────────────────────────────────────────────
+
+describe('Read renderer (deep)', () => {
+  it('shows offset/limit info when no content', () => {
+    const html = formatToolInput({ file_path: 'test.go', offset: 10, limit: 50 }, 'Read')
+    expect(html).toContain('file-preview-meta')
+    expect(html).not.toContain('file-preview-line')
+  })
+
+  it('renders multi-line content with separate line divs', () => {
+    const html = formatToolInput({ file_path: 'test.go', content: 'line1\nline2\nline3' }, 'Read')
+    const lineMatches = html.match(/file-preview-line/g)
+    expect(lineMatches?.length).toBe(3)
+  })
+
+  it('renders empty file_path gracefully', () => {
+    const html = formatToolInput({ file_path: '', content: 'hello' }, 'Read')
+    expect(html).toContain('file-preview-view')
+    expect(html).toContain('file-preview-line')
+  })
+
+  it('renders content with offset but no limit', () => {
+    const html = formatToolInput({ file_path: 'test.go', offset: 5 }, 'Read')
+    expect(html).toContain('file-preview-view')
+  })
+
+  it('renders content with limit but no offset', () => {
+    const html = formatToolInput({ file_path: 'test.go', limit: 20 }, 'Read')
+    expect(html).toContain('file-preview-view')
+  })
+})
+
+// ────────────────────────────────────────────────────────────
+// Write renderer — deep tests
+// ────────────────────────────────────────────────────────────
+
+describe('Write renderer (deep)', () => {
+  it('renders only file header when no content', () => {
+    const html = formatToolInput({ file_path: 'new.go' }, 'Write')
+    expect(html).toContain('file-write-view')
+    expect(html).toContain('file-write-badge')
+    expect(html).not.toContain('file-write-line')
+  })
+
+  it('renders multi-line content with separate line divs', () => {
+    const html = formatToolInput({ file_path: 'new.go', content: 'a\nb\nc' }, 'Write')
+    const lineMatches = html.match(/file-write-line/g)
+    expect(lineMatches?.length).toBe(3)
+  })
+
+  it('renders content with empty string', () => {
+    const html = formatToolInput({ file_path: 'new.go', content: '' }, 'Write')
+    expect(html).not.toContain('file-write-line')
+  })
+})
+
+// ────────────────────────────────────────────────────────────
+// AskUserQuestion renderer — deep tests
+// ────────────────────────────────────────────────────────────
+
+describe('AskUserQuestion renderer (deep)', () => {
+  it('renders empty state when questions is empty array', () => {
+    const html = formatToolInput({ questions: [] }, 'AskUserQuestion')
+    expect(html).toContain('ask-question-empty')
+  })
+
+  it('renders empty state when questions is not an array', () => {
+    const html = formatToolInput({ questions: 'not-array' }, 'AskUserQuestion')
+    expect(html).toContain('ask-question-empty')
+  })
+
+  it('renders empty state when questions is missing', () => {
+    const html = formatToolInput({}, 'AskUserQuestion')
+    expect(html).toContain('ask-question-empty')
+  })
+
+  it('renders options that are plain strings', () => {
+    const html = formatToolInput({
+      questions: [{ question: 'Pick one', options: ['Option A', 'Option B'] }],
+    }, 'AskUserQuestion')
+    expect(html).toContain('Option A')
+    expect(html).toContain('Option B')
+  })
+
+  it('renders option description when present', () => {
+    const html = formatToolInput({
+      questions: [{ question: 'Pick one', options: [{ label: 'A', description: 'Desc A' }] }],
+    }, 'AskUserQuestion')
+    expect(html).toContain('ask-option-desc')
+    expect(html).toContain('Desc A')
+  })
+
+  it('renders multi-select with checkbox indicator', () => {
+    const html = formatToolInput({
+      questions: [{ question: 'Pick many', multiSelect: true, options: ['A', 'B'] }],
+    }, 'AskUserQuestion')
+    expect(html).toContain('☐')
+    expect(html).toContain('data-multi="true"')
+  })
+
+  it('renders single-select with circle indicator', () => {
+    const html = formatToolInput({
+      questions: [{ question: 'Pick one', multiSelect: false, options: ['A', 'B'] }],
+    }, 'AskUserQuestion')
+    expect(html).toContain('◯')
+    expect(html).toContain('data-multi="false"')
+  })
+
+  it('renders supplementary input', () => {
+    const html = formatToolInput({
+      questions: [{ question: 'Pick one', options: ['A'] }],
+    }, 'AskUserQuestion')
+    expect(html).toContain('ask-question-supplementary')
+    expect(html).toContain('ask-supplementary-input')
+  })
+
+  it('submit button is disabled by default', () => {
+    const html = formatToolInput({
+      questions: [{ question: 'Pick one', options: ['A'] }],
+    }, 'AskUserQuestion')
+    expect(html).toContain('ask-question-submit" disabled')
+  })
+
+  it('renders header and question text', () => {
+    const html = formatToolInput({
+      questions: [{ header: 'Choose wisely', question: 'Which path?' }],
+    }, 'AskUserQuestion')
+    expect(html).toContain('ask-question-header')
+    expect(html).toContain('Choose wisely')
+    expect(html).toContain('ask-question-text')
+    expect(html).toContain('Which path?')
+  })
+
+  it('renders data-qi and data-oi attributes on options', () => {
+    const html = formatToolInput({
+      questions: [{ question: 'Q', options: ['A', 'B'] }],
+    }, 'AskUserQuestion')
+    expect(html).toContain('data-qi="0"')
+    expect(html).toContain('data-oi="0"')
+    expect(html).toContain('data-oi="1"')
+  })
+})
+
+// ────────────────────────────────────────────────────────────
+// AskUserQuestion action handler — DOM interaction tests
+// ────────────────────────────────────────────────────────────
+
+describe('AskUserQuestion action handler', () => {
+  /** Create a minimal AskUserQuestion DOM structure for testing */
+  function createAskDOM(multiSelect = false): { container: HTMLDivElement; emit: ReturnType<typeof vi.fn> } {
+    const emit = vi.fn()
+    const container = document.createElement('div')
+    container.className = 'ask-question-view'
+    container.innerHTML = `
+      <div class="ask-question-item" data-multi="${multiSelect}">
+        <div class="ask-question-options">
+          <div class="ask-question-option" data-qi="0" data-oi="0" data-label="Option A">
+            <span class="ask-option-indicator">${multiSelect ? '☐' : '◯'}</span>
+            <div class="ask-option-content">
+              <span class="ask-option-label">Option A</span>
+            </div>
+          </div>
+          <div class="ask-question-option" data-qi="0" data-oi="1" data-label="Option B">
+            <span class="ask-option-indicator">${multiSelect ? '☐' : '◯'}</span>
+            <div class="ask-option-content">
+              <span class="ask-option-label">Option B</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="ask-question-supplementary">
+        <label class="ask-supplementary-label">Additional info</label>
+        <input class="ask-supplementary-input" type="text" placeholder="Optional" />
+      </div>
+      <button class="ask-question-submit" disabled>Submit</button>
+    `
+    document.body.appendChild(container)
+    return { container, emit }
+  }
+
+  function cleanup(container: HTMLDivElement) {
+    container.remove()
+  }
+
+  it('returns false for clicks outside option/submit', () => {
+    const { container, emit } = createAskDOM()
+    // Click on the supplementary input area (not option, not submit)
+    const suppArea = container.querySelector('.ask-question-supplementary') as HTMLElement
+    const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true })
+    Object.defineProperty(clickEvent, 'target', { value: suppArea, writable: false })
+    const result = handleToolAction('AskUserQuestion', clickEvent, emit)
+    expect(result).toBe(false)
+    cleanup(container)
+  })
+
+  describe('single-select mode', () => {
+    it('selecting an option marks it as selected and changes indicator to ◉', () => {
+      const { container, emit } = createAskDOM(false)
+      const option = container.querySelector('.ask-question-option') as HTMLElement
+
+      const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickEvent, 'target', { value: option, writable: false })
+      handleToolAction('AskUserQuestion', clickEvent, emit)
+
+      expect(option.classList.contains('selected')).toBe(true)
+      const indicator = option.querySelector('.ask-option-indicator')
+      expect(indicator?.textContent).toBe('◉')
+      cleanup(container)
+    })
+
+    it('selecting another option deselects the previous one', () => {
+      const { container, emit } = createAskDOM(false)
+      const options = container.querySelectorAll('.ask-question-option')
+      const optA = options[0] as HTMLElement
+      const optB = options[1] as HTMLElement
+
+      // Click A
+      const clickA = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickA, 'target', { value: optA, writable: false })
+      handleToolAction('AskUserQuestion', clickA, emit)
+
+      // Click B
+      const clickB = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickB, 'target', { value: optB, writable: false })
+      handleToolAction('AskUserQuestion', clickB, emit)
+
+      expect(optA.classList.contains('selected')).toBe(false)
+      expect(optB.classList.contains('selected')).toBe(true)
+
+      // A's indicator should revert to ◯
+      const indicatorA = optA.querySelector('.ask-option-indicator')
+      expect(indicatorA?.textContent).toBe('◯')
+      cleanup(container)
+    })
+
+    it('enables submit button when an option is selected', () => {
+      const { container, emit } = createAskDOM(false)
+      const option = container.querySelector('.ask-question-option') as HTMLElement
+      const submitBtn = container.querySelector('.ask-question-submit') as HTMLButtonElement
+
+      expect(submitBtn.disabled).toBe(true)
+
+      const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickEvent, 'target', { value: option, writable: false })
+      handleToolAction('AskUserQuestion', clickEvent, emit)
+
+      expect(submitBtn.disabled).toBe(false)
+      cleanup(container)
+    })
+  })
+
+  describe('multi-select mode', () => {
+    it('toggles selection on and off', () => {
+      const { container, emit } = createAskDOM(true)
+      const option = container.querySelector('.ask-question-option') as HTMLElement
+
+      // First click: select
+      const click1 = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(click1, 'target', { value: option, writable: false })
+      handleToolAction('AskUserQuestion', click1, emit)
+      expect(option.classList.contains('selected')).toBe(true)
+      const indicator = option.querySelector('.ask-option-indicator')
+      expect(indicator?.textContent).toBe('☑')
+
+      // Second click: deselect
+      const click2 = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(click2, 'target', { value: option, writable: false })
+      handleToolAction('AskUserQuestion', click2, emit)
+      expect(option.classList.contains('selected')).toBe(false)
+      expect(indicator?.textContent).toBe('☐')
+
+      cleanup(container)
+    })
+
+    it('allows selecting multiple options simultaneously', () => {
+      const { container, emit } = createAskDOM(true)
+      const options = container.querySelectorAll('.ask-question-option')
+      const optA = options[0] as HTMLElement
+      const optB = options[1] as HTMLElement
+
+      const clickA = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickA, 'target', { value: optA, writable: false })
+      handleToolAction('AskUserQuestion', clickA, emit)
+
+      const clickB = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickB, 'target', { value: optB, writable: false })
+      handleToolAction('AskUserQuestion', clickB, emit)
+
+      expect(optA.classList.contains('selected')).toBe(true)
+      expect(optB.classList.contains('selected')).toBe(true)
+      cleanup(container)
+    })
+  })
+
+  describe('submit', () => {
+    it('emits send-message with selected labels on submit', () => {
+      const { container, emit } = createAskDOM(false)
+      const option = container.querySelector('.ask-question-option') as HTMLElement
+      const submitBtn = container.querySelector('.ask-question-submit') as HTMLButtonElement
+
+      // Select option
+      const clickOpt = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickOpt, 'target', { value: option, writable: false })
+      handleToolAction('AskUserQuestion', clickOpt, emit)
+
+      // Submit
+      const clickSubmit = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickSubmit, 'target', { value: submitBtn, writable: false })
+      handleToolAction('AskUserQuestion', clickSubmit, emit)
+
+      expect(emit).toHaveBeenCalledWith('send-message', 'Option A')
+      cleanup(container)
+    })
+
+    it('appends supplementary text to answer', () => {
+      const { container, emit } = createAskDOM(false)
+      const option = container.querySelector('.ask-question-option') as HTMLElement
+      const submitBtn = container.querySelector('.ask-question-submit') as HTMLButtonElement
+      const suppInput = container.querySelector('.ask-supplementary-input') as HTMLInputElement
+
+      suppInput.value = 'extra context'
+
+      // Select option
+      const clickOpt = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickOpt, 'target', { value: option, writable: false })
+      handleToolAction('AskUserQuestion', clickOpt, emit)
+
+      // Submit
+      const clickSubmit = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickSubmit, 'target', { value: submitBtn, writable: false })
+      handleToolAction('AskUserQuestion', clickSubmit, emit)
+
+      expect(emit).toHaveBeenCalledWith('send-message', 'Option A\nextra context')
+      cleanup(container)
+    })
+
+    it('marks view as ask-submitted after submit', () => {
+      const { container, emit } = createAskDOM(false)
+      const option = container.querySelector('.ask-question-option') as HTMLElement
+      const submitBtn = container.querySelector('.ask-question-submit') as HTMLButtonElement
+
+      // Select option
+      const clickOpt = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickOpt, 'target', { value: option, writable: false })
+      handleToolAction('AskUserQuestion', clickOpt, emit)
+
+      // Submit
+      const clickSubmit = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickSubmit, 'target', { value: submitBtn, writable: false })
+      handleToolAction('AskUserQuestion', clickSubmit, emit)
+
+      expect(container.classList.contains('ask-submitted')).toBe(true)
+      cleanup(container)
+    })
+
+    it('disables submit button after submission', () => {
+      const { container, emit } = createAskDOM(false)
+      const option = container.querySelector('.ask-question-option') as HTMLElement
+      const submitBtn = container.querySelector('.ask-question-submit') as HTMLButtonElement
+
+      // Select option
+      const clickOpt = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickOpt, 'target', { value: option, writable: false })
+      handleToolAction('AskUserQuestion', clickOpt, emit)
+
+      // Submit
+      const clickSubmit = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickSubmit, 'target', { value: submitBtn, writable: false })
+      handleToolAction('AskUserQuestion', clickSubmit, emit)
+
+      expect(submitBtn.disabled).toBe(true)
+      cleanup(container)
+    })
+
+    it('disables supplementary input after submission', () => {
+      const { container, emit } = createAskDOM(false)
+      const option = container.querySelector('.ask-question-option') as HTMLElement
+      const submitBtn = container.querySelector('.ask-question-submit') as HTMLButtonElement
+      const suppInput = container.querySelector('.ask-supplementary-input') as HTMLInputElement
+
+      // Select option
+      const clickOpt = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickOpt, 'target', { value: option, writable: false })
+      handleToolAction('AskUserQuestion', clickOpt, emit)
+
+      // Submit
+      const clickSubmit = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickSubmit, 'target', { value: submitBtn, writable: false })
+      handleToolAction('AskUserQuestion', clickSubmit, emit)
+
+      expect(suppInput.disabled).toBe(true)
+      cleanup(container)
+    })
+
+    it('sets pointer-events none on unselected options after submission', () => {
+      const { container, emit } = createAskDOM(false)
+      const options = container.querySelectorAll('.ask-question-option')
+      const optA = options[0] as HTMLElement
+      const optB = options[1] as HTMLElement
+      const submitBtn = container.querySelector('.ask-question-submit') as HTMLButtonElement
+
+      // Select option A
+      const clickOpt = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickOpt, 'target', { value: optA, writable: false })
+      handleToolAction('AskUserQuestion', clickOpt, emit)
+
+      // Submit
+      const clickSubmit = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickSubmit, 'target', { value: submitBtn, writable: false })
+      handleToolAction('AskUserQuestion', clickSubmit, emit)
+
+      // Unselected option should have pointer-events: none
+      expect(optB.style.pointerEvents).toBe('none')
+      expect(optB.style.opacity).toBe('0.4')
+      cleanup(container)
+    })
+
+    it('does not respond to clicks after submission', () => {
+      const { container, emit } = createAskDOM(false)
+      const option = container.querySelector('.ask-question-option') as HTMLElement
+      const submitBtn = container.querySelector('.ask-question-submit') as HTMLButtonElement
+      const options = container.querySelectorAll('.ask-question-option')
+      const optB = options[1] as HTMLElement
+
+      // Select A, submit
+      const clickOpt = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickOpt, 'target', { value: option, writable: false })
+      handleToolAction('AskUserQuestion', clickOpt, emit)
+
+      const clickSubmit = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickSubmit, 'target', { value: submitBtn, writable: false })
+      handleToolAction('AskUserQuestion', clickSubmit, emit)
+
+      const callCount = emit.mock.calls.length
+
+      // Try clicking another option after submit — should not change state
+      const clickB = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickB, 'target', { value: optB, writable: false })
+      handleToolAction('AskUserQuestion', clickB, emit)
+
+      // B should NOT be selected since the view is submitted
+      expect(optB.classList.contains('selected')).toBe(false)
+      cleanup(container)
+    })
+
+    it('does not emit when no options selected and submit is clicked', () => {
+      const { container, emit } = createAskDOM(false)
+      const submitBtn = container.querySelector('.ask-question-submit') as HTMLButtonElement
+
+      // Submit without selecting anything (button would be disabled in real DOM,
+      // but handler should also not emit)
+      const clickSubmit = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickSubmit, 'target', { value: submitBtn, writable: false })
+      handleToolAction('AskUserQuestion', clickSubmit, emit)
+
+      // Should not emit send-message (no answers)
+      expect(emit).not.toHaveBeenCalledWith('send-message', expect.anything())
+      cleanup(container)
+    })
+  })
+
+  describe('case-insensitive dispatch', () => {
+    it('dispatches to AskUserQuestion handler regardless of case', () => {
+      const { container, emit } = createAskDOM(false)
+      const option = container.querySelector('.ask-question-option') as HTMLElement
+
+      const clickOpt = new MouseEvent('click', { bubbles: true, cancelable: true })
+      Object.defineProperty(clickOpt, 'target', { value: option, writable: false })
+
+      expect(handleToolAction('askuserquestion', clickOpt, emit)).toBe(true)
+      expect(handleToolAction('ASKUSERQUESTION', clickOpt, emit)).toBe(true)
+      cleanup(container)
+    })
+  })
+})
+
+// ────────────────────────────────────────────────────────────
+// registerToolActionHandler
+// ────────────────────────────────────────────────────────────
+
+describe('registerToolActionHandler', () => {
+  it('registers a handler that handleToolAction can dispatch to', () => {
+    const handler = vi.fn().mockReturnValue(true)
+    registerToolActionHandler('TestActionTool', handler)
+
+    const event = new MouseEvent('click')
+    const emit = vi.fn()
+    const result = handleToolAction('TestActionTool', event, emit)
+
+    expect(result).toBe(true)
+    expect(handler).toHaveBeenCalledWith(event, emit)
+  })
+
+  it('registration is case-insensitive', () => {
+    const handler = vi.fn().mockReturnValue(true)
+    registerToolActionHandler('CaseTestTool', handler)
+
+    const event = new MouseEvent('click')
+    const emit = vi.fn()
+    const result = handleToolAction('casetesttool', event, emit)
+
+    expect(result).toBe(true)
+    expect(handler).toHaveBeenCalledWith(event, emit)
+  })
+})
+
+// ────────────────────────────────────────────────────────────
+// JSON fallback — deep tests
+// ────────────────────────────────────────────────────────────
+
+describe('JSON fallback (deep)', () => {
+  it('non-empty object includes hljs highlight', () => {
+    const html = formatToolInput({ key: 'value' }, 'NonExistentTool')
+    expect(html).toContain('tool-json-body')
+    expect(html).toContain('<code>')
+    expect(html).toContain('</code>')
+    // hljs should add spans for syntax highlighting
+    expect(html).toContain('hljs-')
+  })
+
+  it('empty object renders empty braces (highlighted)', () => {
+    const html = formatToolInput({})
+    // hljs wraps { and } in spans, so we check for both punctuation parts
+    expect(html).toContain('hljs-punctuation">{</span>')
+    expect(html).toContain('hljs-punctuation">}</span>')
+  })
+
+  it('falls back when tool name given but input is not object', () => {
+    const html = formatToolInput('string input', 'Edit')
+    expect(html).toContain('tool-json-body')
+  })
+
+  it('falls back when tool name given but input is null', () => {
+    const html = formatToolInput(null, 'Edit')
+    expect(html).toContain('tool-json-body')
+  })
+})
+
+// ────────────────────────────────────────────────────────────
+// hljs fallback paths (highlight throws via spy)
+// ────────────────────────────────────────────────────────────
+
+describe('hljs highlight fallback (catch blocks)', () => {
+  let hljsSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(async () => {
+    const { hljs } = await import('@/utils/globals.ts')
+    hljsSpy = vi.spyOn(hljs, 'highlight').mockImplementation(() => { throw new Error('hljs mock error') })
+  })
+
+  afterEach(() => {
+    hljsSpy?.mockRestore()
+  })
+
+  it('Bash renderer falls back to escapeHtml when hljs.highlight throws', () => {
+    const html = formatToolInput({ command: 'echo "hello"' }, 'Bash')
+    expect(html).toContain('bash-terminal-view')
+    expect(html).toContain('echo')
+    // Should NOT contain hljs spans
+    expect(html).not.toContain('hljs-')
+  })
+
+  it('Grep renderer falls back to escapeHtml for pattern when hljs.highlight throws', () => {
+    const html = formatToolInput({ pattern: 'TODO' }, 'Grep')
+    expect(html).toContain('grep-search-view')
+    expect(html).toContain('TODO')
+    expect(html).not.toContain('hljs-')
+  })
+
+  it('JSON fallback (empty object) falls back when hljs.highlight throws', () => {
+    const html = formatToolInput({})
+    expect(html).toContain('tool-json-body')
+    // Should contain literal {} without hljs spans
+    expect(html).toContain('>{}</code>')
+  })
+
+  it('JSON fallback (non-empty object) falls back when hljs.highlight throws', () => {
+    const html = formatToolInput({ foo: 'bar' }, 'UnknownTool')
+    expect(html).toContain('tool-json-body')
+    expect(html).toContain('foo')
+    // Should contain escapeHtml'd JSON, not hljs spans
+    expect(html).not.toContain('hljs-')
   })
 })

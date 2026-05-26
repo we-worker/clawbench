@@ -2,6 +2,10 @@ package model
 
 import "time"
 
+// ResponsePreviewMaxRunes is the maximum number of runes included in the
+// response preview sent via WS session_update events and JPush notifications.
+const ResponsePreviewMaxRunes = 512
+
 // ChatMessage represents a single message in the chat history
 type ChatMessage struct {
 	ID          int64     `json:"id,omitempty"`
@@ -14,6 +18,7 @@ type ChatMessage struct {
 	Streaming   bool      `json:"streaming,omitempty"`
 	Indexed     bool      `json:"indexed,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
+	Summary     *string   `json:"summary,omitempty"` // reading summary (nil=not summarized, ""=too short, non-empty=summary)
 }
 
 // ChatSession represents a chat session

@@ -9,21 +9,25 @@
         <span class="project-name">{{ projectName }}</span>
         <ChevronDown :size="12" class="switch-chevron" :class="{ open: dropdownOpen }" />
       </button>
+    </div>
+    <Teleport to="body">
       <Transition name="dropdown">
-        <div v-if="dropdownOpen" class="project-dropdown">
+        <div v-if="dropdownOpen" class="project-dropdown" :style="dropdownStyle" ref="dropdownPanelRef">
           <div v-if="loadingRecent" class="dropdown-loading">{{ t('common.loading') }}</div>
           <template v-else>
             <div v-if="recentItems.length === 0" class="dropdown-empty">{{ t('appHeader.noRecentProjects') }}</div>
-            <div
-              v-for="item in recentItems"
-              :key="item.path"
-              class="dropdown-item"
-              :class="{ active: item.path === projectRoot }"
-              @click="selectRecent(item)"
-            >
-              <Projector :size="14" class="item-icon" />
-              <span class="item-label">{{ item.name }}</span>
-              <span class="item-path" @mousedown.prevent="onPathMouseDown" @click="onPathClick">{{ item.displayPath }}</span>
+            <div v-else class="dropdown-scroll-area">
+              <div
+                v-for="item in recentItems"
+                :key="item.path"
+                class="dropdown-item"
+                :class="{ active: item.path === projectRoot }"
+                @click="selectRecent(item)"
+              >
+                <Projector :size="14" class="item-icon" />
+                <span class="item-label">{{ item.name }}</span>
+                <span class="item-path" @mousedown.prevent="onPathMouseDown" @click="onPathClick">{{ item.displayPath }}</span>
+              </div>
             </div>
             <div class="dropdown-divider"></div>
             <div class="dropdown-item other-item" @click="openBrowse">
@@ -33,149 +37,69 @@
           </template>
         </div>
       </Transition>
-    </div>
+    </Teleport>
 
     <div v-if="gitBranch" class="branch-badge" :title="gitBranch" @click="openHistory">
       <GitBranch :size="12" class="branch-icon" />
       <span class="branch-name">{{ gitBranch }}</span>
     </div>
 
-    <button ref="settingsBtnRef" class="settings-toggle" @click="toggleSettingsMenu" :title="t('appHeader.settings')">
-      <Settings :size="20" />
+    <button ref="statusBtnRef" class="status-toggle" @click="toggleStatusMenu" :title="t('appHeader.connectionStatus')">
+      <span class="status-dot" :class="statusDotClass"></span>
     </button>
-    <PopupMenu v-model:show="settingsMenuOpen" :target-element="settingsBtnRef" :max-width="200" :max-height="320" :menu-items-count="settingsItemCount">
-      <div class="settings-menu-title">{{ t('appHeader.settings') }}</div>
-      <!-- Reconfigure server — always available in app mode -->
-      <template v-if="isAppMode">
-        <button class="settings-menu-item reconfigure-item" @click="handleReconfigure">
-          <Server :size="14" />
-          <span>{{ t('appHeader.reconfigureServer') }}</span>
-        </button>
-        <div class="settings-menu-divider"></div>
-        <button class="settings-menu-item" :class="{ active: debugLogEnabled }" @click="toggleDebugLog">
-          <Check v-if="debugLogEnabled" :size="14" />
-          <span v-else class="settings-menu-check-spacer"></span>
-          <Bug :size="14" />
-          <span>{{ t('appHeader.debugLog') }}</span>
-        </button>
-        <div class="settings-menu-divider"></div>
-      </template>
-      <button class="settings-menu-item" :class="{ active: currentLocale === 'zh' }" @click="handleLocaleSwitch('zh')">
-          <Check v-if="currentLocale === 'zh'" :size="14" />
-          <span v-else class="settings-menu-check-spacer"></span>
-          <span>中文</span>
-        </button>
-        <button class="settings-menu-item" :class="{ active: currentLocale === 'en' }" @click="handleLocaleSwitch('en')">
-          <Check v-if="currentLocale === 'en'" :size="14" />
-          <span v-else class="settings-menu-check-spacer"></span>
-          <span>English</span>
-        </button>
-        <div class="settings-menu-divider"></div>
-        <button class="settings-menu-item" :class="{ active: theme === 'dark' }" @click="handleThemeSwitch('dark')">
-          <Check v-if="theme === 'dark'" :size="14" />
-          <span v-else class="settings-menu-check-spacer"></span>
-          <Moon :size="14" />
-          <span>{{ t('appHeader.darkMode') }}</span>
-        </button>
-        <button class="settings-menu-item" :class="{ active: theme === 'light' }" @click="handleThemeSwitch('light')">
-          <Check v-if="theme === 'light'" :size="14" />
-          <span v-else class="settings-menu-check-spacer"></span>
-          <Sun :size="14" />
-        <span>{{ t('appHeader.lightMode') }}</span>
-      </button>
+    <PopupMenu v-model:show="statusMenuOpen" :target-element="statusBtnRef" :max-width="200" :max-height="120" :menu-items-count="2">
+      <div class="status-menu-item">
+        <span class="status-indicator" :class="statusDotClass"></span>
+        <span class="status-value">{{ serverStatusLabel }}</span>
+      </div>
     </PopupMenu>
   </header>
   </Teleport>
 </template>
 
 <script setup>
-import { Projector, ChevronDown, Search, Moon, Sun, Settings, Check, Server, Bug, GitBranch } from 'lucide-vue-next'
+import { Projector, ChevronDown, Search, GitBranch } from 'lucide-vue-next'
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useLocale } from '@/composables/useLocale'
-import { useAppMode } from '@/composables/useAppMode'
+import { useGlobalEvents } from '@/composables/useGlobalEvents'
 import { baseName, toRelativePath } from '@/utils/path.ts'
 import { store } from '@/stores/app.ts'
+import { setPendingManageNavigation } from '@/composables/useCommitNavigation.ts'
 import PopupMenu from '@/components/common/PopupMenu.vue'
 
 const { t } = useI18n()
-const { currentLocale, setLocale } = useLocale()
-const { isAppMode } = useAppMode()
+const { wsStatus } = useGlobalEvents()
 const switchTab = inject('switchTab')
 
 const props = defineProps({
     projectRoot: String,
-    theme: String,
     hidden: Boolean,
 })
-const emit = defineEmits(['toggleTheme', 'openProjectDialog', 'reconfigureServer'])
+const emit = defineEmits(['openProjectDialog'])
 
 const toast = inject('toast')
+const hotSwitchProject = inject('hotSwitchProject')
 
-// Settings menu state
-const settingsBtnRef = ref(null)
-const settingsMenuOpen = ref(false)
+// Connection status menu state
+const statusBtnRef = ref(null)
+const statusMenuOpen = ref(false)
 
-// Debug log capture state (Android only, persisted in localStorage)
-const debugLogEnabled = ref(false)
-
-function toggleSettingsMenu() {
-    settingsMenuOpen.value = !settingsMenuOpen.value
+function toggleStatusMenu() {
+    statusMenuOpen.value = !statusMenuOpen.value
 }
 
-function handleLocaleSwitch(lang) {
-    if (currentLocale.value !== lang) {
-        setLocale(lang)
-    }
-    settingsMenuOpen.value = false
-}
+// Status dot class for the button indicator and popup
+const statusDotClass = computed(() => {
+    if (wsStatus.value === 'disconnected') return 'status-dot-disconnected'
+    if (wsStatus.value === 'reconnecting') return 'status-dot-reconnecting'
+    return 'status-dot-connected'
+})
 
-function handleThemeSwitch(mode) {
-    if (props.theme !== mode) {
-        emit('toggleTheme')
-    }
-    settingsMenuOpen.value = false
-}
-
-function handleReconfigure() {
-    settingsMenuOpen.value = false
-    emit('reconfigureServer')
-}
-
-// Debug log capture toggle
-function toggleDebugLog() {
-    debugLogEnabled.value = !debugLogEnabled.value
-    localStorage.setItem('android_log_capture', debugLogEnabled.value ? 'true' : 'false')
-    if (window.AndroidNative) {
-        if (debugLogEnabled.value) {
-            window.AndroidNative.startLogCapture()
-        } else {
-            window.AndroidNative.stopLogCapture()
-        }
-    }
-    // Don't close menu so user can see the toggle state
-}
-
-// Restore debug log capture state on mount
-function restoreDebugLogState() {
-    if (!isAppMode.value || !window.AndroidNative) return
-    const saved = localStorage.getItem('android_log_capture')
-    if (saved === 'true') {
-        debugLogEnabled.value = true
-        try {
-            window.AndroidNative.startLogCapture()
-        } catch (_) {}
-    }
-}
-
-// Calculate menu item count for PopupMenu positioning
-const settingsItemCount = computed(() => {
-    // 4 interactive items: zh + en + dark + light (divider height negligible)
-    let count = 4
-    if (isAppMode.value) {
-        count += 4 // reconfigure item + divider + debug log item + divider
-    }
-    return count
+// Simplified server status label
+const serverStatusLabel = computed(() => {
+    if (wsStatus.value === 'connected') return t('appHeader.serverConnected')
+    if (wsStatus.value === 'reconnecting') return t('appHeader.serverReconnecting')
+    return t('appHeader.serverDisconnected')
 })
 
 const projectName = computed(() => {
@@ -187,6 +111,7 @@ const projectName = computed(() => {
 const gitBranch = computed(() => store.state.gitBranch)
 
 function openHistory() {
+    setPendingManageNavigation()
     switchTab?.('history')
 }
 
@@ -198,8 +123,24 @@ watch(() => props.projectRoot, (newRoot) => {
 // Dropdown state
 const dropdownOpen = ref(false)
 const dropdownRef = ref(null)
+const dropdownPanelRef = ref(null)
 const loadingRecent = ref(false)
 const recentItems = ref([])
+
+// Dynamic dropdown positioning (teleported to body, needs fixed positioning)
+const dropdownStyle = ref({})
+
+function updateDropdownPosition() {
+    if (!dropdownRef.value) return
+    const rect = dropdownRef.value.getBoundingClientRect()
+    dropdownStyle.value = {
+        position: 'fixed',
+        top: `${rect.bottom + 4}px`,
+        left: `${rect.left}px`,
+        minWidth: `${Math.max(220, rect.width)}px`,
+        maxWidth: '280px',
+    }
+}
 
 let watchBase = ''
 
@@ -212,6 +153,7 @@ function toggleDropdown() {
         dropdownOpen.value = false
     } else {
         loadRecentProjects()
+        updateDropdownPosition()
         dropdownOpen.value = true
     }
 }
@@ -242,14 +184,19 @@ async function selectRecent(item) {
     dropdownOpen.value = false
     if (item.path === props.projectRoot) return
     try {
-        const resp = await fetch('/api/project', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: item.path })
-        })
-        if (resp.ok) {
-            window.location.reload()
+        if (hotSwitchProject) {
+            await hotSwitchProject(item.path)
         } else {
+            // Fallback: legacy full reload
+            const resp = await fetch('/api/project', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: item.path })
+            })
+            if (resp.ok) {
+                window.location.reload()
+                return
+            }
             const text = await resp.text()
             let msg = text
             let msgKey = ''
@@ -260,13 +207,11 @@ async function selectRecent(item) {
             } catch (_) {}
             if (msgKey === 'NotADirectory') {
                 toast?.show(t('appHeader.projectPathNotFound'), { icon: '⚠️', type: 'error', duration: 3000 })
-                // Remove stale entry from recent projects
                 fetch('/api/recent-projects', {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ path: item.path })
                 }).catch(() => {})
-                // Remove from local list immediately
                 recentItems.value = recentItems.value.filter(r => r.path !== item.path)
             } else {
                 toast?.show(t('appHeader.switchProjectFailed', { error: msg }), { icon: '⚠️', type: 'error', duration: 3000 })
@@ -284,9 +229,9 @@ function openBrowse() {
 
 // Close dropdown on outside click
 function onClickOutside(e) {
-    if (dropdownRef.value && !dropdownRef.value.contains(e.target)) {
-        dropdownOpen.value = false
-    }
+    if (dropdownRef.value && dropdownRef.value.contains(e.target)) return
+    if (dropdownPanelRef.value && dropdownPanelRef.value.contains(e.target)) return
+    dropdownOpen.value = false
 }
 
 // Track whether the path element was dragged, so click can decide to bubble or not
@@ -321,7 +266,6 @@ function onPathClick(e) {
 
 onMounted(() => {
     document.addEventListener('click', onClickOutside)
-    restoreDebugLogState()
 })
 
 onUnmounted(() => {
@@ -356,6 +300,7 @@ onUnmounted(() => {
     font-size: 13px;
     font-weight: 500;
     max-width: 180px;
+    width: 100%;
     min-width: 0;
     transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
     line-height: 1.4;
@@ -394,110 +339,7 @@ onUnmounted(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-/* Dropdown */
-.project-dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    min-width: 220px;
-    max-width: 280px;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-    z-index: 3000;
-    overflow: hidden;
-    padding: 3px 0;
-}
-
-.dropdown-loading,
-.dropdown-empty {
-    text-align: center;
-    padding: 10px 12px;
-    color: var(--text-muted);
-    font-size: 12px;
-}
-
-.dropdown-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 10px;
-    cursor: pointer;
-    transition: background 0.1s;
-    font-size: 12px;
-}
-
-.dropdown-item:hover {
-    background: var(--bg-tertiary);
-}
-
-.dropdown-item.active {
-    background: var(--accent-color);
-    color: #fff;
-}
-
-.dropdown-item.active .item-icon {
-    color: #fff;
-}
-
-.dropdown-item.active .item-path {
-    color: rgba(255,255,255,0.6);
-}
-
-.item-icon {
-    flex-shrink: 0;
-    color: var(--accent-color);
-}
-
-.dropdown-item.active .item-icon {
-    color: #fff;
-}
-
-.item-label {
-    flex-shrink: 0;
-    font-weight: 500;
-    white-space: nowrap;
-}
-
-.item-path {
-    flex: 1;
-    color: var(--text-muted);
-    font-size: 11px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    white-space: nowrap;
-    cursor: default;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-}
-
-.item-path::-webkit-scrollbar {
-    display: none;
-}
-
-.other-item .item-icon {
-    color: var(--text-secondary);
-}
-
-.dropdown-divider {
-    height: 1px;
-    background: var(--border-color);
-    margin: 2px 0;
-}
-
-/* Dropdown transition */
-.dropdown-enter-active,
-.dropdown-leave-active {
-    transition: opacity 0.15s, transform 0.15s;
-}
-
-.dropdown-enter-from,
-.dropdown-leave-to {
-    opacity: 0;
-    transform: translateY(-4px);
+    min-width: 0;
 }
 
 /* Branch badge */
@@ -536,92 +378,213 @@ onUnmounted(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
 }
 
-.settings-toggle {
+/* Connection status button */
+.status-toggle {
     padding: 6px;
     border: none;
     background: transparent;
     cursor: pointer;
-    color: var(--text-primary);
     border-radius: var(--radius-sm);
     transition: background 0.15s;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     margin-left: auto;
 }
 
-.settings-toggle:hover {
-    background: var(--bg-tertiary);
+@media (hover: hover) {
+    .status-toggle:hover {
+        background: var(--bg-tertiary);
+    }
 }
 
-.settings-toggle svg {
-    width: 20px;
-    height: 20px;
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    transition: background-color 0.3s;
+}
+
+.status-dot-connected {
+    background: var(--color-green, #22c55e);
+}
+
+.status-dot-reconnecting {
+    background: var(--color-yellow, #eab308);
+    animation: status-pulse 1.2s ease-in-out infinite;
+}
+
+.status-dot-disconnected {
+    background: var(--color-red, #ef4444);
+}
+
+@keyframes status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
 }
 </style>
 
-<!-- Unscoped styles for teleported settings menu content (PopupMenu uses Teleport to body, scoped styles won't reach it) -->
+<!-- Unscoped styles for teleported status menu content (PopupMenu uses Teleport to body, scoped styles won't reach it) -->
 <style>
-.settings-menu-title {
-    padding: 4px 10px 1px;
-    font-size: 10px;
-    color: var(--text-muted, #999);
-    font-weight: 500;
-    letter-spacing: 0.3px;
+/* Connection status menu (teleported to body, needs unscoped styles) */
+.status-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    white-space: nowrap;
 }
 
-.settings-menu-item {
+.status-dot-connected,
+.status-indicator.status-dot-connected {
+    background: var(--color-green, #22c55e);
+}
+
+.status-dot-reconnecting,
+.status-indicator.status-dot-reconnecting {
+    background: var(--color-yellow, #eab308);
+    animation: status-pulse 1.2s ease-in-out infinite;
+}
+
+.status-dot-disconnected,
+.status-indicator.status-dot-disconnected {
+    background: var(--color-red, #ef4444);
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.status-value {
+    color: var(--text-primary, #333);
+}
+
+/* Project dropdown (teleported to body, positioned via JS) */
+.project-dropdown {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+    z-index: 9999;
+    overflow: hidden;
+    padding: 3px 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.project-dropdown .dropdown-scroll-area {
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: 300px;
+    scrollbar-width: thin;
+}
+
+.project-dropdown .dropdown-scroll-area::-webkit-scrollbar {
+    width: 4px;
+}
+
+.project-dropdown .dropdown-scroll-area::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 2px;
+}
+
+.project-dropdown .dropdown-scroll-area::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.project-dropdown .dropdown-loading,
+.project-dropdown .dropdown-empty {
+    text-align: center;
+    padding: 10px 12px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.project-dropdown .dropdown-item {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 10px;
-    width: 100%;
-    border: none;
-    background: none;
-    color: var(--text-primary);
-    font-size: 12px;
+    padding: 5px 10px;
     cursor: pointer;
-    white-space: nowrap;
-    text-align: left;
+    transition: background 0.1s;
+    font-size: 12px;
 }
 
-.settings-menu-item:hover {
-    background: var(--accent-color, #0066cc);
+.project-dropdown .dropdown-item:hover {
+    background: var(--bg-tertiary);
+}
+
+.project-dropdown .dropdown-item.active {
+    background: var(--accent-color);
     color: #fff;
 }
 
-.settings-menu-item.active {
-    color: var(--accent-color, #0066cc);
+.project-dropdown .dropdown-item.active .item-icon {
+    color: #fff;
+}
+
+.project-dropdown .dropdown-item.active .item-path {
+    color: rgba(255,255,255,0.6);
+}
+
+.project-dropdown .item-icon {
+    flex-shrink: 0;
+    color: var(--accent-color);
+}
+
+.project-dropdown .dropdown-item.active .item-icon {
+    color: #fff;
+}
+
+.project-dropdown .item-label {
+    flex-shrink: 0;
     font-weight: 500;
+    white-space: nowrap;
 }
 
-.settings-menu-item.active:hover {
-    color: #fff;
+.project-dropdown .item-path {
+    flex: 1;
+    color: var(--text-muted);
+    font-size: 11px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    cursor: default;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
 
-.settings-menu-item.reconfigure-item {
-    color: var(--color-red, #dc2626);
+.project-dropdown .item-path::-webkit-scrollbar {
+    display: none;
 }
 
-.settings-menu-item.reconfigure-item:hover {
-    background: color-mix(in srgb, var(--color-red, #dc2626) 10%, transparent);
-    color: var(--color-red, #dc2626);
+.project-dropdown .other-item .item-icon {
+    color: var(--text-secondary);
 }
 
-.settings-menu-item svg {
-    flex-shrink: 0;
-    width: 14px;
-    height: 14px;
-}
-
-.settings-menu-check-spacer {
-    width: 14px;
-    flex-shrink: 0;
-}
-
-.settings-menu-divider {
+.project-dropdown .dropdown-divider {
     height: 1px;
-    background: var(--border-color, #e5e5e5);
-    margin: 3px 6px;
+    background: var(--border-color);
+    margin: 2px 0;
+}
+
+/* Dropdown transition (teleported to body) */
+.dropdown-enter-active,
+.dropdown-leave-active {
+    transition: opacity 0.15s, transform 0.15s;
+}
+
+.dropdown-enter-from,
+.dropdown-leave-to {
+    opacity: 0;
+    transform: translateY(-4px);
 }
 </style>

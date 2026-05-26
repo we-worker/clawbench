@@ -18,7 +18,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.25'
 
       - name: Go vet
         run: go vet ./...
@@ -29,9 +29,122 @@ jobs:
       - name: Go build
         run: go build ./cmd/server
 
+  coverage-go:
+    name: Coverage Gate (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download main baseline
+        if: github.event_name == 'pull_request'
+        uses: dawidd6/action-download-artifact@v8
+        with:
+          workflow: ci.yml
+          branch: main
+          name: main-go-coverage
+          path: .clawbench/baseline/
+        continue-on-error: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Run coverage gate check
+        run: ./scripts/check-go-coverage.sh
+
+      - name: Upload coverage profile
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-go-coverage
+          path: coverage.out
+          retention-days: 90
+
+  coverage-frontend:
+    name: Coverage Gate (Frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download main baseline
+        if: github.event_name == 'pull_request'
+        uses: dawidd6/action-download-artifact@v8
+        with:
+          workflow: ci.yml
+          branch: main
+          name: main-frontend-coverage
+          path: .clawbench/baseline/
+        continue-on-error: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run coverage gate check
+        run: ./scripts/check-frontend-coverage.sh
+
+      - name: Upload coverage data
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-frontend-coverage
+          path: |
+            coverage/coverage-summary.json
+            coverage/coverage-final.json
+          retention-days: 90
+
+  coverage-android:
+    name: Coverage Gate (Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download main baseline
+        if: github.event_name == 'pull_request'
+        uses: dawidd6/action-download-artifact@v8
+        with:
+          workflow: ci.yml
+          branch: main
+          name: main-android-coverage
+          path: .clawbench/baseline/
+        continue-on-error: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Run coverage gate check
+        run: ./scripts/check-android-coverage.sh
+
+      - name: Upload coverage data
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-android-coverage
+          path: android/app/build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml
+          retention-days: 90
+
   build-frontend:
     name: Build Frontend
     runs-on: ubuntu-latest
+    needs: [coverage-frontend]
     steps:
       - uses: actions/checkout@v4
 
@@ -42,9 +155,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Test
-        run: npm test
 
       - name: Build
         run: npm run build
@@ -68,7 +178,10 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: |
+          VERSION_CODE=$(git rev-list --count HEAD)
+          VERSION_NAME=$(git describe --tags --always 2>/dev/null || echo "dev")
+          ./gradlew assembleDebug -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

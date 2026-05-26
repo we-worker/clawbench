@@ -3,6 +3,8 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"clawbench/internal/model"
 	"clawbench/internal/service"
@@ -17,15 +19,50 @@ func ServeSessions(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		sessions, err := service.GetSessions(projectPath, "")
+		// Parse optional pagination parameters
+		limit := 0
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if v, err := strconv.Atoi(l); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		cursor := r.URL.Query().Get("cursor")
+		cursorID := r.URL.Query().Get("cursor_id")
+		// Normalize cursor timestamp: frontend sends ISO 8601 (2026-05-16T15:25:50Z)
+		// but SQLite stores as "2026-05-16 15:25:50". Convert T→space and strip Z/+00:00.
+		if cursor != "" {
+			cursor = strings.ReplaceAll(cursor, "T", " ")
+			cursor = strings.TrimSuffix(cursor, "Z")
+			cursor = strings.TrimSuffix(cursor, "+00:00")
+		}
+
+		var sessions []model.ChatSession
+		var hasMore bool
+		var err error
+
+		if limit > 0 {
+			sessions, hasMore, err = service.GetSessionsPaged(projectPath, "", limit, cursor, cursorID)
+		} else {
+			sessions, err = service.GetSessions(projectPath, "")
+			hasMore = false
+		}
 		if err != nil {
 			model.WriteError(w, model.Internal(fmt.Errorf("failed to load sessions")))
 			return
 		}
-		for i := range sessions {
-			sessions[i].Running = service.IsSessionRunning(sessions[i].ID)
+		// Batch-check running state: single mutex acquisition instead of N
+		runningIDs := service.GetRunningSessionIDs()
+		runningSet := make(map[string]bool, len(runningIDs))
+		for _, id := range runningIDs {
+			runningSet[id] = true
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"sessions": sessions})
+		for i := range sessions {
+			sessions[i].Running = runningSet[sessions[i].ID]
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"sessions": sessions,
+			"hasMore":  hasMore,
+		})
 
 	case http.MethodPost:
 		// Check session count limit before creating (0 = unlimited)
@@ -46,11 +83,10 @@ func ServeSessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		backend := req.Backend
-		agentModel := ""
 		agentID := req.AgentID
 		resolvedAgentID := agentID
 		agentSource := "default"
-		backend2, model2, _, _, ok := resolveAgentConfig(agentID)
+		backend2, _, _, _, ok := resolveAgentConfig(agentID)
 		if !ok {
 		writeLocalizedErrorf(w, r, http.StatusServiceUnavailable, "NoAgentsAvailable")
 			return
@@ -58,7 +94,11 @@ func ServeSessions(w http.ResponseWriter, r *http.Request) {
 		if backend2 != "" {
 			backend = backend2
 		}
-		agentModel = model2
+		// Don't pre-fill agent default model into session — leave model empty so
+		// the frontend falls back to the global localStorage preference, making the
+		// user's model choice persist across projects. The model will be persisted
+		// to the session only when the user explicitly sends a message with a modelId.
+		agentModel := ""
 		if resolvedAgentID == "" {
 			resolvedAgentID = model.GetDefaultAgentID()
 		}
@@ -136,13 +176,14 @@ func getSessionID(r *http.Request) string {
 }
 
 // setSessionID sets session ID in cookie.
+// HttpOnly: true prevents JavaScript access, mitigating XSS-based session hijack (ISS-123).
 func setSessionID(w http.ResponseWriter, sessionID string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "chat_session_id",
 		Value:    sessionID,
 		Path:     "/",
 		MaxAge:   86400 * 30, // 30 days
-		HttpOnly: false,
+		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
 }

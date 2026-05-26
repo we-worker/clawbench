@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"clawbench/internal/ai"
 	"clawbench/internal/model"
 	"clawbench/internal/summarize"
+	"clawbench/internal/ws"
 
 	"github.com/robfig/cron/v3"
 )
@@ -238,7 +238,7 @@ func (s *Scheduler) RemoveTask(id int64) {
 	s.mu.Unlock()
 
 	// Cascade: soft-delete associated chat sessions
-	rows, err := DB.Query(`
+	rows, err := DBRead.Query(`
 		SELECT te.session_id, cs.project_path, cs.backend
 		FROM task_executions te
 		JOIN chat_sessions cs ON cs.id = te.session_id
@@ -394,6 +394,13 @@ func (s *Scheduler) registerTaskLocked(task *model.ScheduledTask) error {
 		if err != nil || current.Status != "active" {
 			return
 		}
+		// Skip if a previous execution of this task is still running
+		if s.HasRunningExecutions(taskID) {
+			slog.Info("skipping cron trigger: task already running",
+				slog.Int64("task_id", taskID),
+			)
+			return
+		}
 		s.executeTask(current, projectPath, "auto")
 	}))
 
@@ -412,6 +419,36 @@ func UpdateTaskStats(task *model.ScheduledTask, newStatus string) {
 	now := time.Now()
 	DB.Exec("UPDATE scheduled_tasks SET last_run_at = ?, run_count = run_count + 1, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 		now, newStatus, task.ID)
+}
+
+// emitTaskEvent broadcasts a task_update event to connected clients.
+func emitTaskEvent(taskID, status, executionID, sessionID, projectPath, taskName string) {
+	mgr := ws.GetManager()
+	if mgr == nil {
+		return
+	}
+	data := &ws.TaskUpdateData{
+		TaskID:      taskID,
+		Status:      status,
+		ExecutionID: executionID,
+		SessionID:   sessionID,
+		ProjectPath: projectPath,
+	}
+	// For completed tasks, include session title (task name) and response preview
+	if status == "completed" || status == "cancelled" {
+		if taskName != "" {
+			data.SessionTitle = taskName
+		}
+		if status == "completed" && sessionID != "" {
+			data.ResponsePreview = getSessionResponsePreview(sessionID)
+		}
+	}
+	mgr.BroadcastEvent(ws.ServerMessage{
+		Type:  "event",
+		ID:    ws.GenerateEventID(),
+		Event: "task_update",
+		Data:  data,
+	})
 }
 
 // executeTask runs a scheduled task by invoking the AI backend and inserting
@@ -485,15 +522,27 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 		}
 	}
 
+	// Respect user's global model/thinking preference (from most recent session).
+	// Falls back to agent defaults when no user preference exists.
+	userModel, userThinking := GetLatestUserModel(task.AgentID, projectPath)
+	effectiveModel := userModel
+	if effectiveModel == "" {
+		effectiveModel = agent.DefaultModelID()
+	}
+	effectiveThinking := userThinking
+	if effectiveThinking == "" {
+		effectiveThinking = agent.ThinkingEffort
+	}
+
 	chatReq := ai.ChatRequest{
 		Prompt:             task.Prompt,
 		SessionID:          sessionID,
 		WorkDir:            projectPath,
 		SystemPrompt:       systemPrompt,
-		Model:              agent.DefaultModelID(),
+		Model:              effectiveModel,
 		Command:            agent.Command,
 		AgentID:            task.AgentID,
-		ThinkingEffort:     agent.ThinkingEffort,
+		ThinkingEffort:     effectiveThinking,
 		Resume:             false,
 		ScheduledExecution: true,
 	}
@@ -501,7 +550,17 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 	// Execute AI backend (no timeout - let AI run indefinitely)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Register running execution
+	backend, err := ai.NewBackend(backendName)
+	if err != nil {
+		slog.Error("failed to create backend for task", slog.String("err", err.Error()))
+		cancel() // Release context resources
+		UpdateExecutionStatus(sessionID, "failed")
+		emitTaskEvent(fmt.Sprintf("%d", task.ID), "failed", fmt.Sprintf("%d", executionID), sessionID, projectPath, task.Name)
+		return
+	}
+
+	// Register running execution only after backend creation succeeds (ISS-128).
+	// This prevents the frontend from seeing a "running" state that immediately fails.
 	running := &RunningExecution{
 		ID:          sessionID,
 		TaskID:      task.ID,
@@ -515,17 +574,14 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 		cancel()
 	}()
 
-	backend, err := ai.NewBackend(backendName)
-	if err != nil {
-		slog.Error("failed to create backend for task", slog.String("err", err.Error()))
-		UpdateExecutionStatus(sessionID, "failed")
-		return
-	}
+	// Emit "running" event after backend creation succeeds (ISS-128).
+	emitTaskEvent(fmt.Sprintf("%d", task.ID), "running", fmt.Sprintf("%d", executionID), sessionID, projectPath, task.Name)
 
 	eventCh, err := backend.ExecuteStream(ctx, chatReq)
 	if err != nil {
 		slog.Error("failed to execute stream for task", slog.String("err", err.Error()))
 		UpdateExecutionStatus(sessionID, "failed")
+		emitTaskEvent(fmt.Sprintf("%d", task.ID), "failed", fmt.Sprintf("%d", executionID), sessionID, projectPath, task.Name)
 		return
 	}
 
@@ -555,6 +611,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 			slog.String("session_id", sessionID),
 		)
 		UpdateExecutionStatus(sessionID, "cancelled")
+		emitTaskEvent(fmt.Sprintf("%d", task.ID), "cancelled", fmt.Sprintf("%d", executionID), sessionID, projectPath, task.Name)
 		newStatus := task.Status
 		UpdateTaskStats(task, newStatus)
 		return
@@ -569,6 +626,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 			slog.String("session_id", sessionID),
 		)
 		UpdateExecutionStatus(sessionID, "failed")
+		emitTaskEvent(fmt.Sprintf("%d", task.ID), "failed", fmt.Sprintf("%d", executionID), sessionID, projectPath, task.Name)
 		newStatus := task.Status
 		UpdateTaskStats(task, newStatus)
 		return
@@ -583,9 +641,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 
 	// Build content JSON for the assistant message
 	contentMap := map[string]any{"blocks": blocks}
-	if responseMetadata != nil {
-		contentMap["metadata"] = responseMetadata
-	}
+	contentMap["metadata"] = responseMetadata
 	contentJSON, _ := json.Marshal(contentMap)
 
 	// Write assistant message to chat_history
@@ -595,6 +651,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 
 	// Mark execution as completed
 	UpdateExecutionStatus(sessionID, "completed")
+	emitTaskEvent(fmt.Sprintf("%d", task.ID), "completed", fmt.Sprintf("%d", executionID), sessionID, projectPath, task.Name)
 
 	// Update task execution stats
 	newStatus := task.Status
@@ -602,7 +659,7 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 	// Check repeat mode — for "limited", read current DB value to decide completion
 	if task.RepeatMode == "limited" {
 		var currentCount int
-		if err := DB.QueryRow("SELECT run_count FROM scheduled_tasks WHERE id = ?", task.ID).Scan(&currentCount); err == nil {
+		if err := DBRead.QueryRow("SELECT run_count FROM scheduled_tasks WHERE id = ?", task.ID).Scan(&currentCount); err == nil {
 			if currentCount+1 >= task.MaxRuns {
 				newStatus = "completed"
 			}
@@ -612,11 +669,21 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 		newStatus = "completed"
 	}
 
-	schedule, _ := cron.ParseStandard(task.CronExpr)
+	schedule, err := cron.ParseStandard(task.CronExpr)
+	if err != nil {
+		slog.Error("failed to parse cron expression for next run calculation",
+			slog.Int64("task_id", task.ID),
+			slog.String("cron_expr", task.CronExpr),
+			slog.String("error", err.Error()))
+		// Fall through: nextRunAt remains nil, task stays active but no next_run_at
+	}
 	var nextRunAt *time.Time
-	if newStatus == "active" {
+	if newStatus == "active" && schedule != nil {
 		nr := schedule.Next(time.Now())
 		nextRunAt = &nr
+	} else if newStatus == "active" && schedule == nil {
+		slog.Error("nil cron schedule, cannot calculate next run",
+			slog.Int64("task_id", task.ID))
 	} else {
 		// Task completed, remove from cron
 		s.mu.Lock()
@@ -641,48 +708,10 @@ func (s *Scheduler) executeTask(task *model.ScheduledTask, projectPath string, t
 		slog.String("status", newStatus),
 	)
 
-	// Generate summary asynchronously if task summarizer is configured
-	if s.taskSummarizer != nil {
-		capturedExecID := executionID // capture for goroutine
-		capturedBlocks := blocks      // capture for goroutine
-		go func() {
-			// Use independent context with timeout — do NOT inherit executeTask's
-			// ctx which is cancelled when this function returns.
-			sumCtx, sumCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer sumCancel()
-
-			text := extractTextFromBlocks(capturedBlocks)
-			if utf8.RuneCountInString(text) < summarize.ShortTextThreshold {
-				// Text too short, mark as empty (frontend shows original)
-				if err := UpdateExecutionSummary(capturedExecID, ""); err != nil {
-					slog.Warn("failed to update execution summary (short text)",
-						slog.Int64("exec_id", capturedExecID),
-						slog.String("err", err.Error()),
-					)
-				}
-				return
-			}
-			summary, err := s.taskSummarizer.Summarize(sumCtx, text, "")
-			if err != nil {
-				slog.Warn("task execution summary failed",
-					slog.Int64("task_id", task.ID),
-					slog.Int64("exec_id", capturedExecID),
-					slog.String("err", err.Error()),
-				)
-				return // summary stays NULL, frontend shows original
-			}
-			if err := UpdateExecutionSummary(capturedExecID, summary); err != nil {
-				slog.Warn("failed to update execution summary",
-					slog.Int64("exec_id", capturedExecID),
-					slog.String("err", err.Error()),
-				)
-			}
-			slog.Info("task execution summary completed",
-				slog.Int64("task_id", task.ID),
-				slog.Int64("exec_id", capturedExecID),
-				slog.Int("summary_len", utf8.RuneCountInString(summary)),
-			)
-		}()
+	// Generate summary asynchronously using unified AsyncSummarize
+	if taskSummarizerInstance != nil {
+		projectPath := task.ProjectPath
+		AsyncSummarize("task_execution", executionID, blocks, projectPath, sessionID)
 	}
 }
 
@@ -711,7 +740,7 @@ func GetTasks(projectPath string) ([]model.ScheduledTask, error) {
 		args = []interface{}{projectPath}
 	}
 
-	rows, err := DB.Query(query, args...)
+	rows, err := DBRead.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -741,7 +770,7 @@ func GetTasks(projectPath string) ([]model.ScheduledTask, error) {
 func GetTaskByID(id int64) (*model.ScheduledTask, error) {
 	var t model.ScheduledTask
 	var lastRun, nextRun, lastRead sql.NullTime
-	err := DB.QueryRow(
+	err := DBRead.QueryRow(
 		`SELECT s.id, s.project_path, s.name, s.cron_expr, s.agent_id, s.prompt, s.session_id,
 		s.status, s.repeat_mode, s.max_runs, s.last_run_at, s.next_run_at, s.run_count,
 		s.last_read_at, s.created_at, s.updated_at,
@@ -833,32 +862,6 @@ func MarkExecutionRead(executionID string) error {
 	return err
 }
 
-// UpdateExecutionSummary updates the summary column for a task execution.
-// summary is NULL when not yet generated, "" when text was too short,
-// and non-empty when summarization succeeded.
-func UpdateExecutionSummary(executionID int64, summary string) error {
-	_, err := DB.Exec(
-		"UPDATE task_executions SET summary = ? WHERE id = ?",
-		summary, executionID,
-	)
-	return err
-}
-
-// extractTextFromBlocks extracts plain text from ContentBlock array.
-// Only text-type blocks are included; tool_use, thinking, etc. are skipped.
-func extractTextFromBlocks(blocks []model.ContentBlock) string {
-	var buf strings.Builder
-	for _, b := range blocks {
-		if b.Type == "text" && b.Text != "" {
-			if buf.Len() > 0 {
-				buf.WriteString("\n\n")
-			}
-			buf.WriteString(b.Text)
-		}
-	}
-	return buf.String()
-}
-
 // DeleteTaskExecution deletes a single task execution and soft-deletes the
 // associated chat session. Running executions cannot be deleted.
 func DeleteTaskExecution(executionID int64) error {
@@ -866,7 +869,7 @@ func DeleteTaskExecution(executionID int64) error {
 	var sessionID string
 	var taskID int64
 	var status string
-	err := DB.QueryRow(
+	err := DBRead.QueryRow(
 		"SELECT session_id, task_id, status FROM task_executions WHERE id = ?",
 		executionID,
 	).Scan(&sessionID, &taskID, &status)
@@ -878,9 +881,21 @@ func DeleteTaskExecution(executionID int64) error {
 		return fmt.Errorf("cannot delete a running execution")
 	}
 
-	// Soft-delete the associated chat session
+	// Hard-delete the execution row first (conditional on status to prevent TOCTOU race).
+	// This must happen BEFORE soft-deleting the session: if the conditional DELETE fails
+	// (execution became running between the DBRead check and this DELETE), the session
+	// must remain intact to avoid inconsistent state.
+	result, err := DB.Exec("DELETE FROM task_executions WHERE id = ? AND status != 'running'", executionID)
+	if err != nil {
+		return fmt.Errorf("failed to delete execution: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return fmt.Errorf("cannot delete a running execution")
+	}
+
+	// Only soft-delete the associated chat session AFTER successful execution deletion.
 	var projectPath, backend string
-	err = DB.QueryRow(
+	err = DBRead.QueryRow(
 		"SELECT project_path, backend FROM chat_sessions WHERE id = ?",
 		sessionID,
 	).Scan(&projectPath, &backend)
@@ -893,11 +908,6 @@ func DeleteTaskExecution(executionID int64) error {
 		}
 	}
 
-	// Hard-delete the execution row
-	if _, err := DB.Exec("DELETE FROM task_executions WHERE id = ?", executionID); err != nil {
-		return fmt.Errorf("failed to delete execution: %w", err)
-	}
-
 	// Decrement run_count on the parent task (clamp to 0)
 	DB.Exec("UPDATE scheduled_tasks SET run_count = MAX(run_count - 1, 0), updated_at = CURRENT_TIMESTAMP WHERE id = ?", taskID)
 
@@ -908,7 +918,7 @@ func DeleteTaskExecution(executionID int64) error {
 // and soft-deletes the associated chat sessions.
 func DeleteAllTaskExecutions(taskID int64) error {
 	// Collect all non-running executions with their session info
-	rows, err := DB.Query(`
+	rows, err := DBRead.Query(`
 		SELECT te.id, te.session_id, cs.project_path, cs.backend
 		FROM task_executions te
 		JOIN chat_sessions cs ON cs.id = te.session_id
@@ -947,7 +957,7 @@ func DeleteAllTaskExecutions(taskID int64) error {
 
 	// Reset run_count to match remaining (running) executions
 	var runningCount int
-	DB.QueryRow("SELECT COUNT(*) FROM task_executions WHERE task_id = ?", taskID).Scan(&runningCount)
+	DBRead.QueryRow("SELECT COUNT(*) FROM task_executions WHERE task_id = ?", taskID).Scan(&runningCount)
 	DB.Exec("UPDATE scheduled_tasks SET run_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", runningCount, taskID)
 
 	return nil
@@ -958,14 +968,14 @@ func HasUnreadTasks(projectPath string) (bool, error) {
 	var count int
 	var err error
 	if projectPath == "" {
-		err = DB.QueryRow(
+		err = DBRead.QueryRow(
 			`SELECT COUNT(*) FROM scheduled_tasks s
 			 WHERE (SELECT COUNT(*) FROM task_executions e
 			      WHERE e.task_id = s.id AND e.read_at IS NULL AND e.status != 'running'
 			      AND (s.last_read_at IS NULL OR e.created_at > s.last_read_at)) > 0`,
 		).Scan(&count)
 	} else {
-		err = DB.QueryRow(
+		err = DBRead.QueryRow(
 			`SELECT COUNT(*) FROM scheduled_tasks s
 			 WHERE s.project_path = ?
 			 AND (SELECT COUNT(*) FROM task_executions e

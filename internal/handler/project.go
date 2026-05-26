@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"clawbench/internal/model"
+	"clawbench/internal/platform"
 	"clawbench/internal/service"
 )
 
@@ -87,11 +88,12 @@ func ServeProjectSet(w http.ResponseWriter, r *http.Request) {
 				Path:     "/",
 				MaxAge:   7 * 24 * 3600,
 				HttpOnly: true,
+				Secure:   r.TLS != nil,
 				SameSite: http.SameSiteLaxMode,
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"path": projectPath})
+		json.NewEncoder(w).Encode(map[string]string{"path": projectPath, "homeDir": platform.UserHomeDir()})
 
 	case http.MethodPost:
 		var req struct {
@@ -148,6 +150,7 @@ func ServeProjectSet(w http.ResponseWriter, r *http.Request) {
 			Path:     "/",
 			MaxAge:   7 * 24 * 3600,
 			HttpOnly: true,
+			Secure:   r.TLS != nil,
 			SameSite: http.SameSiteLaxMode,
 		})
 		w.Header().Set("Content-Type", "application/json")
@@ -172,7 +175,9 @@ func ServeWatchDir(w http.ResponseWriter, r *http.Request) {
 		"uploadMaxFiles":        model.UploadMaxFiles,
 		"chatInitialMessages":   model.ChatInitialMessages,
 		"chatPageSize":          model.ChatPageSize,
+		"chatSessionPageSize":   model.ChatSessionPageSize,
 		"chatCollapsedHeight":   model.ChatCollapsedHeight,
 		"sessionMaxCount":       model.SessionMaxCount,
+		"recentProjectsMaxCount": model.RecentProjectsMaxCount,
 	})
 }

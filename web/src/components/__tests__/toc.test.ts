@@ -261,3 +261,345 @@ describe('extractToc', () => {
     expect(texts).toContain('Server')
   })
 })
+
+describe('extractToc - more languages', () => {
+  it('extracts PHP class and function symbols', () => {
+    const content = 'class UserService {\n  public static function find() {\nfunction helper() {'
+    const toc = extractToc(content, 'php')
+    expect(toc.length).toBeGreaterThanOrEqual(2)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('UserService')
+    expect(texts).toContain('helper')
+  })
+
+  it('extracts PHP abstract class and interface', () => {
+    const content = 'abstract class BaseHandler {\ninterface Logger {'
+    const toc = extractToc(content, 'php')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('BaseHandler')
+    expect(texts).toContain('Logger')
+  })
+
+  it('extracts Kotlin class and fun symbols', () => {
+    const content = 'class MainActivity {\nfun onCreate() {\nval name = "test"\nvar count = 0'
+    const toc = extractToc(content, 'kotlin')
+    expect(toc.length).toBeGreaterThanOrEqual(2)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('MainActivity')
+  })
+
+  it('extracts Kotlin data class and object', () => {
+    const content = 'data class User(val name: String)\nobject Singleton'
+    const toc = extractToc(content, 'kotlin')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('User')
+    expect(texts).toContain('Singleton')
+  })
+
+  it('extracts Scala class and def symbols', () => {
+    const content = 'class SparkJob {\nobject Config {\ndef run(): Unit = {\nval version = "1.0"'
+    const toc = extractToc(content, 'scala')
+    expect(toc.length).toBeGreaterThanOrEqual(2)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('SparkJob')
+    expect(texts).toContain('Config')
+  })
+
+  it('extracts Scala case class and trait', () => {
+    const content = 'case class Event(id: Int)\ntrait Serializable'
+    const toc = extractToc(content, 'scala')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('Event')
+    expect(texts).toContain('Serializable')
+  })
+
+  it('extracts Lua local function and method symbols', () => {
+    const content = 'local function init()\nfunction MyClass:render()'
+    const toc = extractToc(content, 'lua')
+    expect(toc.length).toBeGreaterThanOrEqual(2)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('init')
+    expect(texts).toContain('render')
+  })
+
+  it('extracts Nginx server and location blocks', () => {
+    const content = 'server {\n  listen 80;\n  location /api {\n  upstream backend {'
+    const toc = extractToc(content, 'nginx')
+    expect(toc.length).toBeGreaterThanOrEqual(2)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('server')
+    expect(texts).toContain('/api')
+  })
+
+  it('extracts INI section headers', () => {
+    const content = '[database]\nhost=localhost\n[server]\nport=8080'
+    const toc = extractToc(content, 'ini')
+    expect(toc).toHaveLength(2)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('database')
+    expect(texts).toContain('server')
+  })
+
+  it('extracts Vue template/script/style sections', () => {
+    const content = '<template>\n  <div/>\n</template>\n<script setup>\n</script>\n<style scoped>\n</style>'
+    const toc = extractToc(content, 'vue')
+    expect(toc.length).toBeGreaterThanOrEqual(2)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('template')
+    expect(texts).toContain('script')
+  })
+
+  it('extracts Swift class and func symbols', () => {
+    const content = 'class ViewController {\n  func viewDidLoad() {\n  var title: String\n  let count = 0'
+    const toc = extractToc(content, 'swift')
+    expect(toc.length).toBeGreaterThanOrEqual(2)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('ViewController')
+  })
+
+  it('extracts Swift protocol and extension', () => {
+    const content = 'protocol Delegate {\nextension UIView {'
+    const toc = extractToc(content, 'swift')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('Delegate')
+    expect(texts).toContain('UIView')
+  })
+
+  it('extracts GraphQL type and field symbols', () => {
+    const content = 'type Query {\n  users: [User]\n}\ninput CreateUserInput {\n  name: String\n}\nenum Role {\n  ADMIN\n}'
+    const toc = extractToc(content, 'graphql')
+    expect(toc.length).toBeGreaterThanOrEqual(3)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('Query')
+    expect(texts).toContain('CreateUserInput')
+    expect(texts).toContain('Role')
+  })
+
+  it('extracts TOML section headers', () => {
+    const content = '[dependencies]\nserde = "1.0"\n[[bin]]\nname = "app"\n[profile.release]'
+    const toc = extractToc(content, 'toml')
+    expect(toc.length).toBeGreaterThanOrEqual(2)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('dependencies')
+    expect(texts).toContain('bin')
+  })
+
+  it('extracts Makefile targets', () => {
+    const content = 'build:\n\tgo build\n test:\n\tgo test'
+    const toc = extractToc(content, 'makefile')
+    expect(toc.length).toBeGreaterThanOrEqual(1)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('build')
+  })
+})
+
+describe('extractTocGeneric (fallback for unknown lang)', () => {
+  it('extracts key-value pairs by indentation', () => {
+    const content = 'root:\n  child1: value\n  child2:\n    grandchild: val'
+    const toc = extractToc(content, 'unknown_lang')
+    expect(toc.length).toBeGreaterThanOrEqual(1)
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('root')
+  })
+
+  it('skips comment lines starting with //', () => {
+    const content = '// this is a comment\nkey: value'
+    const toc = extractToc(content, 'unknown_lang')
+    const texts = toc.map(t => t.text)
+    expect(texts).not.toContain('this')
+  })
+
+  it('skips comment lines starting with #', () => {
+    const content = '# this is a comment\nkey: value'
+    const toc = extractToc(content, 'unknown_lang')
+    const texts = toc.map(t => t.text)
+    expect(texts).not.toContain('this')
+  })
+
+  it('skips comment lines starting with <!--', () => {
+    const content = '<!-- HTML comment -->\nkey: value'
+    const toc = extractToc(content, 'unknown_lang')
+    const texts = toc.map(t => t.text)
+    expect(texts).not.toContain('!--')
+  })
+
+  it('skips keys shorter than 2 characters', () => {
+    const content = '{\n  a: 1,\n  ab: 2,\n}'
+    const toc = extractToc(content, 'unknown_lang')
+    const texts = toc.map(t => t.text)
+    expect(texts).not.toContain('a')
+    expect(texts).toContain('ab')
+  })
+
+  it('skips { as key', () => {
+    const content = '{: something\nkey: value'
+    const toc = extractToc(content, 'unknown_lang')
+    const texts = toc.map(t => t.text)
+    expect(texts).not.toContain('{')
+  })
+
+  it('skips [ as key', () => {
+    const content = '[: something\nkey: value'
+    const toc = extractToc(content, 'unknown_lang')
+    const texts = toc.map(t => t.text)
+    expect(texts).not.toContain('[')
+  })
+
+  it('limits results to 150 entries', () => {
+    const lines = Array.from({ length: 200 }, (_, i) => `key${i}: value`)
+    const content = lines.join('\n')
+    const toc = extractToc(content, 'unknown_lang')
+    expect(toc.length).toBeLessThanOrEqual(150)
+  })
+
+  it('calculates indent levels correctly', () => {
+    // indent 0 → level 1, indent 2 → level 2, indent 4 → level 3
+    const content = 'root:\n  child:\n    grandchild:'
+    const toc = extractToc(content, 'unknown_lang')
+    expect(toc).toHaveLength(3)
+    expect(toc[0].level).toBe(1) // indent 0 → Math.floor(0/2)+1 = 1
+    expect(toc[1].level).toBe(2) // indent 2 → Math.floor(2/2)+1 = 2
+    expect(toc[2].level).toBe(3) // indent 4 → Math.floor(4/2)+1 = 3
+  })
+
+  it('skips lines that do not end with : , { [ (', () => {
+    const content = 'just a plain line\nkey: value'
+    const toc = extractToc(content, 'unknown_lang')
+    const texts = toc.map(t => t.text)
+    expect(texts).not.toContain('just')
+  })
+
+  it('skips lines with indent > 6', () => {
+    const content = 'root:\n        tooDeep: value'
+    const toc = extractToc(content, 'unknown_lang')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('root')
+    expect(texts).not.toContain('tooDeep')
+  })
+
+  it('returns empty for content with no extractable keys', () => {
+    const toc = extractToc('just plain text\nno keys here', 'unknown_lang')
+    expect(toc).toEqual([])
+  })
+})
+
+describe('slugify edge cases', () => {
+  it('handles pure Chinese with punctuation', () => {
+    expect(slugify('你好，世界！')).toBe('你好-世界')
+  })
+
+  it('handles Unicode emoji', () => {
+    const result = slugify('hello 🚀 world')
+    expect(result).toBe('hello-world')
+  })
+
+  it('handles very long string', () => {
+    const long = 'a'.repeat(10000)
+    const result = slugify(long)
+    expect(result).toBe(long.toLowerCase())
+    expect(result).toHaveLength(10000)
+  })
+
+  it('handles mixed upper and lower case', () => {
+    expect(slugify('FooBARbaz')).toBe('foobarbaz')
+  })
+
+  it('handles Chinese with English and special chars', () => {
+    expect(slugify('第1章：简介（Overview）')).toBe('第1章-简介-overview')
+  })
+})
+
+describe('extractToc edge cases', () => {
+  it('extracts Go type alias', () => {
+    const content = 'type MyAlias = int\ntype AnotherAlias = string'
+    const toc = extractToc(content, 'go')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('MyAlias')
+    expect(texts).toContain('AnotherAlias')
+  })
+
+  it('extracts Go var declarations', () => {
+    const content = 'var version = "1.0"\nvar debug bool'
+    const toc = extractToc(content, 'go')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('version')
+    expect(texts).toContain('debug')
+  })
+
+  it('extracts Go const declarations', () => {
+    const content = 'const MaxRetries = 3\nconst DefaultTimeout = 30'
+    const toc = extractToc(content, 'go')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('MaxRetries')
+    expect(texts).toContain('DefaultTimeout')
+  })
+
+  it('extracts TypeScript enum', () => {
+    const content = 'enum Color {\n  Red,\n  Green\n}'
+    const toc = extractToc(content, 'typescript')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('Color')
+  })
+
+  it('extracts TypeScript interface', () => {
+    const content = 'interface User {\n  name: string\n}\nexport interface Config {'
+    const toc = extractToc(content, 'typescript')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('User')
+    expect(texts).toContain('Config')
+  })
+
+  it('extracts TypeScript type alias', () => {
+    const content = 'type ID = string\nexport type Result<T> = { data: T }'
+    const toc = extractToc(content, 'typescript')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('ID')
+    expect(texts).toContain('Result')
+  })
+
+  it('extracts Rust impl blocks', () => {
+    const content = 'impl Server {\n  pub fn start() {}\n}\nimpl<T> Handler for Server {'
+    const toc = extractToc(content, 'rust')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('Server')
+  })
+
+  it('extracts Rust trait definitions', () => {
+    const content = 'pub trait Handler {\n  fn handle(&self);\n}'
+    const toc = extractToc(content, 'rust')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('Handler')
+  })
+
+  it('extracts Rust mod declarations', () => {
+    const content = 'pub mod network;\npub mod config;'
+    const toc = extractToc(content, 'rust')
+    const texts = toc.map(t => t.text)
+    // \S+ captures the semicolon too, e.g. "network;"
+    expect(texts.some(t => t.startsWith('network'))).toBe(true)
+    expect(texts.some(t => t.startsWith('config'))).toBe(true)
+  })
+
+  it('handles multi-line comments in Go without interference', () => {
+    const content = '/* This is a\n   multi-line comment */\ntype Server struct {}'
+    const toc = extractToc(content, 'go')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('Server')
+  })
+
+  it('handles C++ namespace and template class', () => {
+    const content = 'namespace myapp {\ntemplate<typename T> class Container {'
+    const toc = extractToc(content, 'cpp')
+    const texts = toc.map(t => t.text)
+    expect(texts).toContain('myapp')
+    expect(texts).toContain('Container')
+  })
+
+  it('strips trailing braces and angle brackets from matched text', () => {
+    const content = 'type Server<T> struct {\nfunc (s *Server) Start() error {'
+    const toc = extractToc(content, 'go')
+    const texts = toc.map(t => t.text)
+    // The regex captures "Server<T>" but text is cleaned to "Server"
+    expect(texts).toContain('Server')
+  })
+})

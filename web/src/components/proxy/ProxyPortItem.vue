@@ -1,33 +1,41 @@
 <template>
   <div class="proxy-port-item" :class="{ inactive: !active && !tunnelDisconnected }">
-    <div class="port-info">
-      <div class="port-main">
-        <span class="port-number">{{ port }}</span>
+    <!-- Top row: port + badges | actions -->
+    <div class="port-row-top">
+      <div class="port-badges">
+        <span class="port-number">{{ localPort }}</span>
         <span class="port-protocol" :class="protocol">{{ protocol }}</span>
-        <span
-          class="port-status"
-          :class="statusClass"
-          :title="statusTitle"
-        ></span>
-        <span v-if="name" class="port-name">{{ name }}</span>
+        <span class="port-status" :class="statusClass" :title="statusTitle"></span>
+      </div>
+      <div class="port-actions">
+        <button class="port-action-btn sandbox" @click.stop="$emit('open', localPort, protocol, host)" :title="t('proxy.openInSandbox')">
+          <Box :size="14" />
+        </button>
+        <button class="port-action-btn open" @click.stop="$emit('openExternal', localPort, protocol, host)" :title="t('proxy.openInBrowser')">
+          <ExternalLink :size="14" />
+        </button>
+        <button class="port-action-btn reconnect" :class="{ spinning: reconnecting }" :disabled="reconnecting" @click.stop="$emit('reconnect', localPort)" :title="t('proxy.reconnectPort')">
+          <RotateCcw :size="14" />
+        </button>
+        <button class="port-action-btn edit" @click.stop="$emit('edit', localPort)" :title="t('common.edit')">
+          <Pencil :size="14" />
+        </button>
+        <button class="port-action-btn delete" @click.stop="$emit('remove', localPort)" :title="t('common.delete')">
+          <Trash2 :size="14" />
+        </button>
       </div>
     </div>
-    <div class="port-actions">
-      <button class="port-action-btn sandbox" @click.stop="$emit('open', port, protocol)" :title="t('proxy.openInSandbox')">
-        <Box :size="14" />
-      </button>
-      <button class="port-action-btn open" @click.stop="$emit('openExternal', port, protocol)" :title="t('proxy.openInBrowser')">
-        <ExternalLink :size="14" />
-      </button>
-      <button class="port-action-btn delete" @click.stop="$emit('remove', port)" :title="t('common.delete')">
-        <Trash2 :size="14" />
-      </button>
+    <!-- Bottom row: target + name (secondary info) -->
+    <div v-if="hasDetail" class="port-row-bottom">
+      <span v-if="port !== localPort" class="port-target">→ {{ host || 'localhost' }}:{{ port }}</span>
+      <span v-else-if="host" class="port-host">{{ host }}</span>
+      <span v-if="name" class="port-name">{{ name }}</span>
     </div>
   </div>
 </template>
 
 <script setup>
-import { Box, ExternalLink, Trash2 } from 'lucide-vue-next'
+import { Box, ExternalLink, RotateCcw, Pencil, Trash2 } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -35,13 +43,20 @@ const { t } = useI18n()
 
 const props = defineProps({
   port: { type: Number, required: true },
+  localPort: { type: Number, required: true },
+  host: { type: String, default: '' },
   name: { type: String, default: '' },
   protocol: { type: String, default: 'http' },
   active: { type: Boolean, default: false },
   tunnelDisconnected: { type: Boolean, default: false },
+  reconnecting: { type: Boolean, default: false },
 })
 
-defineEmits(['open', 'openExternal', 'remove'])
+defineEmits(['open', 'openExternal', 'reconnect', 'edit', 'remove'])
+
+const hasDetail = computed(() => {
+  return props.port !== props.localPort || props.host || props.name
+})
 
 const statusClass = computed(() => {
   if (props.active) return 'active'
@@ -59,8 +74,8 @@ const statusTitle = computed(() => {
 <style scoped>
 .proxy-port-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 4px;
   padding: 8px 10px;
   border-radius: 6px;
   border: 1px solid var(--border-color, #e5e5e5);
@@ -70,18 +85,19 @@ const statusTitle = computed(() => {
   opacity: 0.6;
 }
 
-.port-info {
-  flex: 1;
-  min-width: 0;
+/* Top row: badges left, actions right */
+.port-row-top {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.port-main {
+.port-badges {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .port-number {
@@ -141,17 +157,9 @@ const statusTitle = computed(() => {
   }
 }
 
-.port-name {
-  font-size: 13px;
-  color: var(--text-secondary, #666);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .port-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   flex-shrink: 0;
 }
 
@@ -184,8 +192,69 @@ const statusTitle = computed(() => {
   background: var(--bg-tertiary, #f0f0f0);
 }
 
+.port-action-btn.reconnect:hover {
+  color: #22c55e;
+  background: var(--bg-tertiary, #f0f0f0);
+}
+
+.port-action-btn.reconnect.spinning svg {
+  animation: spin 1s linear infinite;
+}
+
+.port-action-btn.reconnect:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.port-action-btn.edit:hover {
+  color: #f59e0b;
+  background: var(--bg-tertiary, #f0f0f0);
+}
+
 .port-action-btn.delete:hover {
   color: #dc3545;
   background: var(--bg-tertiary, #f0f0f0);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Bottom row: secondary info */
+.port-row-bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.port-target {
+  font-size: 11px;
+  font-family: monospace;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+
+.port-host {
+  font-size: 11px;
+  font-family: monospace;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(107, 114, 128, 0.1);
+  color: var(--text-secondary, #666);
+}
+
+.port-name {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 </style>

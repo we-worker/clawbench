@@ -34,8 +34,14 @@ func ServeTasks(w http.ResponseWriter, r *http.Request) {
 		for i := range tasks {
 			tasks[i].RunningCount = runningCounts[tasks[i].ID]
 		}
-		// Check if any task has unread executions
-		hasUnread, _ := service.HasUnreadTasks(projectPath)
+		// Derive hasUnread from already-fetched tasks (avoid redundant DB query)
+		hasUnread := false
+		for _, t := range tasks {
+			if t.UnreadCount > 0 {
+				hasUnread = true
+				break
+			}
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks, "hasUnread": hasUnread})
 
 	case http.MethodPost:
@@ -316,7 +322,8 @@ func ServeTaskByID(w http.ResponseWriter, r *http.Request) {
 
 // serveTaskExecutions returns the execution history for a task.
 // It joins task_executions with chat_history to fetch the assistant content.
-// Supports optional ?limit=N query parameter (default: unlimited).
+// Supports cursor-based pagination: ?limit=N&cursor=timestamp&cursor_id=id
+// When limit > 0, returns { executions, hasMore }. Otherwise returns all (no hasMore).
 func serveTaskExecutions(w http.ResponseWriter, r *http.Request, taskID int64, projectPath string) {
 	task, err := service.GetTaskByID(taskID)
 	if err != nil {
@@ -328,12 +335,21 @@ func serveTaskExecutions(w http.ResponseWriter, r *http.Request, taskID int64, p
 		return
 	}
 
-	// Optional limit query parameter
+	// Parse pagination parameters
 	limit := 0
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 			limit = l
 		}
+	}
+	cursor := r.URL.Query().Get("cursor")
+	cursorID := r.URL.Query().Get("cursor_id")
+	// Normalize cursor timestamp: frontend sends ISO 8601 (e.g. 2026-05-16T15:25:50Z)
+	// but SQLite stores as "2026-05-16 15:25:50". Convert T→space and strip Z/+00:00.
+	if cursor != "" {
+		cursor = strings.ReplaceAll(cursor, "T", " ")
+		cursor = strings.TrimSuffix(cursor, "Z")
+		cursor = strings.TrimSuffix(cursor, "+00:00")
 	}
 
 	type Execution struct {
@@ -349,19 +365,31 @@ func serveTaskExecutions(w http.ResponseWriter, r *http.Request, taskID int64, p
 
 	query := `
 		SELECT te.id, te.session_id, te.trigger_type, te.status, te.created_at,
-		       te.read_at, te.summary,
+		       te.read_at, sm.summary,
 		       ch.content AS assistant_content
 		FROM task_executions te
+		LEFT JOIN summaries sm ON sm.target_type = 'task_execution' AND sm.target_id = te.id
 		LEFT JOIN chat_history ch ON ch.session_id = te.session_id
 		    AND ch.role = 'assistant'
 		    AND ch.deleted = 0
 		    AND ch.streaming = 0
-		WHERE te.task_id = ?
-		ORDER BY te.created_at DESC`
+		WHERE te.task_id = ?`
 	args := []any{taskID}
+
+	// Apply cursor filter for pagination
+	if cursor != "" && cursorID != "" {
+		cursorIDInt, cerr := strconv.ParseInt(cursorID, 10, 64)
+		if cerr == nil && cursorIDInt > 0 {
+			query += " AND (te.created_at < ? OR (te.created_at = ? AND te.id < ?))"
+			args = append(args, cursor, cursor, cursorIDInt)
+		}
+	}
+
+	query += " ORDER BY te.created_at DESC, te.id DESC"
+
 	if limit > 0 {
 		query += " LIMIT ?"
-		args = append(args, limit)
+		args = append(args, limit+1)
 	}
 
 	rows, err := service.DB.Query(query, args...)
@@ -405,5 +433,17 @@ func serveTaskExecutions(w http.ResponseWriter, r *http.Request, taskID int64, p
 	if executions == nil {
 		executions = []Execution{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"executions": executions})
+
+	// Determine hasMore using limit+1 trick
+	hasMore := false
+	if limit > 0 && len(executions) > limit {
+		hasMore = true
+		executions = executions[:limit]
+	}
+
+	result := map[string]any{"executions": executions}
+	if limit > 0 {
+		result["hasMore"] = hasMore
+	}
+	writeJSON(w, http.StatusOK, result)
 }

@@ -1,5 +1,5 @@
-import { onUnmounted, type Ref } from 'vue'
-import { cancelChat } from '@/utils/api.ts'
+import { onMounted, onUnmounted, type Ref } from 'vue'
+import { cancelChat } from '@/utils/api'
 import { useReconnect } from './useReconnect'
 import { gt } from '@/composables/useLocale'
 import { FILE_MODIFYING_TOOLS, findLastBlockOfType, forceCleanupStreamingState as _forceCleanupStreamingState } from '@/utils/chatStreamUtils.ts'
@@ -58,13 +58,19 @@ export function useChatStream(options: UseChatStreamOptions) {
   const TOOL_USE_TIMEOUT_MS = 30000 // 30 seconds without 'done' event = mark as done
 
   const reconnect = useReconnect({
-    maxAttempts: 1,
+    maxAttempts: 3,
     baseDelay: 2000,
-    onReconnect: () => connectStream(currentSessionId.value),
+    onReconnect: () => connectStream(currentSessionId.value, true),
   })
 
   function debouncedRender() {
     if (renderTimer) clearTimeout(renderTimer)
+    // Panel not visible: skip rendering and scrolling — data still accumulates,
+    // rendering will catch up when the tab becomes active (loadHistory on re-activate)
+    if (!isOpen.value) {
+      renderTimer = null
+      return
+    }
     renderTimer = window.setTimeout(() => {
       onRenderNeeded()
       onScrollBottom()
@@ -129,7 +135,7 @@ export function useChatStream(options: UseChatStreamOptions) {
     const MAX_JSON_PARSE_FAILURES = 5
     pollingInterval = setInterval(async () => {
       try {
-        const resp = await fetch(`/api/ai/chat?session_id=${encodeURIComponent(currentSessionId.value)}`)
+        const resp = await fetch(`/api/ai/chat?session_id=${encodeURIComponent(currentSessionId.value)}`, { credentials: 'same-origin' })
         if (!resp.ok) {
           throw new Error(`HTTP ${resp.status}`)
         }
@@ -163,10 +169,13 @@ export function useChatStream(options: UseChatStreamOptions) {
           stopPolling()
           messages.value = latestMsgs
           currentSessionId.value = data.sessionId || currentSessionId.value
-          onRenderNeeded(true)
+          // Only render and scroll when panel is visible
+          if (isOpen.value) {
+            onRenderNeeded(true)
+            onScrollBottom(true)
+          }
           loading.value = false
           onMessage()
-          onScrollBottom(true)
           onStreamEnd?.('done')
           if (!isOpen.value) {
             const lastMsg = messages.value[messages.value.length - 1]
@@ -188,8 +197,11 @@ export function useChatStream(options: UseChatStreamOptions) {
         }
         messages.value = latestMsgs
         currentSessionId.value = data.sessionId || currentSessionId.value
-        onRenderNeeded(true)
-        onScrollBottom()
+        // Only render and scroll when panel is visible
+        if (isOpen.value) {
+          onRenderNeeded(true)
+          onScrollBottom()
+        }
       } catch (err) {
         console.error('Polling error:', err)
         stopPolling()
@@ -204,10 +216,15 @@ export function useChatStream(options: UseChatStreamOptions) {
     }, 2000)
   }
 
-  function connectStream(sessionId: string) {
+  function connectStream(sessionId: string, isRetry = false) {
     disconnectStream()
     stopPolling()
-    reconnect.reset()
+    // Only reset reconnect state for fresh/intentional connections (user action,
+    // foreground return, network recovery). Do NOT reset for automatic reconnection
+    // attempts — that would clear reconnectAttempts, making maxAttempts useless.
+    if (!isRetry) {
+      reconnect.reset()
+    }
 
     // Find existing streaming message or create a new one
     let streamingMsg = messages.value.find(m => m.role === 'assistant' && m.streaming)
@@ -238,10 +255,21 @@ export function useChatStream(options: UseChatStreamOptions) {
       return true
     }
 
-    eventSource = new EventSource(`/api/ai/chat/stream?session_id=${encodeURIComponent(sessionId)}`)
+    eventSource = new EventSource(`/api/ai/chat/stream?session_id=${encodeURIComponent(sessionId)}`, { withCredentials: true })
 
     // Start stream timeout
     resetStreamTimeout()
+
+    eventSource.addEventListener('resume_split', () => {
+      if (!guard()) return
+      resetStreamTimeout()
+      // AutoResumeBackend detected ExitPlanMode and will auto-resume.
+      // Clear the streaming message's blocks so that resume content
+      // starts fresh — prevents duplicate rendering of pre-resume
+      // content (Issue #60).
+      streamingMsg.blocks = []
+      debouncedRender()
+    })
 
     eventSource.addEventListener('content', (e) => {
       if (!guard()) return
@@ -271,7 +299,10 @@ export function useChatStream(options: UseChatStreamOptions) {
       } else {
         blocks.push({ type: 'thinking', text: data.text })
       }
-      onScrollBottom()
+      // Skip scroll when panel not visible
+      if (isOpen.value) {
+        onScrollBottom()
+      }
     })
 
     eventSource.addEventListener('tool_use', (e) => {
@@ -328,7 +359,10 @@ export function useChatStream(options: UseChatStreamOptions) {
           toolUseTimeouts.set(data.id, timer)
         }
       }
-      onScrollBottom()
+      // Skip scroll when panel not visible
+      if (isOpen.value) {
+        onScrollBottom()
+      }
     })
 
     eventSource.addEventListener('tool_result', (e) => {
@@ -342,7 +376,10 @@ export function useChatStream(options: UseChatStreamOptions) {
         if (data.output !== undefined) existing.output = data.output
         if (data.status !== undefined) existing.status = data.status
       }
-      onScrollBottom()
+      // Skip scroll when panel not visible
+      if (isOpen.value) {
+        onScrollBottom()
+      }
     })
 
     eventSource.addEventListener('metadata', (e) => {
@@ -356,12 +393,17 @@ export function useChatStream(options: UseChatStreamOptions) {
       if (streamTimeout) { clearTimeout(streamTimeout); streamTimeout = null }
       clearToolUseTimeouts()
       disconnectStream()
+      reconnect.reset() // Stream completed — reset reconnect state for future sessions
       // Reload from DB to ensure complete content — SSE events may have been
       // dropped during transmission, so the local state may be incomplete.
       onLoadHistory().finally(() => {
         loading.value = false
         onMessage()
-        onScrollBottom(true)
+        // Only scroll when panel is visible; loadHistory on
+        // re-activate will handle the refresh
+        if (isOpen.value) {
+          onScrollBottom(true)
+        }
         onStreamEnd?.('done')
         if (!isOpen.value) {
           const lastMsg = messages.value[messages.value.length - 1]
@@ -402,7 +444,10 @@ export function useChatStream(options: UseChatStreamOptions) {
       const warningBlock = { type: 'warning', text: data.text }
       if (data.reason) warningBlock.reason = data.reason
       streamingMsg.blocks.push(warningBlock)
-      onRenderNeeded()
+      // Skip render when panel not visible — data is accumulated regardless
+      if (isOpen.value) {
+        onRenderNeeded()
+      }
     })
 
     eventSource.addEventListener('queue_consume', (e) => {
@@ -435,11 +480,14 @@ export function useChatStream(options: UseChatStreamOptions) {
       // Vue's reactive proxy (see connectStream for the same pattern)
       streamingMsg = messages.value[messages.value.length - 1]
 
-      onRenderNeeded()
-      // Force scroll: queue_done removes the streaming indicator which shrinks layout,
-      // making isAtBottom=false even though the user is visually at the bottom.
-      // Since new messages are being injected, always scroll to show them.
-      onScrollBottom(true)
+      // Skip render/scroll when panel not visible
+      if (isOpen.value) {
+        onRenderNeeded()
+        // Force scroll: queue_done removes the streaming indicator which shrinks layout,
+        // making isAtBottom=false even though the user is visually at the bottom.
+        // Since new messages are being injected, always scroll to show them.
+        onScrollBottom(true)
+      }
     })
 
     eventSource.addEventListener('queue_update', (e) => {
@@ -455,11 +503,14 @@ export function useChatStream(options: UseChatStreamOptions) {
       // Current streaming message is finalized — clear loading state
       // before the next queued message starts (queue_consume)
       _forceCleanupStreamingState(messages.value, { onRenderNeeded, onExtractScheduledTasks })
-      // Re-sync scroll position: removing the streaming indicator and pending
-      // messages shrinks the layout, which can make isAtBottom=false even when
-      // the user is visually at the bottom. Scroll to ensure isAtBottom stays
-      // accurate before queue_consume arrives.
-      onScrollBottom()
+      // Skip scroll when panel not visible
+      if (isOpen.value) {
+        // Re-sync scroll position: removing the streaming indicator and pending
+        // messages shrinks the layout, which can make isAtBottom=false even when
+        // the user is visually at the bottom. Scroll to ensure isAtBottom stays
+        // accurate before queue_consume arrives.
+        onScrollBottom()
+      }
     })
 
     eventSource.addEventListener('error', (e) => {
@@ -489,6 +540,7 @@ export function useChatStream(options: UseChatStreamOptions) {
         reconnect.scheduleReconnect()
       } else {
         // Too many attempts or session inactive — fall back to polling
+        reconnect.reset() // Clear reconnect state before falling back to polling
         forceCleanupStreamingState()
         pollUntilDone()
       }
@@ -520,18 +572,34 @@ export function useChatStream(options: UseChatStreamOptions) {
     if (eventSource) {
       console.info('Network recovered, reconnecting SSE stream')
       disconnectStream()
-      reconnect.reset()
+      // connectStream with isRetry=false will reset reconnect state
       connectStream(currentSessionId.value)
     }
   }
   window.addEventListener('online', handleOnline)
 
+  // Visibility change: always close SSE and polling when going to background.
+  // Mobile OS will throttle/kill background connections anyway, so keeping SSE
+  // alive is a waste of resources. On foreground, ChatPanel's visibility handler
+  // calls loadHistory which reconnects the stream if the session is still running.
+  function handleStreamVisibility() {
+    if (document.visibilityState === 'hidden') {
+      disconnectStream()
+      stopPolling()
+    }
+  }
+
   // Cleanup on unmount
+  onMounted(() => {
+    document.addEventListener('visibilitychange', handleStreamVisibility)
+  })
+
   onUnmounted(() => {
     disconnectStream()
     stopPolling()
     clearToolUseTimeouts()
     window.removeEventListener('online', handleOnline)
+    document.removeEventListener('visibilitychange', handleStreamVisibility)
   })
 
   return {

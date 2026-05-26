@@ -1,5 +1,5 @@
 <template>
-  <BottomSheet ref="bottomSheetRef" :open="open" compact :title="t('session.title')" @close="$emit('close')">
+  <BottomSheet ref="bottomSheetRef" :open="open" auto :title="t('session.title')" @close="$emit('close')">
     <template #header>
       <Bot :size="16" class="bs-header-icon" />
       <span class="bs-header-title">{{ t('session.title') }}</span>
@@ -8,38 +8,40 @@
       </button>
     </template>
 
-    <div class="session-list">
+    <div class="session-list" ref="listRef">
       <div v-if="loading" class="session-loading">{{ t('common.loading') }}</div>
       <div v-else-if="sessions.length === 0" class="session-empty">{{ t('session.noSessions') }}</div>
-      <div
-        v-for="session in sessionsWithStatus"
-        :key="session.id"
-        class="session-item"
-        :class="{ active: session.id === currentSessionId, running: session.running }"
-        @click="selectSession(session.id, session.backend)"
-      >
-        <div class="session-item-main">
-          <div class="session-item-info">
-            <div class="session-item-header">
-              <span class="session-item-title">{{ session.title }}</span>
-              <span v-if="session.unreadCount > 0" class="session-item-unread">{{ session.unreadCount }}</span>
-              <span v-if="session.running" class="session-item-status running">
-                <span class="status-dot"></span>
-                {{ t('session.running') }}
-              </span>
+      <template v-else>
+        <div
+          v-for="session in sessionsWithStatus"
+          :key="session.id"
+          class="session-item"
+          :class="{ active: session.id === currentSessionId, running: session.running }"
+          @click="selectSession(session.id, session.backend)"
+        >
+          <div class="session-item-main">
+            <div class="session-item-info">
+              <div class="session-item-header">
+                <span class="session-item-title">{{ session.title }}</span>
+                <span v-if="session.unreadCount > 0" class="session-item-unread">{{ session.unreadCount }}</span>
+                <span v-if="session.running" class="session-running-dot"></span>
+              </div>
+              <div class="session-item-meta">
+                <span class="session-item-time">{{ formatRelativeTime(session.updatedAt) }}</span>
+                <span class="session-item-agent">{{ getAgentIcon(session.agentId) }} {{ getAgentName(session.agentId) }}</span>
+                <span class="session-item-backend">{{ session.backend }}</span>
+                <span v-if="session.model" class="session-item-model">{{ session.model }}</span>
+              </div>
             </div>
-            <div class="session-item-meta">
-              <span class="session-item-time">{{ formatRelativeTime(session.updatedAt) }}</span>
-              <span class="session-item-agent">{{ getAgentIcon(session.agentId) }} {{ getAgentName(session.agentId) }}</span>
-              <span class="session-item-backend">{{ session.backend }}</span>
-              <span v-if="session.model" class="session-item-model">{{ session.model }}</span>
-            </div>
+            <button class="session-item-delete" @click.stop="deleteSession(session.id)" :title="t('common.delete')">
+              <Trash2 :size="14" />
+            </button>
           </div>
-          <button class="session-item-delete" @click.stop="deleteSession(session.id)" :title="t('common.delete')">
-            <Trash2 :size="14" />
-          </button>
         </div>
-      </div>
+        <div ref="sentinelRef" class="session-list-sentinel"></div>
+        <div v-if="loadingMore" class="session-loading-more">{{ t('common.loading') }}</div>
+        <div v-else-if="!hasMore && sessions.length > 0" class="session-list-end"></div>
+      </template>
     </div>
   </BottomSheet>
 
@@ -79,12 +81,14 @@
 <script setup>
 import { useI18n } from 'vue-i18n'
 import { Bot, Plus, Trash2 } from 'lucide-vue-next'
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
 import BottomSheet from '@/components/common/BottomSheet.vue'
 import ModalDialog from '@/components/common/ModalDialog.vue'
-import { useAgents } from '@/composables/useAgents.ts'
+import { useAgents } from '@/composables/useAgents'
 import { useDialog } from '@/composables/useDialog.ts'
+import { useSessionIdentity } from '@/composables/useSessionIdentity.ts'
 import { formatRelativeTime } from '@/utils/format.ts'
+import { store } from '@/stores/app.ts'
 
 const { t } = useI18n()
 const props = defineProps({
@@ -98,8 +102,15 @@ const emit = defineEmits(['close', 'select', 'create', 'delete'])
 const bottomSheetRef = ref(null)
 const sessions = ref([])
 const loading = ref(false)
+const loadingMore = ref(false)
+const hasMore = ref(false)
+const listRef = ref(null)
+const sentinelRef = ref(null)
+let observer = null
+const pageSize = computed(() => store.state.chatSessionPageSize || 10)
 const { agents, loadAgents, getAgentIcon, getAgentName, isDefaultAgent, getAgentDefaultModelName } = useAgents()
 const dialog = useDialog()
+const { runningSessionsVersion } = useSessionIdentity()
 
 /** Get the display name of an agent's default model. */
 function agentDefaultModelName(agentId) {
@@ -111,13 +122,20 @@ const showAgentSelector = ref(false)
 let agentSelectorOpenTime = 0
 
 const sessionsWithStatus = computed(() => {
+  // Access runningSessionsVersion to establish reactive dependency
+  // so the computed re-evaluates when sessions start/stop running
+  void runningSessionsVersion.value
   return sessions.value.map(s => ({
     ...s,
+    // WS-maintained runningSessionIds is the authoritative source of truth.
+    // It is initialized from API on app start (loadSessionsOnce) and updated
+    // in real-time via WS session_update events. The API snapshot s.running
+    // is stale once the drawer is open — do NOT fall back to it.
     running: props.runningSessionIds.has(s.id)
   }))
 })
 
-defineExpose({ loadSessions, openAgentSelector })
+defineExpose({ loadSessions, openAgentSelector, addSessionLocally })
 
 async function openAgentSelector() {
   await loadAgents()
@@ -144,24 +162,57 @@ async function handleCreateClick() {
 }
 
 async function loadSessions() {
-  const isInitialLoad = sessions.value.length === 0
-  if (isInitialLoad) {
-    loading.value = true
-  }
+  loading.value = true
+  hasMore.value = false
   try {
-    const resp = await fetch('/api/ai/sessions')
+    const resp = await fetch(`/api/ai/sessions?limit=${pageSize.value}`)
     const data = await resp.json()
     sessions.value = data.sessions || []
+    hasMore.value = !!data.hasMore
   } catch (err) {
     console.error('Failed to load sessions:', err)
-    if (isInitialLoad) {
-      sessions.value = []
-    }
+    sessions.value = []
   } finally {
-    if (isInitialLoad) {
-      loading.value = false
-    }
+    loading.value = false
+    await nextTick()
+    setupObserver()
   }
+}
+
+async function loadMoreSessions() {
+  if (loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
+  try {
+    const last = sessions.value[sessions.value.length - 1]
+    if (!last) return
+    const cursor = last.updatedAt
+    const cursorId = last.id
+    const resp = await fetch(`/api/ai/sessions?limit=${pageSize.value}&cursor=${encodeURIComponent(cursor)}&cursor_id=${encodeURIComponent(cursorId)}`)
+    const data = await resp.json()
+    const more = data.sessions || []
+    if (more.length > 0) {
+      sessions.value = [...sessions.value, ...more]
+    }
+    hasMore.value = !!data.hasMore
+  } catch (err) {
+    console.error('Failed to load more sessions:', err)
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+function setupObserver() {
+  if (observer) {
+    observer.disconnect()
+    observer = null
+  }
+  if (!sentinelRef.value || !listRef.value) return
+  observer = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && hasMore.value && !loadingMore.value) {
+      loadMoreSessions()
+    }
+  }, { threshold: 0.1, rootMargin: '100px', root: listRef.value })
+  observer.observe(sentinelRef.value)
 }
 
 function selectSession(sessionId, backend) {
@@ -182,13 +233,32 @@ async function deleteSession(sessionId) {
   if (!await dialog.confirm(t('session.confirmDelete'), { dangerous: true })) return
   const session = sessions.value.find(s => s.id === sessionId)
   emit('delete', sessionId, session?.backend)
-  // Reload list after a short delay to let the delete API complete
-  setTimeout(() => loadSessions(), 300)
+  // Optimistic local removal — no API reload needed while drawer is open.
+  // Next open will do a full loadSessions() to catch any changes made while closed.
+  sessions.value = sessions.value.filter(s => s.id !== sessionId)
 }
 
+function addSessionLocally(session) {
+  if (!session) return
+  // Prepend to list, avoid duplicate if already present
+  if (sessions.value.some(s => s.id === session.id)) return
+  sessions.value = [session, ...sessions.value]
+}
+
+// Load from API when the drawer opens. While the drawer is open, local
+// mutations (delete, create) update the sessions array directly — no reload
+// needed. The next open will do a full loadSessions() to catch any changes
+// that happened while the drawer was closed.
 watch(() => props.open, async (val) => {
   if (val) {
     await Promise.all([loadSessions(), loadAgents()])
+  }
+})
+
+onUnmounted(() => {
+  if (observer) {
+    observer.disconnect()
+    observer = null
   }
 })
 </script>
@@ -204,10 +274,20 @@ watch(() => props.open, async (val) => {
   flex: 1;
 }
 
-.session-loading,
+.session-loading {
+  min-height: 40vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #999);
+  font-size: 13px;
+}
+
 .session-empty {
-  padding: 24px 12px;
-  text-align: center;
+  min-height: 40vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted, #999);
   font-size: 13px;
 }
@@ -275,27 +355,19 @@ watch(() => props.open, async (val) => {
   padding: 1px 5px;
   border-radius: 8px;
   font-weight: 600;
-  background: #ef4444;
+  background: var(--accent-color, #0066cc);
   color: #fff;
   flex-shrink: 0;
   min-width: 14px;
   text-align: center;
 }
 
-.session-item-status.running {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  color: #22c55e;
-  font-weight: 500;
-}
-
-.status-dot {
+.session-running-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: #22c55e;
+  flex-shrink: 0;
   animation: pulse 1.5s infinite;
 }
 
@@ -512,4 +584,19 @@ watch(() => props.open, async (val) => {
 }
 
 .btn-secondary:hover { background: #e0e0e0; }
+
+.session-list-sentinel {
+  height: 1px;
+}
+
+.session-loading-more {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-muted, #999);
+  font-size: 12px;
+}
+
+.session-list-end {
+  height: 0;
+}
 </style>

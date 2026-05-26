@@ -7,14 +7,11 @@
     <LoginView v-else-if="!isAuthenticated" @login-success="handleLoginSuccess" />
 
     <!-- Main app -->
-    <div v-else class="app-container" :class="{ 'chrome-hidden': terminalKeyboardActive }">
+    <div v-else class="app-container" :class="{ 'chrome-hidden': terminalKeyboardActive, 'chat-keyboard-open': chatKeyboardActive, 'project-switching': switchingProject }" :key="projectKey">
       <AppHeader
         :hidden="terminalActive"
         :project-root="projectRoot"
-        :theme="theme"
-        @toggle-theme="toggleTheme"
         @open-project-dialog="handleOpenProjectDialog"
-        @reconfigure-server="handleReconfigureServer"
       />
 
       <main class="main-content">
@@ -108,6 +105,7 @@
           <TabPanel tabId="history" :activeTab="activeTab" :noHeader="true">
             <GitHistoryContent
               mode="project"
+              :active="activeTab === 'history'"
               @open-file="handleSelectFile"
             />
           </TabPanel>
@@ -128,6 +126,11 @@
           <!-- Tasks Tab -->
           <TabPanel tabId="tasks" :activeTab="activeTab" :noHeader="true">
             <TaskTab :active="activeTab === 'tasks'" @open-file="handleTaskOpenFile" />
+          </TabPanel>
+
+          <!-- Settings Tab -->
+          <TabPanel tabId="settings" :activeTab="activeTab" :noHeader="true">
+            <SettingsPage :active="activeTab === 'settings'" />
           </TabPanel>
         </div>
       </main>
@@ -159,33 +162,40 @@
         @open-sessions="handleQuoteOpenSessions"
       />
 
-      <!-- Session drawer for quote-question session switching -->
+      <!-- Global session drawer — accessible from any tab -->
       <SessionDrawer
-        :open="quoteSessionDrawerOpen"
+        ref="sessionDrawerRef"
+        :open="sessionIdentity.sessionDrawerOpen.value"
         :currentSessionId="sessionIdentity.currentSessionId.value"
         :runningSessionIds="sessionIdentity.runningSessions.value"
-        @close="quoteSessionDrawerOpen = false"
-        @select="handleQuoteSessionSelect"
-        @create="handleQuoteSessionCreate"
-        @delete="handleQuoteSessionDelete"
+        @close="sessionIdentity.sessionDrawerOpen.value = false"
+        @select="handleSessionSelect"
+        @create="handleSessionCreate"
+        @delete="handleSessionDelete"
       />
 
       <!-- Bottom dock (tab bar) -->
-      <div v-if="isAuthenticated" v-show="!terminalKeyboardActive" class="bottom-dock-wrapper">
+      <div v-if="isAuthenticated" v-show="!anyKeyboardActive" class="bottom-dock-wrapper">
         <div class="bottom-dock">
           <div class="dock-center">
-            <button class="dock-btn" :class="{ active: activeTab === 'chat', 'has-unread': store.state.chatUnread && activeTab !== 'chat', 'has-running': store.state.chatRunning && activeTab !== 'chat' && !store.state.chatUnread }" @click.stop="switchTab('chat')" :title="t('nav.chat')">
-              <MessageSquare />
-            </button>
+            <div class="dock-btn-wrap">
+              <button class="dock-btn" :class="{ active: activeTab === 'chat', 'has-unread': store.state.chatUnread && activeTab !== 'chat', 'has-running': store.state.chatRunning && activeTab !== 'chat' }" @click.stop="switchTab('chat')" :title="t('nav.chat')">
+                <MessageSquare />
+              </button>
+              <span v-if="store.state.chatUnread && activeTab !== 'chat'" class="dock-badge"></span>
+            </div>
             <button class="dock-btn" :class="{ active: activeTab === 'viewer' }" @click.stop="switchTab('viewer')" :title="t('nav.fileViewer')">
               <FileText />
             </button>
             <button class="dock-btn" :class="{ active: activeTab === 'browse' }" @click.stop="switchTab('browse')" :title="t('nav.fileManager')">
               <FolderOpen />
             </button>
-            <button class="dock-btn" :class="{ active: activeTab === 'tasks', 'has-unread': store.state.taskUnread && activeTab !== 'tasks', 'just-completed': store.state.taskJustCompleted && activeTab !== 'tasks' && !store.state.taskUnread, 'has-running': store.state.taskRunning && activeTab !== 'tasks' && !store.state.taskUnread && !store.state.taskJustCompleted }" @click.stop="switchTab('tasks')" :title="t('nav.tasks')">
-              <CalendarClock />
-            </button>
+            <div class="dock-btn-wrap">
+              <button class="dock-btn" :class="{ active: activeTab === 'tasks', 'has-unread': store.state.taskUnread && activeTab !== 'tasks', 'just-completed': store.state.taskJustCompleted && activeTab !== 'tasks', 'has-running': store.state.taskRunning && activeTab !== 'tasks' }" @click.stop="switchTab('tasks')" :title="t('nav.tasks')">
+                <CalendarClock />
+              </button>
+              <span v-if="store.state.taskUnread && activeTab !== 'tasks'" class="dock-badge"></span>
+            </div>
             <div class="dock-overflow-wrapper">
               <button
                 ref="overflowBtnRef"
@@ -212,13 +222,18 @@
             <GitBranch :size="16" />
             <span>{{ t('git.history.projectHistory') }}</span>
           </button>
-          <button class="dock-overflow-item" :class="{ active: activeTab === 'proxy' }" @click.stop="handleOverflowSelect('proxy')">
+          <button v-if="!isSSHDisabled" class="dock-overflow-item" :class="{ active: activeTab === 'proxy' }" @click.stop="handleOverflowSelect('proxy')">
             <EthernetPort :size="16" />
             <span>{{ t('nav.portForward') }}</span>
           </button>
-          <button class="dock-overflow-item" :class="{ active: activeTab === 'terminal' }" @click.stop="handleOverflowSelect('terminal')">
+          <button v-if="!isTerminalDisabled" class="dock-overflow-item" :class="{ active: activeTab === 'terminal' }" @click.stop="handleOverflowSelect('terminal')">
             <TerminalIcon :size="16" />
             <span>{{ t('terminal.title') }}</span>
+          </button>
+          <div class="dock-overflow-divider"></div>
+          <button class="dock-overflow-item" @click.stop="handleOverflowSettings">
+            <Settings :size="16" />
+            <span>{{ t('nav.settings') }}</span>
           </button>
         </div>
       </Transition>
@@ -232,7 +247,8 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, provide, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, FolderOpen, FileText, GitBranch, EthernetPort, Terminal as TerminalIcon, CalendarClock, MoreHorizontal } from 'lucide-vue-next'
+import { useSettingsConfig } from '@/composables/useSettingsConfig'
+import { MessageSquare, FolderOpen, FileText, GitBranch, EthernetPort, Terminal as TerminalIcon, CalendarClock, MoreHorizontal, Settings } from 'lucide-vue-next'
 import AppHeader from './components/common/AppHeader.vue'
 import TabPanel from './components/common/TabPanel.vue'
 import WelcomeView from './components/WelcomeView.vue'
@@ -254,17 +270,26 @@ import DialogOverlay from './components/common/DialogOverlay.vue'
 import SessionDrawer from './components/session/SessionDrawer.vue'
 import QuoteQuestionBar from './components/common/QuoteQuestionBar.vue'
 import HeaderMarquee from './components/common/HeaderMarquee.vue'
+import SettingsPage from './components/settings/SettingsPage.vue'
 import TaskTab from '@/components/task/TaskTab.vue'
 import { useQuoteQuestion } from './composables/useQuoteQuestion.ts'
-import { useTaskTab, registerSwitchTab } from '@/composables/useTaskTab.ts'
-import { useSessionIdentity } from './composables/useSessionIdentity.ts'
+import { useTaskTab, registerSwitchTab, onTaskEvent } from '@/composables/useTaskTab.ts'
+import { resetAgents } from '@/composables/useAgents'
+import { useSessionIdentity, registerSessionDrawerRef, resetIdentity } from './composables/useSessionIdentity.ts'
+import { loadSessionsOnce } from './composables/useChatSession.ts'
 import { useToast } from './composables/useToast.ts'
 import { useAppMode } from './composables/useAppMode.ts'
 import { useTerminalKeyboard } from './composables/useTerminalKeyboard.ts'
+import { useChatKeyboard } from './composables/useChatKeyboard.ts'
 import { usePortForward } from './composables/usePortForward.ts'
+import { useTerminalStatus } from './composables/useTerminalStatus.ts'
 import { useFileWatch } from './composables/useFileWatch.ts'
 import { refreshCurrentFile } from './composables/useFileRefresh.ts'
+import { useGlobalEvents } from './composables/useGlobalEvents'
+import { useEdgeSwipeBack } from './composables/useEdgeSwipeBack'
+import { handleBackNavigation } from './composables/useBackHandler'
 import { store } from './stores/app.ts'
+import { setPendingCommitNavigation } from './composables/useCommitNavigation.ts'
 import { initMermaid, reRenderMermaid } from './utils/mermaid.ts'
 import { getFileType } from './utils/fileType.ts'
 import 'highlight.js/styles/github.css'
@@ -274,21 +299,174 @@ import './assets/hljs-light-override.css'
 const isAuthenticated = ref(null)
 const { t } = useI18n()
 
+// SPA hot project switch: key forces Vue to destroy/rebuild the app-container subtree
+const projectKey = ref('initial')
+const switchingProject = ref(false)
+
+async function hotSwitchProject(newProjectPath, pendingSessionId) {
+  // ── Phase 1: Fade out ──
+  switchingProject.value = true
+  await nextTick()
+  await new Promise(r => setTimeout(r, 150))
+
+  // ── Phase 2: POST to backend to set new project cookie ──
+  try {
+    await store.setProject(newProjectPath)
+  } catch (err) {
+    // Project doesn't exist — revert fade-out and show error
+    switchingProject.value = false
+    const msgKey = err?.msgKey
+    if (msgKey === 'NotADirectory') {
+      toast.show(t('appHeader.projectPathNotFound'), { icon: '⚠️', type: 'error', duration: 3000 })
+      // Remove stale project from recent list
+      fetch('/api/recent-projects', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: newProjectPath })
+      }).catch(() => {})
+    } else {
+      toast.show(t('appHeader.switchProjectFailed', { error: err.message }), { icon: '⚠️', type: 'error', duration: 3000 })
+    }
+    return
+  }
+
+  // ── Phase 3: Reset module-level singletons ──
+  // (store state already reset by setProject, but identity/agents need explicit reset)
+  resetIdentity()
+  resetAgents()
+
+  // ── Phase 4: Change key → Vue destroys old component tree & builds new one ──
+  projectKey.value = newProjectPath
+
+  // ── Phase 5: Reload all project-scoped data (mirrors onMounted after auth) ──
+  try { await store.loadProject() } catch (_) {
+    toast.show(t('toast.projectLoadFailed'), { icon: '⚠️', type: 'error', duration: 0, onClick: () => location.reload() })
+  }
+  await sessionIdentity.initSessionFromAPI()
+  loadSessionsOnce()
+  try { await store.loadFiles('') } catch (_) {}
+  store.loadGitBranch().catch(() => {})
+  loadTasks()
+  loadConfig()
+  loadSSHInfo().catch(() => {})
+  loadTerminalStatus().catch(() => {})
+  if (isAppMode.value) syncToNative().catch(() => {})
+
+  // ── Phase 6: Restore last opened file for the new project ──
+  const lastFile = localStorage.getItem('clawbenchLastFile_' + store.state.projectRoot)
+  if (lastFile && lastFile !== store.state.currentFile?.path) {
+    const lastSlash = lastFile.lastIndexOf('/')
+    store.state.currentDir = lastSlash > 0 ? lastFile.slice(0, lastSlash) : ''
+    await store.loadFiles(store.state.currentDir)
+    await store.selectFile(lastFile)
+    if (store.state.currentFile?.error) store.state.currentFile = null
+  }
+
+  // ── Phase 7: Handle cross-project pending navigation ──
+  if (pendingSessionId) {
+    const checkReady = () => {
+      if (sessionIdentity.currentSessionId.value) {
+        switchTab('chat')
+        sessionIdentity.switchSession(pendingSessionId)
+      } else {
+        setTimeout(checkReady, 100)
+      }
+    }
+    checkReady()
+  }
+
+  // ── Phase 8: Fade in ──
+  switchingProject.value = false
+}
+
 const activeTab = ref('chat')
 
 function switchTab(tab) {
   if (activeTab.value === tab) return
   activeTab.value = tab
   if (tab === 'chat') {
-    store.state.chatUnread = false
+    // Recalculate instead of blindly clearing — if the user switches to chat
+    // but hasn't opened the unread session, the indicator should keep flashing.
+    // loadSessionsOnce checks unreadCount per session (excluding current), so
+    // it only clears when all sessions are actually read.
+    loadSessionsOnce()
   }
   if (tab === 'tasks') {
+    // Only stop dock button flash — don't clear per-task unread badges.
+    // Per-task badges are cleared when the user enters that task's execution history.
     store.state.taskUnread = false
-    markAllTasksRead()
   }
   // Close overflow menu when switching to a main tab
-  if (!overflowTabs.includes(tab)) {
+  if (!overflowTabs.value.includes(tab)) {
     overflowMenuOpen.value = false
+  }
+}
+
+/** Handle clawbench-open-session event from Android push notification tap */
+function handleOpenSession(e) {
+  const detail = e?.detail
+  console.log('[ClawBench] clawbench-open-session event received, detail=', detail)
+  if (!detail?.sessionId) {
+    console.warn('[ClawBench] clawbench-open-session: no sessionId in detail, ignoring')
+    return
+  }
+  const { sessionId, projectPath } = detail
+  console.log('[ClawBench] clawbench-open-session: sessionId=', sessionId, 'projectPath=', projectPath, 'currentProject=', store.state.projectRoot)
+  if (projectPath && projectPath !== store.state.projectRoot) {
+    // Cross-project: hot switch without page reload
+    console.log('[ClawBench] cross-project navigation, switching to', projectPath)
+    hotSwitchProject(projectPath, sessionId).catch(() => {
+      // If project switch fails, try same-project switch as fallback
+      console.warn('[ClawBench] project switch failed, falling back to same-project switch')
+      switchTab('chat')
+      sessionIdentity.switchSession(sessionId)
+    })
+  } else {
+    // Same project: lightweight switch
+    console.log('[ClawBench] same-project navigation, switching to session', sessionId)
+    switchTab('chat')
+    sessionIdentity.switchSession(sessionId)
+  }
+}
+
+/** Handle clawbench-open-task event from Android push notification tap (task execution) */
+function handleOpenTask(e) {
+  const detail = e?.detail
+  console.log('[ClawBench] clawbench-open-task event received, detail=', detail)
+  if (!detail?.taskId) {
+    console.warn('[ClawBench] clawbench-open-task: no taskId in detail, ignoring')
+    return
+  }
+  const { taskId, executionId, projectPath } = detail
+  console.log('[ClawBench] clawbench-open-task: taskId=', taskId, 'executionId=', executionId, 'currentProject=', store.state.projectRoot)
+
+  const navigateToTask = () => {
+    switchTab('tasks')
+    navigateToTaskHistory(Number(taskId))
+    if (executionId) {
+      // openExecDetail without execData will auto-fetch from API via refreshExecDetail
+      openExecDetail(executionId)
+    }
+  }
+
+  if (projectPath && projectPath !== store.state.projectRoot) {
+    // Cross-project: switch project, store pending task navigation, then reload
+    console.log('[ClawBench] cross-project navigation, switching to', projectPath)
+    localStorage.setItem('clawbenchPendingNav', JSON.stringify({ taskId, executionId }))
+    fetch('/api/project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: projectPath }),
+    }).then(() => {
+      window.location.reload()
+    }).catch(() => {
+      console.warn('[ClawBench] project switch failed, falling back to same-project switch')
+      navigateToTask()
+    })
+  } else {
+    // Same project: lightweight switch
+    console.log('[ClawBench] same-project navigation, switching to task', taskId)
+    navigateToTask()
   }
 }
 
@@ -308,7 +486,10 @@ provide('toast', toast)
 
 const sessionIdentity = useSessionIdentity()
 
-const showHidden = ref(JSON.parse(localStorage.getItem('clawbenchShowHidden') || 'false'))
+const showHidden = ref(false)
+const { localConfig, setLocalConfig: setSetting, loadConfig, getServerValueWithDefault } = useSettingsConfig()
+// Initialize from settings config (which handles legacy key migration)
+showHidden.value = !!localConfig.showHidden
 const sortField = ref(null)
 const sortDir = ref('asc')
 
@@ -319,9 +500,51 @@ useFileWatch({
 })
 
 const { isAppMode } = useAppMode()
-const { syncToNative } = usePortForward()
-const { startTaskPolling, stopTaskPolling, markAllTasksRead, navigateToTaskSettings } = useTaskTab()
+const { syncToNative, sshInfo, loadSSHInfo } = usePortForward()
+const { terminalRuntimeEnabled, loadTerminalStatus } = useTerminalStatus()
+const isSSHDisabled = computed(() => sshInfo.value?.enabled === false)
+// Use runtime status (actual server state) not config value — mirrors SSH pattern.
+// Config may say enabled=true before restart; the runtime API returns false until
+// the terminal manager actually exists.  `null` means "not yet loaded" → treat as
+// disabled to avoid a flash of the terminal button on first mount.
+const isTerminalDisabled = computed(() => terminalRuntimeEnabled.value !== true)
+watch(isSSHDisabled, (disabled) => {
+  if (disabled && activeTab.value === 'proxy') {
+    switchTab('chat')
+  }
+})
+watch(isTerminalDisabled, (disabled) => {
+  if (disabled && activeTab.value === 'terminal') {
+    switchTab('chat')
+  }
+})
+const { navigateToTaskSettings, navigateToTaskHistory, openExecDetail, loadTasks } = useTaskTab()
 registerSwitchTab(switchTab)
+
+// Wire up WS global events
+const { onEvent, init: initGlobalEvents, destroy: destroyGlobalEvents } = useGlobalEvents()
+const removeTaskHandler = onEvent((event, data) => {
+    if (event === 'task_update') {
+        onTaskEvent(data)
+    }
+})
+
+const handleForeground = () => {
+    // Full state pull — 3rd defense layer
+    loadSessionsOnce()
+}
+
+// Edge swipe back gesture detection (right-edge-left-swipe → go back)
+useEdgeSwipeBack()
+
+// Android hardware back button / predictive back gesture → delegate to JS
+window.addEventListener('clawbench-back-press', () => {
+    // If any feature can handle back, do it and prevent the default Android behavior
+    const handled = handleBackNavigation()
+    // Set flag for the Android native code to check
+    window.__clawbenchBackHandled = !!handled
+})
+window.addEventListener('clawbench-foreground', handleForeground)
 const terminalRequestedCwd = ref(null)
 
 // Hide AppHeader when terminal tab is active (always); hide Dock + padding only when keyboard is open
@@ -329,31 +552,66 @@ const terminalActive = computed(() => activeTab.value === 'terminal')
 const { keyboardHeight: terminalKeyboardHeight } = useTerminalKeyboard()
 const terminalKeyboardActive = computed(() => terminalActive.value && terminalKeyboardHeight.value > 0)
 
+// Chat keyboard — on iOS WKWebView there's no adjustResize, so we detect
+// keyboard via visualViewport and compensate in the web layer.
+const { chatKeyboardHeight } = useChatKeyboard()
+const chatKeyboardActive = computed(() => activeTab.value === 'chat' && chatKeyboardHeight.value > 0)
+
+// Unified: any soft keyboard is open (terminal or chat)
+const anyKeyboardActive = computed(() => terminalKeyboardActive.value || chatKeyboardActive.value)
+
 const quoteQuestion = useQuoteQuestion()
-const quoteSessionDrawerOpen = ref(false)
+const sessionDrawerRef = ref(null)
 
+// Register SessionDrawer ref so identity.openAgentSelector() works
+watch(sessionDrawerRef, (ref) => {
+  if (ref) registerSessionDrawerRef(ref)
+}, { immediate: true })
+
+// Register identity actions (switchSession, createSession, etc.)
+// These will be overwritten by ChatPanelContent when it mounts, but
+// openAgentSelector is NOT registered here — it's handled via
+// registerSessionDrawerRef above, which is independent.
 function handleQuoteOpenSessions() {
-  quoteSessionDrawerOpen.value = true
+  sessionIdentity.openSessionTab()
 }
 
-function handleQuoteSessionSelect(sessionId) {
+function handleSessionSelect(sessionId, backend) {
   sessionIdentity.switchSession(sessionId)
-  quoteSessionDrawerOpen.value = false
+  sessionIdentity.sessionDrawerOpen.value = false
 }
 
-function handleQuoteSessionCreate(agentId) {
-  sessionIdentity.createSession(agentId)
-  quoteSessionDrawerOpen.value = false
+async function handleSessionCreate(agentId) {
+  await sessionIdentity.createSession(agentId)
+  // If drawer is still open, add the new session to the local list
+  if (sessionDrawerRef.value && sessionIdentity.sessionDrawerOpen.value) {
+    const id = sessionIdentity.currentSessionId.value
+    if (id) {
+      sessionDrawerRef.value.addSessionLocally({
+        id,
+        title: sessionIdentity.currentSessionTitle.value || '',
+        backend: sessionIdentity.currentBackend.value || '',
+        agentId: sessionIdentity.currentAgentId.value || '',
+        model: sessionIdentity.currentModelName.value || '',
+        updatedAt: new Date().toISOString(),
+        unreadCount: 0,
+      })
+    }
+  }
+  sessionIdentity.sessionDrawerOpen.value = false
 }
 
-function handleQuoteSessionDelete(sessionId, backend) {
+function handleSessionDelete(sessionId, backend) {
   sessionIdentity.deleteSession(sessionId, backend)
 }
 
 async function handleLoginSuccess() {
+    // Load project BEFORE setting isAuthenticated so the backend sets the
+    // clawbench_project cookie first. Without this, ChatPanelContent mounts
+    // and calls loadHistory() which fails with NoProjectSelected (no cookie).
+    try { await store.loadProject() } catch (_) { /* loadProject has its own error handling */ }
     isAuthenticated.value = true
     initMermaid()
-    await store.loadProject()
     await store.loadFiles('')
 }
 
@@ -363,14 +621,9 @@ function handleOpenProjectDialog() {
     projectDialogOpen.value = true
 }
 
-function handleReconfigureServer() {
-    if (window.AndroidNative?.showServerDialog) {
-        window.AndroidNative.showServerDialog()
-    }
-}
-
-const theme = ref(localStorage.getItem('theme') ||
-    (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'))
+const theme = ref(localConfig.theme === 'auto'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : (localConfig.theme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')))
 
 const dirEntries = computed(() => store.state.dirEntries)
 const currentDir = computed(() => store.state.currentDir)
@@ -409,7 +662,7 @@ watch(() => currentFile.value, (f) => {
 
 function toggleHidden() {
     showHidden.value = !showHidden.value
-    localStorage.setItem('clawbenchShowHidden', JSON.stringify(showHidden.value))
+    setSetting('showHidden', showHidden.value)
     store.loadFiles(store.state.currentDir)
 }
 
@@ -475,14 +728,21 @@ function handleDockTerminal() {
 // Overflow menu state
 const overflowMenuOpen = ref(false)
 const overflowBtnRef = ref(null)
-const overflowTabs = ['history', 'proxy', 'terminal']
+const overflowTabs = computed(() => {
+  const tabs = ['history']
+  if (!isSSHDisabled.value) tabs.push('proxy')
+  if (!isTerminalDisabled.value) tabs.push('terminal')
+  tabs.push('settings')
+  return tabs
+})
 const overflowTabMeta = {
   history: { icon: GitBranch, titleKey: 'git.history.projectHistory' },
   proxy:   { icon: EthernetPort, titleKey: 'nav.portForward' },
   terminal:{ icon: TerminalIcon, titleKey: 'terminal.title' },
+  settings:{ icon: Settings, titleKey: 'nav.settings' },
 }
 
-const isOverflowTabActive = computed(() => overflowTabs.includes(activeTab.value))
+const isOverflowTabActive = computed(() => overflowTabs.value.includes(activeTab.value))
 
 const overflowPopupStyle = computed(() => {
   const btn = overflowBtnRef.value
@@ -528,6 +788,11 @@ function handleOverflowSelect(tab) {
   }
 }
 
+function handleOverflowSettings() {
+  overflowMenuOpen.value = false
+  switchTab('settings')
+}
+
 // Close overflow menu on outside click
 function handleOverflowOutsideClick(e) {
   if (overflowMenuOpen.value && !e.target.closest('.dock-overflow-popup') && !e.target.closest('.dock-overflow-btn')) {
@@ -557,7 +822,7 @@ function toggleTheme() {
 
 function applyTheme(t) {
     document.documentElement.setAttribute('data-theme', t)
-    localStorage.setItem('theme', t)
+    setSetting('theme', t)
     document.documentElement.setAttribute('data-hljs-theme', t)
     initMermaid()
     reRenderMermaid()
@@ -567,6 +832,7 @@ provide('theme', theme)
 provide('applyTheme', applyTheme)
 provide('activeTab', activeTab)
 provide('switchTab', switchTab)
+provide('hotSwitchProject', hotSwitchProject)
 
 function handleOpenFileManager() {
     activeTab.value = 'browse'
@@ -575,7 +841,7 @@ function handleOpenFileManager() {
 function handleNavigateToCommit(e) {
     const sha = e?.detail?.sha
     if (sha) {
-        store.setCommitNavigate(sha)
+        setPendingCommitNavigation(sha)
     }
     activeTab.value = 'history'
 }
@@ -619,11 +885,26 @@ function playQuoteEmitAnimation(e) {
 }
 
 onMounted(async () => {
-    startTaskPolling()
+    initGlobalEvents()
+    loadTasks()
+    loadConfig() // Load server config early for settings page
     window.addEventListener('open-file-manager', handleOpenFileManager)
     window.addEventListener('navigate-to-commit', handleNavigateToCommit)
     window.addEventListener('quote-sent', playQuoteEmitAnimation)
+    window.addEventListener('clawbench-open-session', handleOpenSession)
+    window.addEventListener('clawbench-open-task', handleOpenTask)
     document.addEventListener('click', handleOverflowOutsideClick)
+    // Sync reactive state from Settings page changes
+    window.addEventListener('clawbench-theme-change', (e) => {
+        const resolved = e.detail
+        theme.value = resolved
+        // Re-render mermaid diagrams for new theme
+        initMermaid()
+        reRenderMermaid()
+    })
+    window.addEventListener('clawbench-showhidden-change', (e) => {
+        showHidden.value = e.detail
+    })
     applyTheme(theme.value)
     let resp
     try {
@@ -663,17 +944,115 @@ onMounted(async () => {
         return
     }
     initMermaid()
-    await sessionIdentity.initSessionFromAPI()
-    try {
-        const sr = await fetch('/api/ai/sessions')
-        if (sr.ok) { const sd = await sr.json(); if (sd.sessions?.some(s => s.unreadCount > 0)) store.state.chatUnread = true }
-    } catch (_) {}
-    if (isAppMode.value) syncToNative().catch(() => {})
+    // Load project first so the backend sets the clawbench_project cookie.
+    // Without this, subsequent chat/session API calls fail with NoProjectSelected
+    // on first login (no cookie yet) and show "加载聊天记录失败".
     try { await store.loadProject() } catch (_) {
         toast.show(t('toast.projectLoadFailed'), { icon: '⚠️', type: 'error', duration: 0, onClick: () => location.reload() }); return
     }
+    await sessionIdentity.initSessionFromAPI()
+    // Use loadSessionsOnce() which correctly sets chatUnread to true OR false.
+    // The old code only set chatUnread=true and never corrected a stale true.
+    loadSessionsOnce()
+    if (isAppMode.value) syncToNative().catch(() => {})
+    loadSSHInfo().catch(() => {})
+    loadTerminalStatus().catch(() => {})
     try { await store.loadFiles('') } catch (_) {
         toast.show(t('toast.fileListLoadFailed'), { icon: '⚠️', type: 'error', duration: 6000 })
+    }
+    // Handle pending navigation from push notification deep link
+    // (cross-project reload or cold start via AndroidNative bridge)
+    const processPendingSessionNav = (navSessionId) => {
+      // Wait for sessions to load before switching (max 3 seconds)
+      let attempts = 0
+      const checkReady = () => {
+        if (sessionIdentity.currentSessionId.value) {
+          switchTab('chat')
+          sessionIdentity.switchSession(navSessionId)
+        } else if (attempts < 30) {
+          attempts++
+          setTimeout(checkReady, 100)
+        }
+      }
+      checkReady()
+    }
+
+    const processPendingTaskNav = async (navTaskId, navExecutionId) => {
+      // Ensure tasks are loaded before navigating
+      try {
+        await loadTasks()
+      } catch (_) {
+        // Proceed anyway — the task list may already be populated
+      }
+      switchTab('tasks')
+      navigateToTaskHistory(Number(navTaskId))
+      if (navExecutionId) {
+        // openExecDetail without execData will auto-fetch from API via refreshExecDetail
+        openExecDetail(navExecutionId)
+      }
+    }
+
+    // Check localStorage for pending navigation (cross-project reload)
+    const pendingNav = localStorage.getItem('clawbenchPendingNav')
+    if (pendingNav) {
+      localStorage.removeItem('clawbenchPendingNav')
+      try {
+        const nav = JSON.parse(pendingNav)
+        if (nav.taskId) {
+          processPendingTaskNav(nav.taskId, nav.executionId)
+        } else if (nav.sessionId) {
+          processPendingSessionNav(nav.sessionId)
+        }
+      } catch (_) {}
+    }
+
+    // Check AndroidNative bridge for cold-start pending navigation
+    // Also poll briefly in case CustomEvent was dispatched while WebView was paused
+    if (isAppMode.value && window.AndroidNative?.getPendingNavigation) {
+      let pollCleared = false
+      const pollPendingNav = () => {
+        try {
+          const nav = window.AndroidNative.getPendingNavigation()
+          console.log('[ClawBench] getPendingNavigation poll result:', nav)
+          if (nav) {
+            const parsed = JSON.parse(nav)
+            const { sessionId, taskId, executionId, projectPath } = parsed
+            if (taskId) {
+              // Task notification navigation
+              pollCleared = true
+              if (projectPath && projectPath !== store.state.projectRoot) {
+                localStorage.setItem('clawbenchPendingNav', JSON.stringify({ taskId, executionId }))
+                fetch('/api/project', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ path: projectPath }),
+                }).then(() => window.location.reload())
+              } else {
+                processPendingTaskNav(taskId, executionId)
+              }
+            } else if (sessionId) {
+              // Session notification navigation
+              // Navigation data found — stop polling
+              pollCleared = true
+              if (projectPath && projectPath !== store.state.projectRoot) {
+                // Need to switch project first — use hot switch instead of reload
+                hotSwitchProject(projectPath, sessionId)
+              } else {
+                processPendingSessionNav(sessionId)
+              }
+            }
+          }
+        } catch (_) {}
+      }
+      // Poll immediately and then every 500ms for up to 3 seconds
+      pollPendingNav()
+      let pollCount = 0
+      const pollInterval = setInterval(() => {
+        if (pollCleared) { clearInterval(pollInterval); return }
+        pollPendingNav()
+        pollCount++
+        if (pollCount >= 6) clearInterval(pollInterval) // 3 seconds total
+      }, 500)
     }
     const lastFile = localStorage.getItem('clawbenchLastFile_' + store.state.projectRoot)
     if (lastFile && lastFile !== store.state.currentFile?.path) {
@@ -688,15 +1067,27 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-    stopTaskPolling()
+    removeTaskHandler()
+    window.removeEventListener('clawbench-foreground', handleForeground)
+    destroyGlobalEvents()
     window.removeEventListener('open-file-manager', handleOpenFileManager)
     window.removeEventListener('navigate-to-commit', handleNavigateToCommit)
     window.removeEventListener('quote-sent', playQuoteEmitAnimation)
+    window.removeEventListener('clawbench-open-session', handleOpenSession)
+    window.removeEventListener('clawbench-open-task', handleOpenTask)
     document.removeEventListener('click', handleOverflowOutsideClick)
 })
 </script>
 
 <style scoped>
+/* SPA hot project switch: fade transition to mask intermediate state */
+.app-container {
+    transition: opacity 0.15s ease;
+}
+.app-container.project-switching {
+    opacity: 0;
+}
+
 .viewer-panel {
   flex: 1;
   display: flex;
@@ -708,6 +1099,12 @@ onUnmounted(() => {
 /* When terminal keyboard is open, remove header padding so content expands to top */
 .chrome-hidden {
     padding-top: 0 !important;
+}
+
+/* When chat keyboard is open on iOS (no adjustResize), shrink the app container
+   from the bottom so content stays above the keyboard. */
+.chat-keyboard-open {
+    bottom: v-bind(chatKeyboardHeight + 'px') !important;
 }
 
 .bottom-dock-wrapper {
@@ -781,13 +1178,26 @@ onUnmounted(() => {
     cursor: default;
 }
 
-.dock-btn.has-unread {
-    animation: dock-unread-flash 0.8s ease-in-out infinite;
+/* Unread indicator — static badge dot (top-right corner).
+ * Uses a real <span> element outside the button so it's not clipped by overflow:hidden.
+ * Positioned on .dock-btn-wrap which wraps both button and badge. */
+.dock-btn-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-@keyframes dock-unread-flash {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-color, #0066cc) 0%, transparent); }
-    50% { box-shadow: 0 0 8px 3px color-mix(in srgb, var(--accent-color, #0066cc) 40%, transparent); }
+.dock-badge {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-color, #0066cc);
+    z-index: 2;
+    pointer-events: none;
 }
 
 .dock-btn.has-running {
@@ -795,15 +1205,24 @@ onUnmounted(() => {
     isolation: isolate;
     overflow: hidden;
     border-color: transparent;
-    box-shadow: 0 0 6px 2px rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 4px 1px color-mix(in srgb, var(--accent-color, #0066cc) 25%, transparent);
 }
 .dock-btn.has-running::before {
     content: '';
     position: absolute;
     inset: -2px;
     border-radius: inherit;
-    background: conic-gradient(from 0deg, transparent 0%, rgba(255,255,255,0.6) 10%, var(--accent-color, #0066cc) 22%, rgba(255,255,255,0.4) 34%, transparent 50%);
-    animation: dock-spin-light 1.2s linear infinite;
+    background: conic-gradient(
+        from 0deg,
+        transparent 0%,
+        color-mix(in srgb, var(--accent-color, #0066cc) 15%, rgba(255,255,255,0.1)) 8%,
+        color-mix(in srgb, var(--accent-color, #0066cc) 50%, rgba(255,255,255,0.3)) 16%,
+        var(--accent-color, #0066cc) 22%,
+        color-mix(in srgb, var(--accent-color, #0066cc) 50%, rgba(255,255,255,0.3)) 28%,
+        color-mix(in srgb, var(--accent-color, #0066cc) 15%, rgba(255,255,255,0.1)) 36%,
+        transparent 50%
+    );
+    animation: dock-spin-light 2s linear infinite;
     z-index: -2;
 }
 .dock-btn.has-running::after {
@@ -895,6 +1314,12 @@ onUnmounted(() => {
 .dock-overflow-item.active {
     background: color-mix(in srgb, var(--accent-color) 15%, transparent);
     color: var(--accent-color);
+}
+
+.dock-overflow-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 8px;
 }
 
 /* Popup transition */

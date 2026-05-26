@@ -1,13 +1,43 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   parseAssistantContent,
   toolCallSummary,
   hasImagesInContent,
   formatDetailTime,
-  humanizeCron,
-  repeatLabel,
+  formatMessageTime,
   truncate,
 } from '@/utils/chatBlocks.ts'
+import {
+  humanizeCron,
+  repeatLabel,
+} from '@/utils/format.ts'
+
+// Mock i18n to return the key for predictable assertions
+vi.mock('@/i18n', () => ({
+  default: {
+    global: {
+      locale: { value: 'en' },
+      t: vi.fn((key: string, params?: Record<string, unknown>) => {
+        // Return a predictable string based on key + params
+        if (params) {
+          const parts = Object.entries(params).map(([k, v]) => `${k}=${v}`)
+          return `${key}:${parts.join(',')}`
+        }
+        return key
+      }),
+    },
+  },
+}))
+
+vi.mock('@/composables/useLocale', () => ({
+  gt: vi.fn((key: string, params?: Record<string, unknown>) => {
+    if (params) {
+      const parts = Object.entries(params).map(([k, v]) => `${k}=${v}`)
+      return `${key}:${parts.join(',')}`
+    }
+    return key
+  }),
+}))
 
 // ── parseAssistantContent ──
 
@@ -320,8 +350,6 @@ describe('formatDetailTime', () => {
 // ── humanizeCron ──
 
 describe('humanizeCron', () => {
-  // Note: humanizeCron uses gt() for i18n, which requires vue-i18n to be initialized.
-  // For these tests, we verify the non-i18n fallback cases and structure.
   it('returns expression as-is for non-5-part cron', () => {
     expect(humanizeCron('invalid')).toBe('invalid')
   })
@@ -337,34 +365,76 @@ describe('humanizeCron', () => {
   it('returns expression for empty string', () => {
     expect(humanizeCron('')).toBe('')
   })
+
+  it('renders "every N minutes" for */N * * * *', () => {
+    const result = humanizeCron('*/5 * * * *')
+    expect(result).toContain('cron.everyMinutes')
+    expect(result).toContain('count=5')
+  })
+
+  it('renders "every N hours" for 0 */N * * *', () => {
+    const result = humanizeCron('0 */2 * * *')
+    expect(result).toContain('cron.everyHours')
+    expect(result).toContain('count=2')
+  })
+
+  it('renders "daily at HH:00" for 0 HH * * *', () => {
+    const result = humanizeCron('0 9 * * *')
+    expect(result).toContain('cron.daily')
+    expect(result).toContain('9:00')
+  })
+
+  it('renders "weekdays at HH:00" for 0 HH * * 1-5', () => {
+    const result = humanizeCron('0 8 * * 1-5')
+    expect(result).toContain('cron.weekdays')
+    expect(result).toContain('8:00')
+  })
+
+  it('returns expression for patterns not matching any known format', () => {
+    expect(humanizeCron('30 4 1 1 *')).toBe('30 4 1 1 *')
+  })
+
+  it('renders "every 1 minutes" for */1 * * * *', () => {
+    const result = humanizeCron('*/1 * * * *')
+    expect(result).toContain('cron.everyMinutes')
+    expect(result).toContain('count=1')
+  })
+
+  it('renders "every 1 hours" for 0 */1 * * *', () => {
+    const result = humanizeCron('0 */1 * * *')
+    expect(result).toContain('cron.everyHours')
+    expect(result).toContain('count=1')
+  })
 })
 
 // ── repeatLabel ──
 
 describe('repeatLabel', () => {
-  // Note: repeatLabel uses gt() for i18n — these tests verify the branching logic
-  // by checking that the function doesn't throw and returns a string.
-  it('returns a string for once mode', () => {
+  it('renders "once" mode', () => {
     const result = repeatLabel('once')
-    expect(typeof result).toBe('string')
-    expect(result.length).toBeGreaterThan(0)
+    expect(result).toContain('task.repeat.once')
   })
 
-  it('returns a string for limited mode', () => {
+  it('renders "limited" mode with count', () => {
     const result = repeatLabel('limited', 5)
-    expect(typeof result).toBe('string')
-    expect(result.length).toBeGreaterThan(0)
+    expect(result).toContain('task.repeat.times')
+    expect(result).toContain('count=5')
   })
 
-  it('returns a string for unlimited mode (default)', () => {
+  it('renders "unlimited" mode (default)', () => {
     const result = repeatLabel('unlimited')
-    expect(typeof result).toBe('string')
-    expect(result.length).toBeGreaterThan(0)
+    expect(result).toContain('task.repeat.unlimited')
   })
 
-  it('returns a string for unknown mode (falls to unlimited)', () => {
+  it('renders unknown mode as unlimited fallback', () => {
     const result = repeatLabel('unknown')
-    expect(typeof result).toBe('string')
+    expect(result).toContain('task.repeat.unlimited')
+  })
+
+  it('renders limited mode with count=1', () => {
+    const result = repeatLabel('limited', 1)
+    expect(result).toContain('task.repeat.times')
+    expect(result).toContain('count=1')
   })
 })
 
@@ -416,5 +486,112 @@ describe('truncate', () => {
     const result = truncate(emoji, 1)
     // Should truncate at codepoint boundary, not in the middle of a grapheme
     expect(result.endsWith('...')).toBe(true)
+  })
+})
+
+// ── formatMessageTime ──
+
+describe('formatMessageTime', () => {
+  it('shows "just now" for timestamps less than 1 minute ago', () => {
+    const now = new Date().toISOString()
+    const result = formatMessageTime(now)
+    expect(result).toContain('time.justNow')
+  })
+
+  it('shows "minutes ago" for timestamps within the last hour', () => {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60000).toISOString()
+    const result = formatMessageTime(fiveMinAgo)
+    expect(result).toContain('time.minutesAgo')
+    expect(result).toContain('count=5')
+  })
+
+  it('shows "hours ago" for timestamps within the last day', () => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600000).toISOString()
+    const result = formatMessageTime(twoHoursAgo)
+    expect(result).toContain('time.hoursAgo')
+    expect(result).toContain('count=2')
+  })
+
+  it('shows "days ago" for timestamps within the last week', () => {
+    const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString()
+    const result = formatMessageTime(threeDaysAgo)
+    expect(result).toContain('time.daysAgo')
+    expect(result).toContain('count=3')
+  })
+
+  it('shows date for timestamps older than 7 days', () => {
+    const tenDaysAgo = new Date(Date.now() - 10 * 86400000).toISOString()
+    const result = formatMessageTime(tenDaysAgo)
+    // Falls back to locale date format, should NOT contain "time." i18n keys
+    expect(result).not.toContain('time.justNow')
+    expect(result).not.toContain('time.minutesAgo')
+    expect(result).not.toContain('time.hoursAgo')
+    expect(result).not.toContain('time.daysAgo')
+    // Should contain a date-like string (digits and delimiters)
+    expect(result.length).toBeGreaterThan(0)
+  })
+
+  it('shows 1 minute ago correctly', () => {
+    const oneMinAgo = new Date(Date.now() - 60000).toISOString()
+    const result = formatMessageTime(oneMinAgo)
+    expect(result).toContain('time.minutesAgo')
+    expect(result).toContain('count=1')
+  })
+
+  it('shows 59 minutes ago correctly', () => {
+    const fiftyNineMinAgo = new Date(Date.now() - 59 * 60000).toISOString()
+    const result = formatMessageTime(fiftyNineMinAgo)
+    expect(result).toContain('time.minutesAgo')
+    expect(result).toContain('count=59')
+  })
+
+  it('shows 23 hours ago correctly', () => {
+    const twentyThreeHoursAgo = new Date(Date.now() - 23 * 3600000).toISOString()
+    const result = formatMessageTime(twentyThreeHoursAgo)
+    expect(result).toContain('time.hoursAgo')
+    expect(result).toContain('count=23')
+  })
+
+  it('shows 6 days ago correctly', () => {
+    const sixDaysAgo = new Date(Date.now() - 6 * 86400000).toISOString()
+    const result = formatMessageTime(sixDaysAgo)
+    expect(result).toContain('time.daysAgo')
+    expect(result).toContain('count=6')
+  })
+})
+
+// ── formatDetailTime (enhanced) ──
+
+describe('formatDetailTime', () => {
+  it('formats to YYYY-MM-DD HH:mm:ss', () => {
+    const result = formatDetailTime('2026-01-15T14:30:45.000Z')
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+  })
+
+  it('zero-pads components', () => {
+    const result = formatDetailTime('2026-03-05T09:05:03.000Z')
+    expect(result).toContain('03')
+    expect(result).toContain('05')
+  })
+
+  it('formats midnight correctly', () => {
+    // Use local time string to avoid timezone offset issues
+    const result = formatDetailTime('2026-12-25T00:00:00')
+    expect(result).toBe('2026-12-25 00:00:00')
+  })
+
+  it('formats end of day correctly', () => {
+    const result = formatDetailTime('2026-06-30T23:59:59')
+    expect(result).toBe('2026-06-30 23:59:59')
+  })
+
+  it('handles ISO date string without timezone', () => {
+    const result = formatDetailTime('2026-07-01T12:30:00')
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+  })
+
+  it('produces consistent format for same input', () => {
+    const input = '2026-01-15T14:30:45.000Z'
+    expect(formatDetailTime(input)).toBe(formatDetailTime(input))
   })
 })

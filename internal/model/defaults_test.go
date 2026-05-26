@@ -10,8 +10,7 @@ func TestParsePresenceMap(t *testing.T) {
 	raw := map[string]any{
 		"port": 20000,
 		"proxy": map[string]any{
-			"enabled":       true,
-			"allowed_ports": "1024-65535",
+			"enabled": true,
 		},
 		"ssh": map[string]any{
 			"enabled": false,
@@ -27,7 +26,6 @@ func TestParsePresenceMap(t *testing.T) {
 		"port",
 		"proxy",
 		"proxy.enabled",
-		"proxy.allowed_ports",
 		"ssh",
 		"ssh.enabled",
 		"tts",
@@ -142,23 +140,20 @@ func TestApplyDefaultsEmptyConfig(t *testing.T) {
 	if cfg.Session.MaxCount != 10 {
 		t.Errorf("Session.MaxCount = %d, want 10", cfg.Session.MaxCount)
 	}
-	if !cfg.Proxy.Enabled {
-		t.Error("Proxy.Enabled should default to true when not in config")
-	}
-	if cfg.Proxy.AllowedPorts != "1024-65535" {
-		t.Errorf("Proxy.AllowedPorts = %q, want %q", cfg.Proxy.AllowedPorts, "1024-65535")
-	}
-	if !cfg.SSH.Enabled {
-		t.Error("SSH.Enabled should default to true when not in config")
+	if !cfg.PortForward.Enabled {
+		t.Error("PortForward.Enabled should default to true when not in config")
 	}
 	if cfg.TTS.Engine != "edge" {
 		t.Errorf("TTS.Engine = %q, want %q", cfg.TTS.Engine, "edge")
 	}
-	if cfg.TTS.SummarizeBackend != "simple" {
-		t.Errorf("TTS.SummarizeBackend = %q, want %q", cfg.TTS.SummarizeBackend, "simple")
+	if cfg.Summarize.Backend != "simple" {
+		t.Errorf("Summarize.Backend = %q, want %q", cfg.Summarize.Backend, "simple")
 	}
 	if cfg.TTS.Speed != 1.0 {
 		t.Errorf("TTS.Speed = %v, want 1.0", cfg.TTS.Speed)
+	}
+	if cfg.RAG.SearchPoolSize != 20 {
+		t.Errorf("RAG.SearchPoolSize = %d, want 20", cfg.RAG.SearchPoolSize)
 	}
 }
 
@@ -198,77 +193,28 @@ func TestApplyDefaultsPartialConfig(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultsBoolPresenceProxyEnabledTrue(t *testing.T) {
+func TestApplyDefaultsBoolPresencePortForwardEnabledFalse(t *testing.T) {
 	cfg := Config{}
 	presence := map[string]bool{
-		"proxy":               true,
-		"proxy.enabled":       true,
-		"proxy.allowed_ports": true,
+		"port_forward":         true,
+		"port_forward.enabled": true,
 	}
-	// Set Enabled to true explicitly in config
-	cfg.Proxy.Enabled = true
+	cfg.PortForward.Enabled = false
 
 	ApplyDefaults(&cfg, presence)
 
-	if !cfg.Proxy.Enabled {
-		t.Error("Proxy.Enabled should stay true when explicitly set to true")
+	if cfg.PortForward.Enabled {
+		t.Error("PortForward.Enabled should stay false when explicitly set to false")
 	}
 }
 
-func TestApplyDefaultsBoolPresenceProxyEnabledFalse(t *testing.T) {
+func TestApplyDefaultsBoolPresencePortForwardNoSection(t *testing.T) {
 	cfg := Config{}
-	presence := map[string]bool{
-		"proxy":         true,
-		"proxy.enabled": true,
-	}
-	// User explicitly wrote "enabled: false"
-	cfg.Proxy.Enabled = false
-
-	ApplyDefaults(&cfg, presence)
-
-	if cfg.Proxy.Enabled {
-		t.Error("Proxy.Enabled should stay false when explicitly set to false")
-	}
-}
-
-func TestApplyDefaultsBoolPresenceProxySectionNoEnabled(t *testing.T) {
-	cfg := Config{}
-	// User wrote a proxy section but didn't include "enabled" key
-	presence := map[string]bool{
-		"proxy":               true,
-		"proxy.allowed_ports": true,
-	}
-
-	ApplyDefaults(&cfg, presence)
-
-	// When proxy section exists but enabled key is absent, should still default to true
-	if !cfg.Proxy.Enabled {
-		t.Error("Proxy.Enabled should default to true when proxy section exists but enabled key is absent")
-	}
-}
-
-func TestApplyDefaultsBoolPresenceSSHEnabledFalse(t *testing.T) {
-	cfg := Config{}
-	presence := map[string]bool{
-		"ssh":         true,
-		"ssh.enabled": true,
-	}
-	cfg.SSH.Enabled = false
-
-	ApplyDefaults(&cfg, presence)
-
-	if cfg.SSH.Enabled {
-		t.Error("SSH.Enabled should stay false when explicitly set to false")
-	}
-}
-
-func TestApplyDefaultsBoolPresenceSSHNoSection(t *testing.T) {
-	cfg := Config{}
-	// No ssh section at all in config
+	// No port_forward section at all in config
 	ApplyDefaults(&cfg, nil)
 
-	if !cfg.SSH.Enabled {
-		t.Error("SSH.Enabled should default to true when ssh section is absent from config")
+	if !cfg.PortForward.Enabled {
+		t.Error("PortForward.Enabled should default to true when port_forward section is absent from config")
 	}
 }
 
@@ -341,5 +287,219 @@ func TestApplyDefaultsPasswordExplicitRemovesFile(t *testing.T) {
 	}
 	if _, err := os.Stat(pwFile); !os.IsNotExist(err) {
 		t.Error("auto-password file should be removed when user sets password explicitly")
+	}
+}
+
+func TestApplyDefaults_DevPortWithTLS(t *testing.T) {
+	setupTestBinDir(t)
+
+	// When DevPort is 0 and TLS is enabled, DevPort should be Port+2
+	cfg := Config{TLS: struct {
+		Enabled  bool   `yaml:"enabled"`
+		CertFile string `yaml:"cert_file"`
+		KeyFile  string `yaml:"key_file"`
+	}{Enabled: true}}
+	ApplyDefaults(&cfg, nil)
+
+	if cfg.DevPort != cfg.Port+2 {
+		t.Errorf("DevPort = %d, want %d (Port+2 when TLS enabled)", cfg.DevPort, cfg.Port+2)
+	}
+}
+
+func TestApplyDefaults_DevPortNegative1Disables(t *testing.T) {
+	setupTestBinDir(t)
+
+	// DevPort = -1 should be preserved (explicitly disabled)
+	cfg := Config{DevPort: -1}
+	ApplyDefaults(&cfg, nil)
+
+	if cfg.DevPort != -1 {
+		t.Errorf("DevPort = %d, want -1 (explicitly disabled)", cfg.DevPort)
+	}
+}
+
+func TestApplyDefaults_DevPortZeroNoTLS(t *testing.T) {
+	setupTestBinDir(t)
+
+	// DevPort = 0 without TLS should stay 0 (disabled)
+	cfg := Config{}
+	ApplyDefaults(&cfg, nil)
+
+	if cfg.DevPort != 0 {
+		t.Errorf("DevPort = %d, want 0 (disabled without TLS)", cfg.DevPort)
+	}
+}
+
+func TestApplyDefaults_TerminalPresenceFalse(t *testing.T) {
+	setupTestBinDir(t)
+
+	// When terminal.enabled is NOT in presence, should default to true
+	cfg := Config{}
+	ApplyDefaults(&cfg, nil)
+
+	if !cfg.Terminal.Enabled {
+		t.Error("Terminal.Enabled should default to true when absent from config")
+	}
+}
+
+func TestApplyDefaults_TerminalPresenceExplicit(t *testing.T) {
+	setupTestBinDir(t)
+
+	// When terminal.enabled IS in presence and set to false, should stay false
+	cfg := Config{}
+	presence := map[string]bool{"terminal.enabled": true}
+	cfg.Terminal.Enabled = false
+	ApplyDefaults(&cfg, presence)
+
+	if cfg.Terminal.Enabled {
+		t.Error("Terminal.Enabled should stay false when explicitly set")
+	}
+}
+
+func TestApplyDefaults_TerminalDefaults(t *testing.T) {
+	setupTestBinDir(t)
+
+	cfg := Config{}
+	ApplyDefaults(&cfg, nil)
+
+	if cfg.Terminal.IdleTimeout != "10m" {
+		t.Errorf("Terminal.IdleTimeout = %q, want %q", cfg.Terminal.IdleTimeout, "10m")
+	}
+	if cfg.Terminal.BufferLines != 2000 {
+		t.Errorf("Terminal.BufferLines = %d, want 2000", cfg.Terminal.BufferLines)
+	}
+	if cfg.Terminal.MaxLineBytes != 65536 {
+		t.Errorf("Terminal.MaxLineBytes = %d, want 65536", cfg.Terminal.MaxLineBytes)
+	}
+	if cfg.Terminal.MaxBufferMB != 4 {
+		t.Errorf("Terminal.MaxBufferMB = %d, want 4", cfg.Terminal.MaxBufferMB)
+	}
+	if cfg.Terminal.MaxSessions != 10 {
+		t.Errorf("Terminal.MaxSessions = %d, want 10", cfg.Terminal.MaxSessions)
+	}
+}
+
+func TestApplyDefaults_RAGDefaults(t *testing.T) {
+	setupTestBinDir(t)
+
+	cfg := Config{}
+	ApplyDefaults(&cfg, nil)
+
+	if cfg.RAG.BaseURL != "http://localhost:11434" {
+		t.Errorf("RAG.BaseURL = %q, want %q", cfg.RAG.BaseURL, "http://localhost:11434")
+	}
+	if cfg.RAG.Model != "bge-m3" {
+		t.Errorf("RAG.Model = %q, want %q", cfg.RAG.Model, "bge-m3")
+	}
+	if cfg.RAG.ChunkSize != 512 {
+		t.Errorf("RAG.ChunkSize = %d, want 512", cfg.RAG.ChunkSize)
+	}
+	if cfg.RAG.ChunkOverlap != 64 {
+		t.Errorf("RAG.ChunkOverlap = %d, want 64", cfg.RAG.ChunkOverlap)
+	}
+	if cfg.RAG.PollInterval != "10s" {
+		t.Errorf("RAG.PollInterval = %q, want %q", cfg.RAG.PollInterval, "10s")
+	}
+	if cfg.RAG.BatchSize != 10 {
+		t.Errorf("RAG.BatchSize = %d, want 10", cfg.RAG.BatchSize)
+	}
+	if cfg.RAG.SearchLimit != 5 {
+		t.Errorf("RAG.SearchLimit = %d, want 5", cfg.RAG.SearchLimit)
+	}
+	if cfg.RAG.RetentionDays != 90 {
+		t.Errorf("RAG.RetentionDays = %d, want 90", cfg.RAG.RetentionDays)
+	}
+}
+
+func TestApplyDefaults_RAGOllamaMigration(t *testing.T) {
+	setupTestBinDir(t)
+
+	// When Ollama fields are set but new fields are empty, should migrate
+	cfg := Config{}
+	cfg.RAG.OllamaBaseURL = "http://old-ollama:11434"
+	cfg.RAG.OllamaModel = "old-model"
+	ApplyDefaults(&cfg, nil)
+
+	if cfg.RAG.BaseURL != "http://old-ollama:11434" {
+		t.Errorf("RAG.BaseURL = %q, want %q (migrated from OllamaBaseURL)", cfg.RAG.BaseURL, "http://old-ollama:11434")
+	}
+	if cfg.RAG.Model != "old-model" {
+		t.Errorf("RAG.Model = %q, want %q (migrated from OllamaModel)", cfg.RAG.Model, "old-model")
+	}
+}
+
+func TestApplyDefaults_ChatSessionPageSize(t *testing.T) {
+	setupTestBinDir(t)
+
+	cfg := Config{}
+	ApplyDefaults(&cfg, nil)
+
+	if cfg.Chat.SessionPageSize != 10 {
+		t.Errorf("Chat.SessionPageSize = %d, want 10", cfg.Chat.SessionPageSize)
+	}
+	if cfg.Chat.SystemPromptInterval != 10 {
+		t.Errorf("Chat.SystemPromptInterval = %d, want 10", cfg.Chat.SystemPromptInterval)
+	}
+}
+
+func TestApplyDefaults_TTSCacheFiles(t *testing.T) {
+	setupTestBinDir(t)
+
+	// MaxCacheFiles = 0 should default to 100
+	cfg := Config{}
+	ApplyDefaults(&cfg, nil)
+
+	if cfg.TTS.MaxCacheFiles != 100 {
+		t.Errorf("TTS.MaxCacheFiles = %d, want 100", cfg.TTS.MaxCacheFiles)
+	}
+}
+
+func TestApplyDefaults_TTSInlineCodeMaxLen(t *testing.T) {
+	setupTestBinDir(t)
+
+	cfg := Config{}
+	ApplyDefaults(&cfg, nil)
+
+	if cfg.TTS.InlineCodeMaxLen != 100 {
+		t.Errorf("TTS.InlineCodeMaxLen = %d, want 100", cfg.TTS.InlineCodeMaxLen)
+	}
+	if cfg.TTS.MaxSummarizeRunes != 10000 {
+		t.Errorf("TTS.MaxSummarizeRunes = %d, want 10000", cfg.TTS.MaxSummarizeRunes)
+	}
+}
+
+func TestApplyDefaults_PortForwardHostKey(t *testing.T) {
+	setupTestBinDir(t)
+
+	cfg := Config{}
+	ApplyDefaults(&cfg, nil)
+
+	if cfg.PortForward.HostKey == "" {
+		t.Error("PortForward.HostKey should have a default value")
+	}
+}
+
+func TestApplyDefaults_RecentProjectsMaxCount(t *testing.T) {
+	setupTestBinDir(t)
+
+	// Default: 10
+	cfg := Config{}
+	ApplyDefaults(&cfg, nil)
+
+	if cfg.RecentProjects.MaxCount != 10 {
+		t.Errorf("RecentProjects.MaxCount = %d, want 10", cfg.RecentProjects.MaxCount)
+	}
+}
+
+func TestApplyDefaults_RecentProjectsMaxCountExplicit(t *testing.T) {
+	setupTestBinDir(t)
+
+	// Explicitly set value should be preserved
+	cfg := Config{}
+	cfg.RecentProjects.MaxCount = 25
+	ApplyDefaults(&cfg, map[string]bool{"recent_projects": true, "recent_projects.max_count": true})
+
+	if cfg.RecentProjects.MaxCount != 25 {
+		t.Errorf("RecentProjects.MaxCount = %d, want 25 (explicitly set)", cfg.RecentProjects.MaxCount)
 	}
 }

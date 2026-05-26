@@ -14,16 +14,24 @@
         <span v-else-if="!isGit" class="drilldown-count">{{ t('git.commitList.notInitialized') }}</span>
         <span v-else-if="!untracked" class="drilldown-count">{{ t('git.commitList.loading') }}</span>
       </div>
-      <SearchInput v-if="commits.length > 0" v-model="commitSearch" :placeholder="searchPlaceholder" />
+      <SearchInput v-if="commits.length > 0" v-model="commitSearch" :placeholder="searchPlaceholder" class="commit-search-input" />
       <button
         v-if="commits.length > 0"
         class="drilldown-refresh-btn"
-        :class="{ spinning: loading }"
+        :class="{ spinning: loading, 'refresh-pulse': refreshHint }"
         :disabled="loading"
         :title="t('git.commitList.refresh')"
         @click.stop="$emit('refresh')"
       >
         <RefreshCw :size="14" />
+      </button>
+      <button
+        v-if="isGit"
+        class="drilldown-refresh-btn"
+        :title="t('git.manage.title')"
+        @click.stop="$emit('manage')"
+      >
+        <GitBranch :size="14" />
       </button>
     </div>
     <div class="drilldown-body" ref="bodyRef">
@@ -99,7 +107,7 @@
 </template>
 
 <script setup>
-import { CirclePlus, FileText, Info, ChevronRight, RefreshCw } from 'lucide-vue-next'
+import { CirclePlus, FileText, Info, ChevronRight, RefreshCw, GitBranch } from 'lucide-vue-next'
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GitGraph from './GitGraph.vue'
@@ -121,9 +129,10 @@ const props = defineProps({
   countLabel: { type: String, default: '' },
   searchPlaceholder: { type: String, default: '' },
   selectedSHA: { type: String, default: null },
+  refreshHint: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['select', 'search', 'load-more', 'init-git', 'refresh'])
+const emit = defineEmits(['select', 'search', 'load-more', 'init-git', 'refresh', 'manage'])
 
 const commitSearch = ref('')
 const listRef = ref(null)
@@ -265,6 +274,12 @@ defineExpose({ observeList, unobserveList, commitSearch })
   flex-shrink: 0;
 }
 
+.commit-search-input {
+  flex: 0 1 auto;
+  max-width: 160px;
+  min-width: 80px;
+}
+
 .drilldown-refresh-btn {
   display: flex;
   align-items: center;
@@ -297,6 +312,17 @@ defineExpose({ observeList, unobserveList, commitSearch })
 
 .drilldown-refresh-btn.spinning svg {
   animation: spin 0.8s linear infinite;
+}
+
+/* Stale data indicator — pulsing glow on refresh button */
+.drilldown-refresh-btn.refresh-pulse {
+  animation: refresh-pulse-glow 1.5s ease-in-out infinite;
+  color: var(--accent-color, #4a90d9);
+}
+
+@keyframes refresh-pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74, 144, 217, 0); }
+  50% { box-shadow: 0 0 6px 2px rgba(74, 144, 217, 0.4); }
 }
 
 @keyframes spin {

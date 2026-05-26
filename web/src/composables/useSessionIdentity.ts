@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { useAgents } from '@/composables/useAgents.ts'
+import { useAgents } from '@/composables/useAgents'
 import { gt } from '@/composables/useLocale'
 
 // ───────────────────────────────────────────────────────────
@@ -18,33 +18,69 @@ const currentModelId = ref('')
 const currentModelName = ref('')
 const currentThinkingEffort = ref('')
 const runningSessions = ref(new Set<string>())
+// Bumped on every mutation to runningSessions so computed properties
+// that depend on the set's contents re-evaluate correctly.
+const runningSessionsVersion = ref(0)
+
+// Whether the global session drawer is open. Lifted from ChatPanelContent
+// to useSessionIdentity so App.vue can render a single SessionDrawer
+// instance that's accessible from any tab (chat, viewer, QuoteQuestionBar).
+const sessionDrawerOpen = ref(false)
+
+/** Reset all module-level singleton refs — used by SPA hot project switch. */
+export function resetIdentity(): void {
+  currentSessionId.value = ''
+  currentSessionTitle.value = ''
+  currentBackend.value = ''
+  currentAgentId.value = ''
+  currentModelId.value = ''
+  currentModelName.value = ''
+  currentThinkingEffort.value = ''
+  runningSessions.value = new Set()
+  runningSessionsVersion.value = 0
+  sessionDrawerOpen.value = false
+  _switchSession = null
+  _createSession = null
+  _deleteSession = null
+  _sendMessage = null
+  _openChatPanel = null
+  _sessionDrawerRef = null
+}
 
 // ───────────────────────────────────────────────────────────
-// LocalStorage persistence for model & thinking effort prefs.
-// Keyed per agent so each agent remembers its own selections.
+// Agent preference persistence — stored in agent YAML files via PATCH /api/agents.
+// preferredModel / preferredThinkingEffort are the source of truth for
+// interactive sessions. Scheduled tasks use BaseModelID() and ThinkingEffort
+// (the agent's original defaults) instead.
 // ───────────────────────────────────────────────────────────
 
-const LS_MODEL_PREFIX = 'clawbench_model_'
-const LS_THINKING_PREFIX = 'clawbench_thinking_'
-
-function saveModelPref(agentId: string, modelId: string) {
+async function saveModelPref(agentId: string, modelId: string) {
   if (!agentId || !modelId) return
-  try { localStorage.setItem(LS_MODEL_PREFIX + agentId, modelId) } catch {}
+  // No-op: model selection in chat is session-scoped and does NOT update the agent's
+  // default model. The agent's preferredModel is configured exclusively via the
+  // settings panel (which calls patchAgentPref directly).
 }
 
 function loadModelPref(agentId: string): string | null {
   if (!agentId) return null
-  try { return localStorage.getItem(LS_MODEL_PREFIX + agentId) } catch { return null }
+  // Read from agent's server-side preference (preferredModel)
+  const { getAgent } = useAgents()
+  const agent = getAgent(agentId)
+  return agent?.preferredModel || null
 }
 
-function saveThinkingPref(agentId: string, level: string) {
+async function saveThinkingPref(agentId: string, level: string) {
   if (!agentId) return
-  try { localStorage.setItem(LS_THINKING_PREFIX + agentId, level) } catch {}
+  // Save to server (agent YAML) via PATCH /api/agents
+  const { patchAgentPref } = await import('@/composables/useSettingsConfig')
+  patchAgentPref(agentId, 'preferred_thinking_effort', level).catch(() => {})
 }
 
 function loadThinkingPref(agentId: string): string | null {
   if (!agentId) return null
-  try { return localStorage.getItem(LS_THINKING_PREFIX + agentId) } catch { return null }
+  // Read from agent's server-side preference (preferredThinkingEffort > thinkingEffort)
+  const { getEffectiveThinkingEffort } = useAgents()
+  return getEffectiveThinkingEffort(agentId) || null
 }
 
 // ───────────────────────────────────────────────────────────
@@ -60,6 +96,9 @@ let _createSession: ((agentId?: string) => Promise<void>) | null = null
 let _deleteSession: ((sessionId: string, backend?: string) => Promise<void>) | null = null
 let _sendMessage: ((text: string, filePaths?: string[]) => Promise<void>) | null = null
 let _openChatPanel: (() => void) | null = null
+// SessionDrawer component ref — set by App.vue. Allows any component to
+// trigger openAgentSelector() on the global drawer without coupling.
+let _sessionDrawerRef: any = null
 
 export interface SessionActions {
   switchSession: (sessionId: string) => Promise<void>
@@ -70,10 +109,8 @@ export interface SessionActions {
 }
 
 /**
- * Register session action callbacks. Called by ChatPanel on mount.
- * These are stable across the ChatPanel lifecycle — only registered
- * once (guard below). If ChatPanel unmounts and remounts, the old
- * callbacks are replaced.
+ * Register session action callbacks. Called by App.vue on mount
+ * (for openAgentSelector) and ChatPanel on mount (for the rest).
  */
 export function registerSessionActions(actions: SessionActions) {
   _switchSession = actions.switchSession
@@ -81,6 +118,11 @@ export function registerSessionActions(actions: SessionActions) {
   _deleteSession = actions.deleteSession
   _sendMessage = actions.sendMessage
   _openChatPanel = actions.openChatPanel
+}
+
+/** Register the SessionDrawer component ref so openAgentSelector() works. */
+export function registerSessionDrawerRef(drawerRef: any) {
+  _sessionDrawerRef = drawerRef
 }
 
 /**
@@ -270,6 +312,16 @@ export function useSessionIdentity() {
     }
   }
 
+  /** Open the global session drawer (sets sessionDrawerOpen = true). */
+  function openSessionTab() {
+    sessionDrawerOpen.value = true
+  }
+
+  /** Open the agent selector inside the session drawer. */
+  function openAgentSelector() {
+    _sessionDrawerRef?.openAgentSelector()
+  }
+
   return {
     // Identity refs (read-only for consumers; ChatPanel writes to them)
     currentSessionId,
@@ -280,13 +332,18 @@ export function useSessionIdentity() {
     currentModelName,
     currentThinkingEffort,
     runningSessions,
+    runningSessionsVersion,
     agentHeaderTitle,
+    // Global session drawer state
+    sessionDrawerOpen,
     // Action proxies
     switchSession,
     createSession,
     deleteSession,
     sendMessage,
     openChatPanel,
+    openSessionTab,
+    openAgentSelector,
     // Registration (for ChatPanel)
     registerSessionActions,
     // Init (for App.vue)

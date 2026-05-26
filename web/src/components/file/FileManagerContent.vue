@@ -259,11 +259,13 @@
           </div>
         </template>
         <!-- Group 4: Terminal -->
-        <div class="context-menu-divider" />
-        <div class="context-menu-item" @click.stop="doOpenTerminal">
-          <TerminalIcon :size="14" />
-          {{ t('file.context.openTerminal') }}
-        </div>
+        <template v-if="!isTerminalDisabled">
+          <div class="context-menu-divider" />
+          <div class="context-menu-item" @click.stop="doOpenTerminal">
+            <TerminalIcon :size="14" />
+            {{ t('file.context.openTerminal') }}
+          </div>
+        </template>
       </div>
       <div v-if="ctxMenu.visible" class="ctx-overlay" @click="ctxMenu.visible = false" @touchstart="ctxMenu.visible = false" />
     </Teleport>
@@ -277,15 +279,18 @@ import { Folder, ArrowDownAz, ArrowUpZa, ChevronDown, ChevronUp, Clock, FileText
 import { getFileType } from '@/utils/fileType.ts'
 import { dirName } from '@/utils/path.ts'
 import {
-  VIEW_MODE_KEY, loadViewMode, saveViewMode, buildThumbUrl,
+  buildThumbUrl,
   isImage as isImageEntry, isAudio as isAudioEntry, isVideo as isVideoEntry,
   isThumbable as isThumbableEntry, formatSize as formatFileSize, THUMBABLE_EXTS,
   createMultiSelect as _createMultiSelect, createClipboard as _createClipboard,
   resolveClickAction,
 } from '@/utils/fileManager.ts'
 import { store } from '@/stores/app.ts'
+import { localConfig, setLocalConfig, useSettingsConfig } from '@/composables/useSettingsConfig'
 import { useAppMode } from '@/composables/useAppMode.ts'
 import { useDialog } from '@/composables/useDialog.ts'
+import { useTerminalStatus } from '@/composables/useTerminalStatus.ts'
+import { useFeatureBackHandler } from '@/composables/useEdgeSwipeBack'
 import SearchInput from '@/components/common/SearchInput.vue'
 import DirBreadcrumb from './DirBreadcrumb.vue'
 
@@ -293,6 +298,17 @@ const toast = inject('toast', null)
 const { isAppMode } = useAppMode()
 const { t, locale } = useI18n()
 const dialog = useDialog()
+const { terminalRuntimeEnabled } = useTerminalStatus()
+const isTerminalDisabled = computed(() => terminalRuntimeEnabled.value !== true)
+
+const activeTab = inject('activeTab', ref(''))
+
+// Register back handler for file browser directory navigation
+useFeatureBackHandler(
+  'browse',
+  () => activeTab.value === 'browse' && !!props.currentDir,
+  () => emit('navigateDir', dirName(props.currentDir)),
+)
 
 const props = defineProps({
     entries: Array,
@@ -310,9 +326,9 @@ const emit = defineEmits(['navigateDir', 'selectFile', 'toggleSort', 'toggleHidd
 const searchQuery = ref('')
 const sortMenuOpen = ref(false)
 
-// ── View mode (list / grid) ──
-const viewMode = ref(loadViewMode())
-watch(viewMode, v => saveViewMode(v))
+// ── View mode (list / grid) from settings config ──
+const viewMode = ref(localConfig.fileView || 'list')
+watch(viewMode, v => setLocalConfig('fileView', v))
 
 // ── Thumbnail loading errors ──
 const thumbErrors = reactive(new Set())
@@ -698,6 +714,15 @@ function formatDate(modified) {
 }
 
 function showCtx(e, entry) {
+    if (!entry) {
+        // Empty-area context menu: no specific entry selected
+        ctxMenu.x = e.clientX
+        ctxMenu.y = e.clientY
+        ctxMenu.entry = null
+        ctxMenu.visible = true
+        nextTick(() => clampCtxMenu())
+        return
+    }
     const path = itemPath(entry.name)
     ctxMenu.x = e.clientX
     ctxMenu.y = e.clientY

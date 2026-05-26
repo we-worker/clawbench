@@ -1,14 +1,45 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"clawbench/internal/model"
 )
+
+// validGitSHA matches a hex commit SHA (6-40 hex chars, abbreviated or full).
+// Prevents argument injection where a malicious SHA starting with "-" could be
+// interpreted as a git flag. (ISS-132)
+var validGitSHA = regexp.MustCompile(`^[0-9a-f]{6,40}$`)
+
+// isValidGitRefName checks that a git ref name (branch/tag) is safe to pass
+// as a CLI argument. Disallows names starting with "-" (which git would
+// interpret as a flag) and names containing whitespace or control characters.
+// (ISS-151, ISS-152)
+var validGitRefName = regexp.MustCompile(`^[^ \t\n\r\x00-\x1f-][^ \t\n\r\x00-\x1f]*$`)
+
+// isValidGitSHA returns true if s looks like a valid hex commit SHA.
+// Also accepts "HEAD" which is a safe git ref used for working tree diffs.
+func isValidGitSHA(s string) bool {
+	if s == "HEAD" {
+		return true
+	}
+	return validGitSHA.MatchString(s)
+}
+
+// isValidGitRefName returns true if s is safe to pass as a git ref name argument.
+func isValidGitRefName(s string) bool {
+	return validGitRefName.MatchString(s)
+}
 
 // commitInfo represents a git commit in API responses.
 type commitInfo struct {
@@ -134,7 +165,7 @@ func ServeGitProjectHistory(w http.ResponseWriter, r *http.Request) {
 	// Format: SHA|parents|subject|date|author+refs
 	// --topo-order ensures branches display contiguously
 	// --decorate-refs-exclude hides remote-tracking refs
-	logArgs := []string{"log", "--format=%H|%P|%s|%ad|%an%d", "--date=iso", "--topo-order", "--decorate-refs-exclude=refs/remotes", "-30"}
+	logArgs := []string{"log", "--format=%H|%P|%s|%ad|%an%d", "--date=iso-strict", "--topo-order", "--decorate-refs-exclude=refs/remotes", "-30"}
 	if skip > 0 {
 		logArgs = append(logArgs, "--skip", fmt.Sprintf("%d", skip))
 	}
@@ -152,7 +183,12 @@ func ServeGitProjectHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // ServeGitBranch returns the current branch name for the project.
+// DELETE /api/git/branch deletes a local branch.
 func ServeGitBranch(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		serveGitDeleteBranch(w, r)
+		return
+	}
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
@@ -165,6 +201,8 @@ func ServeGitBranch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"isGit":  false,
 			"branch": "",
+			"head":   "",
+			"dirty":  false,
 		})
 		return
 	}
@@ -177,9 +215,25 @@ func ServeGitBranch(w http.ResponseWriter, r *http.Request) {
 		branch = strings.TrimSpace(string(output))
 	}
 
+	headSHA := ""
+	shaOutput, shaErr := exec.Command("git", "rev-parse", "HEAD").Output()
+	if shaErr == nil {
+		headSHA = strings.TrimSpace(string(shaOutput))
+	}
+
+	// git diff --quiet HEAD exits 0 if clean, 1 if dirty, 128 if no commits yet
+	dirty := false
+	diffCmd := exec.Command("git", "diff", "--quiet", "HEAD")
+	diffCmd.Dir = projectPath
+	if err := diffCmd.Run(); err != nil {
+		dirty = true
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"isGit":  true,
 		"branch": branch,
+		"head":   headSHA,
+		"dirty":  dirty,
 	})
 }
 
@@ -280,6 +334,10 @@ func ServeGitFileDiff(w http.ResponseWriter, r *http.Request) {
 		writeLocalizedErrorf(w, r, http.StatusBadRequest, "MissingShaOrPath")
 		return
 	}
+	if !isValidGitSHA(sha) {
+		writeLocalizedErrorf(w, r, http.StatusBadRequest, "InvalidSHA")
+		return
+	}
 
 	if _, ok := validateAndResolvePath(w, r, projectPath, filePath); !ok {
 		return
@@ -308,17 +366,31 @@ func ServeGitCommitFiles(w http.ResponseWriter, r *http.Request) {
 		writeLocalizedErrorf(w, r, http.StatusBadRequest, "MissingSha")
 		return
 	}
-
-	// git diff-tree -m --no-commit-id --name-status -r <sha>
-	// -m splits merge commits so their diffs are shown (otherwise empty)
-	cmd := exec.Command("git", "diff-tree", "-m", "--no-commit-id", "--name-status", "-r", sha)
-	cmd.Dir = projectPath
-	output, err := cmd.CombinedOutput()
+	if !isValidGitSHA(sha) {
+		writeLocalizedErrorf(w, r, http.StatusBadRequest, "InvalidSHA")
+		return
+	}
 
 	type fileInfo struct {
 		Path string `json:"path"`
 		Type string `json:"type"` // A=added, M=modified, D=deleted
 	}
+
+	// Detect merge commit by checking number of parents
+	parents := getCommitParents(projectPath, sha)
+
+	if len(parents) >= 2 {
+		// Merge commit: show files grouped by which parent introduced them
+		groups := buildMergeFileGroups(projectPath, sha, parents)
+		writeJSON(w, http.StatusOK, groups)
+		return
+	}
+
+	// Regular commit (or orphan): use diff-tree as before
+	// -m splits merge commits so their diffs are shown (otherwise empty)
+	cmd := exec.Command("git", "diff-tree", "-m", "--no-commit-id", "--name-status", "-r", sha)
+	cmd.Dir = projectPath
+	output, err := cmd.CombinedOutput()
 
 	var files []fileInfo
 	if err == nil {
@@ -339,6 +411,247 @@ func ServeGitCommitFiles(w http.ResponseWriter, r *http.Request) {
 		files = []fileInfo{}
 	}
 	writeJSON(w, http.StatusOK, files)
+}
+
+// getCommitParents returns the parent SHAs of a commit.
+func getCommitParents(projectPath, sha string) []string {
+	cmd := exec.Command("git", "cat-file", "-p", sha)
+	cmd.Dir = projectPath
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var parents []string
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.HasPrefix(line, "parent ") {
+			parents = append(parents, strings.TrimPrefix(line, "parent "))
+		}
+		if line == "" {
+			break
+		}
+	}
+	return parents
+}
+
+// mergeFileGroup represents a group of files introduced by one side of a merge.
+type mergeFileGroup struct {
+	Label string          `json:"label"`
+	Files []mergeFileInfo `json:"files"`
+}
+
+type mergeFileInfo struct {
+	Path string `json:"path"`
+	Type string `json:"type"`
+}
+
+// buildMergeFileGroups computes per-parent file groups for a merge commit.
+// Files changed by both parents are assigned to parent1 (the current branch).
+func buildMergeFileGroups(projectPath, sha string, parents []string) map[string]interface{} {
+	// Get merge-base between first two parents
+	cmd := exec.Command("git", "merge-base", parents[0], parents[1])
+	cmd.Dir = projectPath
+	output, err := cmd.Output()
+	if err != nil {
+		return fallbackMergeFiles(projectPath, sha)
+	}
+	mergeBase := strings.TrimSpace(string(output))
+
+	// Extract branch labels from merge commit message
+	labels := extractMergeLabels(projectPath, sha, parents)
+
+	// Collect files per parent: diff merge-base -> parentN
+	seen := make(map[string]bool)
+	groups := make([]mergeFileGroup, 0, len(parents))
+
+	for i, parent := range parents {
+		cmd := exec.Command("git", "diff", "--name-status", mergeBase, parent)
+		cmd.Dir = projectPath
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+
+		var files []mergeFileInfo
+		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+			if line == "" {
+				continue
+			}
+			parts := strings.SplitN(line, "\t", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			path := parts[1]
+			if seen[path] {
+				continue
+			}
+			seen[path] = true
+			files = append(files, mergeFileInfo{
+				Type: parts[0],
+				Path: path,
+			})
+		}
+
+		label := labels[i]
+		if label == "" {
+			label = fmt.Sprintf("Parent %d", i+1)
+		}
+
+		groups = append(groups, mergeFileGroup{
+			Label: label,
+			Files: files,
+		})
+	}
+
+	// Also include files only in the merge result (conflict resolutions)
+	cmd = exec.Command("git", "diff", "--name-status", mergeBase, sha)
+	cmd.Dir = projectPath
+	output, err = cmd.Output()
+	if err == nil {
+		var resolutionFiles []mergeFileInfo
+		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+			if line == "" {
+				continue
+			}
+			parts := strings.SplitN(line, "\t", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			path := parts[1]
+			if seen[path] {
+				continue
+			}
+			seen[path] = true
+			resolutionFiles = append(resolutionFiles, mergeFileInfo{
+				Type: parts[0],
+				Path: path,
+			})
+		}
+		if len(resolutionFiles) > 0 {
+			groups = append(groups, mergeFileGroup{
+				Label: "conflict resolution",
+				Files: resolutionFiles,
+			})
+		}
+	}
+
+	return map[string]interface{}{
+		"merge":  true,
+		"groups": groups,
+	}
+}
+
+// extractMergeLabels parses branch names from the merge commit message.
+// For "Merge branch 'X' into Y", returns [Y, X].
+// For "Merge branch 'X'" (no into), returns ["", X].
+// Falls back to short SHA if parsing fails.
+func extractMergeLabels(projectPath, sha string, parents []string) []string {
+	labels := make([]string, len(parents))
+
+	cmd := exec.Command("git", "log", "--format=%s", "-1", sha)
+	cmd.Dir = projectPath
+	output, err := cmd.Output()
+	if err != nil {
+		return labels
+	}
+	msg := strings.TrimSpace(string(output))
+
+	// Try "Merge branch 'src' into dst" format
+	// e.g. "Merge branch 'main' into fix/android-coverage-gate"
+	if idx := strings.Index(msg, "Merge branch '"); idx != -1 {
+		rest := msg[idx+len("Merge branch '"):]
+		endSrc := strings.Index(rest, "'")
+		if endSrc != -1 {
+			src := rest[:endSrc]
+			// afterSrc starts after the closing quote, e.g. " into fix/..."
+			afterSrc := rest[endSrc+1:]
+			if strings.HasPrefix(afterSrc, " into ") {
+				dst := strings.TrimPrefix(afterSrc, " into ")
+				if len(labels) >= 1 {
+					labels[0] = dst
+				}
+				if len(labels) >= 2 {
+					labels[1] = src
+				}
+			} else {
+				// "Merge branch 'X'" without into
+				if len(labels) >= 2 {
+					labels[1] = src
+				}
+			}
+		}
+	}
+
+	// Try "Merge pull request #N from user/branch" format
+	if labels[1] == "" && strings.HasPrefix(msg, "Merge pull request") {
+		if idx := strings.LastIndex(msg, "from "); idx != -1 {
+			src := msg[idx+5:]
+			if slashIdx := strings.LastIndex(src, "/"); slashIdx != -1 {
+				src = src[slashIdx+1:]
+			}
+			if len(labels) >= 2 {
+				labels[1] = src
+			}
+		}
+	}
+
+	// Fallback: short SHA for unlabeled parents
+	for i, label := range labels {
+		if label == "" && i < len(parents) {
+			cmd := exec.Command("git", "rev-parse", "--short", parents[i])
+			cmd.Dir = projectPath
+			output, err := cmd.Output()
+			if err == nil {
+				labels[i] = strings.TrimSpace(string(output))
+			}
+		}
+	}
+
+	return labels
+}
+
+// fallbackMergeFiles uses diff-tree -m with dedup when merge-base fails.
+func fallbackMergeFiles(projectPath, sha string) map[string]interface{} {
+	cmd := exec.Command("git", "diff-tree", "-m", "--no-commit-id", "--name-status", "-r", sha)
+	cmd.Dir = projectPath
+	output, err := cmd.CombinedOutput()
+
+	type fileInfo struct {
+		Path string
+		Type string
+	}
+
+	var files []fileInfo
+	if err == nil {
+		seen := make(map[string]bool)
+		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+			if line == "" {
+				continue
+			}
+			parts := strings.SplitN(line, "\t", 2)
+			if len(parts) == 2 && !seen[parts[1]] {
+				seen[parts[1]] = true
+				files = append(files, fileInfo{
+					Type: parts[0],
+					Path: parts[1],
+				})
+			}
+		}
+	}
+	if files == nil {
+		files = []fileInfo{}
+	}
+
+	mergeFiles := make([]mergeFileInfo, len(files))
+	for i, f := range files {
+		mergeFiles[i] = mergeFileInfo{Path: f.Path, Type: f.Type}
+	}
+
+	return map[string]interface{}{
+		"merge": true,
+		"groups": []mergeFileGroup{
+			{Label: "all changes", Files: mergeFiles},
+		},
+	}
 }
 
 // ServeGitHistory returns commit history for a specific file.
@@ -377,8 +690,8 @@ func ServeGitHistory(w http.ResponseWriter, r *http.Request) {
 	lsOut, lsErr := lsCmd.CombinedOutput()
 	untracked := lsErr != nil || len(lsOut) == 0
 
-	// git log --format="%H|%P|%s|%ad|%an%d" --date=iso --topo-order -- <path>
-	cmd := exec.Command("git", "log", "--format=%H|%P|%s|%ad|%an%d", "--date=iso", "--topo-order", "--decorate-refs-exclude=refs/remotes", "--", relPath)
+	// git log --format="%H|%P|%s|%ad|%an%d" --date=iso-strict --topo-order -- <path>
+	cmd := exec.Command("git", "log", "--format=%H|%P|%s|%ad|%an%d", "--date=iso-strict", "--topo-order", "--decorate-refs-exclude=refs/remotes", "--", relPath)
 	cmd.Dir = projectPath
 	output, _ := cmd.CombinedOutput()
 
@@ -412,6 +725,10 @@ func ServeGitDiff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	commit := r.URL.Query().Get("commit")
+	if commit != "" && !isValidGitSHA(commit) {
+		writeLocalizedErrorf(w, r, http.StatusBadRequest, "InvalidSHA")
+		return
+	}
 	output, err := gitDiff(projectPath, relPath, commit)
 	writeDiffResponse(w, output, err)
 }
@@ -500,8 +817,9 @@ func parseGitStatusPorcelain(output string) []wtFileInfo {
 
 // ServeGitVerifyCommits checks which SHAs are valid git commit objects.
 // Accepts POST with JSON body {"shas": ["abc1234", ...]}.
-// Returns {"results": {"abc1234": "commit", "def5678": null}} where null means
-// the SHA is not a valid commit (could be blob/tree/tag or not found).
+// Returns {"results": {"abc1234": {"sha":"...","msg":"...","date":"...","author":"..."}, "def5678": null}}
+// where null means the SHA is not a valid commit.
+// For valid commits, the full commit info is returned for breadcrumb display.
 func ServeGitVerifyCommits(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -523,20 +841,80 @@ func ServeGitVerifyCommits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := make(map[string]interface{}, len(body.SHAs))
+	// Cap SHA count to prevent exceeding OS ARG_MAX (~2MB on Linux).
+	// 500 SHAs × 40 chars each ≈ 20KB — well within safe limits.
+	const maxSHAs = 500
+	if len(body.SHAs) > maxSHAs {
+		body.SHAs = body.SHAs[:maxSHAs]
+	}
+
+	// Validate all SHAs to prevent argument injection (ISS-132)
 	for _, sha := range body.SHAs {
-		cmd := exec.Command("git", "cat-file", "-t", sha)
-		cmd.Dir = projectPath
-		output, err := cmd.Output()
-		if err != nil {
-			results[sha] = nil
-		} else {
-			objType := strings.TrimSpace(string(output))
-			if objType == "commit" {
-				results[sha] = "commit"
-			} else {
-				results[sha] = nil
+		if !isValidGitSHA(sha) {
+			writeLocalizedErrorf(w, r, http.StatusBadRequest, "InvalidSHA")
+			return
+		}
+	}
+
+	results := make(map[string]interface{}, len(body.SHAs))
+
+	// Batch: use git log --no-walk=sorted to fetch all commit info in one command
+	// --ignore-missing skips invalid SHAs instead of erroring out
+	logArgs := []string{
+		"log", "--no-walk=sorted", "--ignore-missing",
+		"--format=%H|%P|%s|%ad|%an%d",
+		"--date=iso-strict",
+	}
+	logArgs = append(logArgs, body.SHAs...)
+
+	logCmd := exec.Command("git", logArgs...)
+	logCmd.Dir = projectPath
+	logOutput, _ := logCmd.Output()
+
+	// Parse git log output — only valid commits appear
+	// Map full SHA → requested SHA for key normalization (frontend may send abbreviated SHAs)
+	// Build a prefix lookup map from requested SHAs for O(1) matching instead of O(N×M) scan.
+	reqSHAMap := make(map[string]string, len(body.SHAs)) // prefix→original
+	for _, sha := range body.SHAs {
+		// Index by the minimum unique prefix length (at least 7 chars for abbreviated SHAs)
+		prefixLen := len(sha)
+		if prefixLen > 40 {
+			prefixLen = 40
+		}
+		reqSHAMap[sha[:prefixLen]] = sha
+	}
+
+	fullToRequested := map[string]string{}
+	if len(logOutput) > 0 {
+		commits := parseGitLog(string(logOutput))
+		for _, c := range commits {
+			// Find which requested SHA matches this full SHA (by prefix lookup)
+			for prefixLen := 7; prefixLen <= len(c.SHA); prefixLen++ {
+				if reqSHA, ok := reqSHAMap[c.SHA[:prefixLen]]; ok {
+					fullToRequested[c.SHA] = reqSHA
+					break
+				}
 			}
+			// Store under both full SHA and (if matched) requested SHA
+			results[c.SHA] = c
+		}
+	}
+
+	// Re-key results under the original requested SHAs and mark unmatched as nil
+	for _, sha := range body.SHAs {
+		matched := false
+		for fullSHA, reqSHA := range fullToRequested {
+			if reqSHA == sha {
+				if fullSHA != sha {
+					results[sha] = results[fullSHA]
+					delete(results, fullSHA)
+				}
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			results[sha] = nil
 		}
 	}
 
@@ -589,5 +967,837 @@ func ServeGitWorkingTreeFiles(w http.ResponseWriter, r *http.Request) {
 		"isGit":          true,
 		"hasUncommitted": len(allFiles) > 0,
 		"files":          allFiles,
+	})
+}
+
+// worktreeInfo represents a git worktree in API responses.
+type worktreeInfo struct {
+	Path         string `json:"path"`
+	DisplayPath  string `json:"displayPath"`
+	Branch       string `json:"branch"`
+	IsCurrent    bool   `json:"isCurrent"`
+	Dirty        bool   `json:"dirty"`
+	ChangeCount  int    `json:"changeCount"`
+	UntrackedCnt int    `json:"untrackedCount"`
+	Locked       bool   `json:"locked"`
+	Missing      bool   `json:"missing"`
+}
+
+// parseWorktreePorcelain parses `git worktree list --porcelain` output into worktreeInfo slice.
+// Blocks are separated by blank lines. Each block has lines like:
+//
+//	worktree /path
+//	HEAD abc123
+//	branch refs/heads/name
+//	locked            (optional, may have reason text)
+//
+// DisplayPath is relative to projectPath with "." prefix (e.g. "./subdir"),
+// or absolute path if the worktree is not under projectPath.
+func parseWorktreePorcelain(output, projectPath string) []worktreeInfo {
+	// Resolve symlinks on projectPath so comparisons work on macOS
+	// where /var is a symlink to /private/var.
+	if resolved, err := filepath.EvalSymlinks(projectPath); err == nil {
+		projectPath = resolved
+	}
+
+	var trees []worktreeInfo
+	blocks := strings.Split(strings.TrimSpace(output), "\n\n")
+	for _, block := range blocks {
+		block = strings.TrimSpace(block)
+		if block == "" {
+			continue
+		}
+		var info worktreeInfo
+		for _, line := range strings.Split(block, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			switch {
+			case strings.HasPrefix(line, "worktree "):
+				path := strings.TrimPrefix(line, "worktree ")
+				if resolved, err := filepath.EvalSymlinks(path); err == nil {
+					path = resolved
+				}
+				info.Path = path
+			case strings.HasPrefix(line, "branch "):
+				branch := strings.TrimPrefix(line, "branch refs/heads/")
+				info.Branch = branch
+			case line == "locked" || strings.HasPrefix(line, "locked "):
+				info.Locked = true
+			}
+		}
+		if info.Path == "" {
+			continue
+		}
+		// Compute DisplayPath
+		if strings.HasPrefix(info.Path, projectPath+"/") {
+			info.DisplayPath = "." + info.Path[len(projectPath):]
+		} else if info.Path == projectPath {
+			info.DisplayPath = "."
+		} else {
+			info.DisplayPath = info.Path
+		}
+		info.IsCurrent = info.Path == projectPath
+		trees = append(trees, info)
+	}
+	return trees
+}
+
+// branchInfo represents a git branch in API responses.
+type branchInfo struct {
+	Name           string `json:"name"`
+	IsCurrent      bool   `json:"isCurrent"`
+	IsDefault      bool   `json:"isDefault"`
+	Ahead          int    `json:"ahead"`
+	Behind         int    `json:"behind"`
+	RemoteTracking string `json:"remoteTracking"`
+}
+
+// parseTrackInfo parses git tracking info like "[ahead 3, behind 2]" into ahead/behind counts.
+func parseTrackInfo(s string) (ahead, behind int) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || s[0] != '[' || s[len(s)-1] != ']' {
+		return 0, 0
+	}
+	s = s[1 : len(s)-1] // strip brackets
+	for _, part := range strings.Split(s, ", ") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "ahead ") {
+			fmt.Sscanf(part, "ahead %d", &ahead)
+		} else if strings.HasPrefix(part, "behind ") {
+			fmt.Sscanf(part, "behind %d", &behind)
+		}
+	}
+	return ahead, behind
+}
+
+// parseBranchForEachRef parses `git for-each-ref --format='%(refname:short)|%(upstream:short)|%(upstream:track)' refs/heads/`
+// output into branchInfo slice.
+// Each line: branchName|upstreamShort|[ahead N, behind M]
+func parseBranchForEachRef(output string) []branchInfo {
+	var branches []branchInfo
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) < 1 {
+			continue
+		}
+		info := branchInfo{Name: parts[0]}
+		if len(parts) > 1 {
+			info.RemoteTracking = parts[1]
+		}
+		if len(parts) > 2 {
+			info.Ahead, info.Behind = parseTrackInfo(parts[2])
+		}
+		branches = append(branches, info)
+	}
+	return branches
+}
+
+// detectDefaultBranch determines the default branch using a fallback chain:
+// 1. git symbolic-ref refs/remotes/origin/HEAD → strip prefix
+// 2. Check if "main" branch exists
+// 3. Check if "master" branch exists
+// 4. Empty string if none found
+func detectDefaultBranch(projectPath string) string {
+	// Try symbolic-ref for origin/HEAD
+	cmd := exec.Command("git", "symbolic-ref", "refs/remotes/origin/HEAD")
+	cmd.Dir = projectPath
+	out, err := cmd.Output()
+	if err == nil {
+		ref := strings.TrimSpace(string(out))
+		// ref is like refs/remotes/origin/main
+		if strings.HasPrefix(ref, "refs/remotes/origin/") {
+			name := strings.TrimPrefix(ref, "refs/remotes/origin/")
+			if name != "" {
+				return name
+			}
+		}
+	}
+
+	// Fallback: check if "main" exists
+	cmd = exec.Command("git", "rev-parse", "--verify", "main")
+	cmd.Dir = projectPath
+	if err := cmd.Run(); err == nil {
+		return "main"
+	}
+
+	// Fallback: check if "master" exists
+	cmd = exec.Command("git", "rev-parse", "--verify", "master")
+	cmd.Dir = projectPath
+	if err := cmd.Run(); err == nil {
+		return "master"
+	}
+
+	return ""
+}
+
+// ServeGitBranches returns all local branches for the project.
+func ServeGitBranches(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	projectPath, ok := requireProject(w, r)
+	if !ok {
+		return
+	}
+
+	if !isGitRepo(projectPath) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"isGit":        false,
+			"branches":     []interface{}{},
+			"defaultBranch": "",
+			"currentBranch": "",
+		})
+		return
+	}
+
+	// Get all branches with tracking info
+	cmd := exec.Command("git", "for-each-ref", "--format=%(refname:short)|%(upstream:short)|%(upstream:track)", "refs/heads/")
+	cmd.Dir = projectPath
+	output, _ := cmd.CombinedOutput()
+	branches := parseBranchForEachRef(string(output))
+
+	// Get current branch
+	cmd = exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	cmd.Dir = projectPath
+	curOut, curErr := cmd.Output()
+	currentBranch := ""
+	if curErr == nil {
+		currentBranch = strings.TrimSpace(string(curOut))
+	}
+
+	// Detect default branch
+	defaultBranch := detectDefaultBranch(projectPath)
+
+	// Set IsCurrent and IsDefault on each branch
+	for i := range branches {
+		branches[i].IsCurrent = branches[i].Name == currentBranch
+		branches[i].IsDefault = branches[i].Name == defaultBranch
+	}
+
+	// Get stash count
+	stashCount := 0
+	stashListCmd := exec.Command("git", "stash", "list")
+	stashListCmd.Dir = projectPath
+	stashListOut, _ := stashListCmd.Output()
+	for _, ch := range string(stashListOut) {
+		if ch == '\n' {
+			stashCount++
+		}
+	}
+	if len(strings.TrimSpace(string(stashListOut))) > 0 {
+		stashCount++ // last entry has no trailing newline
+	}
+
+	if branches == nil {
+		branches = []branchInfo{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"isGit":         true,
+		"branches":      branches,
+		"defaultBranch":  defaultBranch,
+		"currentBranch": currentBranch,
+		"stashCount":    stashCount,
+	})
+}
+
+// ServeGitVerifyWorktrees checks which paths are valid git worktree directories.
+// Accepts POST with JSON body {"paths": ["/abs/path/1", "/abs/path/2"]}.
+// Returns {"results": {"/abs/path/1": {"branch":"feature-x","displayPath":"./.worktrees/feature-x","isCurrent":false,"path":"/abs/path/1"}, "/abs/path/2": null}}
+// where null means the path is not a valid worktree.
+func ServeGitVerifyWorktrees(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	projectPath, ok := requireProject(w, r)
+	if !ok {
+		return
+	}
+	if !isGitRepo(projectPath) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"results": map[string]interface{}{}})
+		return
+	}
+
+	var body struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Paths) == 0 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"results": map[string]interface{}{}})
+		return
+	}
+
+	// Cap path count to prevent abuse.
+	const maxPaths = 100
+	if len(body.Paths) > maxPaths {
+		body.Paths = body.Paths[:maxPaths]
+	}
+
+	// Run git worktree list --porcelain once to get all worktrees
+	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = projectPath
+	output, _ := cmd.CombinedOutput()
+	trees := parseWorktreePorcelain(string(output), projectPath)
+
+	// Build lookup map: resolved worktree path → worktreeInfo
+	lookup := make(map[string]*worktreeInfo, len(trees))
+	for i := range trees {
+		lookup[trees[i].Path] = &trees[i]
+	}
+
+	results := make(map[string]interface{}, len(body.Paths))
+	for _, p := range body.Paths {
+		// Handle relative paths by joining with projectPath
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(projectPath, p)
+		}
+		// Resolve symlinks for consistent matching
+		resolved := p
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			resolved = r
+		}
+		if info, ok := lookup[resolved]; ok {
+			results[p] = info
+		} else {
+			results[p] = nil
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"results": results})
+}
+
+// ServeGitWorktrees returns all git worktrees for the project.
+// DELETE /api/git/worktrees deletes a git worktree.
+func ServeGitWorktrees(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		serveGitDeleteWorktree(w, r)
+		return
+	}
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	projectPath, ok := requireProject(w, r)
+	if !ok {
+		return
+	}
+
+	if !isGitRepo(projectPath) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"isGit":    false,
+			"worktrees": []interface{}{},
+		})
+		return
+	}
+
+	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = projectPath
+	output, _ := cmd.CombinedOutput()
+
+	trees := parseWorktreePorcelain(string(output), projectPath)
+
+	// Check if worktree paths still exist
+	for i := range trees {
+		if _, err := os.Stat(trees[i].Path); os.IsNotExist(err) {
+			trees[i].Missing = true
+		}
+	}
+
+	// Check dirty status for each worktree in parallel
+	type dirtyResult struct {
+		Index         int
+		Dirty         bool
+		ChangeCount   int
+		UntrackedCnt int
+	}
+	results := make(chan dirtyResult, len(trees))
+	for i, wt := range trees {
+		go func(idx int, path string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			statusCmd := exec.CommandContext(ctx, "git", "-C", path, "status", "--porcelain")
+			out, err := statusCmd.CombinedOutput()
+			if err != nil {
+				results <- dirtyResult{Index: idx}
+				return
+			}
+			dirty := false
+			changeCount := 0
+			untrackedCnt := 0
+			for _, line := range strings.Split(string(out), "\n") {
+				if len(line) >= 2 {
+					dirty = true
+					changeCount++
+					if line[0] == '?' && line[1] == '?' {
+						untrackedCnt++
+					}
+				}
+			}
+			results <- dirtyResult{Index: idx, Dirty: dirty, ChangeCount: changeCount, UntrackedCnt: untrackedCnt}
+		}(i, wt.Path)
+	}
+	for range trees {
+		res := <-results
+		trees[res.Index].Dirty = res.Dirty
+		trees[res.Index].ChangeCount = res.ChangeCount
+		trees[res.Index].UntrackedCnt = res.UntrackedCnt
+	}
+
+	if trees == nil {
+		trees = []worktreeInfo{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"isGit":    true,
+		"worktrees": trees,
+	})
+}
+
+// checkoutMu serializes git checkout operations to prevent concurrent branch switches.
+var checkoutMu sync.Mutex
+
+// ServeGitCheckout switches the current branch. Supports stash and force options.
+// POST /api/git/checkout  { "branch": string, "stash": bool, "force": bool }
+func ServeGitCheckout(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	projectPath, ok := requireProject(w, r)
+	if !ok {
+		return
+	}
+
+	if !isGitRepo(projectPath) {
+		writeLocalizedErrorf(w, r, http.StatusBadRequest, "NotAGitRepoShort")
+		return
+	}
+
+	var body struct {
+		Branch string `json:"branch"`
+		Stash  bool   `json:"stash"`
+		Force  bool   `json:"force"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeLocalizedErrorf(w, r, http.StatusBadRequest, "InvalidRequestBody")
+		return
+	}
+	if strings.TrimSpace(body.Branch) == "" {
+		writeLocalizedErrorf(w, r, http.StatusBadRequest, "InvalidRequestBody")
+		return
+	}
+	// Validate branch name to prevent argument injection (ISS-151)
+	if !isValidGitRefName(body.Branch) {
+		writeLocalizedErrorf(w, r, http.StatusBadRequest, "InvalidBranchName")
+		return
+	}
+
+	// Acquire checkout mutex (non-blocking)
+	if !checkoutMu.TryLock() {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"success": false,
+			"error":   "checkout_in_progress",
+		})
+		return
+	}
+	defer checkoutMu.Unlock()
+
+	// Check dirty status
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = projectPath
+	statusOut, _ := statusCmd.CombinedOutput()
+	dirtyLines := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(statusOut)), "\n") {
+		if len(line) >= 2 {
+			dirtyLines++
+		}
+	}
+	isDirty := dirtyLines > 0
+
+	if isDirty && !body.Stash && !body.Force {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success":        false,
+			"error":          "dirty_worktree",
+			"untrackedCount": dirtyLines,
+		})
+		return
+	}
+
+	// Stash if requested and dirty
+	stashed := false
+	if body.Stash && isDirty {
+		stashCmd := exec.Command("git", "stash")
+		stashCmd.Dir = projectPath
+		stashOut, stashErr := stashCmd.CombinedOutput()
+		if stashErr != nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   "stash_failed",
+			})
+			return
+		}
+		_ = stashOut
+		stashed = true
+	}
+
+	// Switch branch — use "--" separator to prevent branch name from being
+	// interpreted as a git flag (ISS-151).
+	switchArgs := []string{"switch"}
+	if body.Force {
+		switchArgs = append(switchArgs, "-f")
+	}
+	switchArgs = append(switchArgs, "--", body.Branch)
+	switchCmd := exec.Command("git", switchArgs...)
+	switchCmd.Dir = projectPath
+	switchOut, switchErr := switchCmd.CombinedOutput()
+
+	if switchErr != nil {
+		errMsg := strings.TrimSpace(string(switchOut))
+		errorCode := "checkout_failed"
+		if strings.Contains(errMsg, "conflict") {
+			errorCode = "checkout_conflict"
+		} else if strings.Contains(errMsg, "hook") {
+			errorCode = "hook_rejected"
+		} else if strings.Contains(errMsg, "did not match") || strings.Contains(errMsg, "not found") {
+			errorCode = "branch_not_found"
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success":     false,
+			"error":       errorCode,
+			"errorDetail": errMsg,
+		})
+		return
+	}
+
+	// Get stash count
+	stashListCmd := exec.Command("git", "stash", "list")
+	stashListCmd.Dir = projectPath
+	stashListOut, _ := stashListCmd.Output()
+	stashCount := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(stashListOut)), "\n") {
+		if line != "" {
+			stashCount++
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":   true,
+		"branch":    body.Branch,
+		"stashed":   stashed,
+		"stashCount": stashCount,
+	})
+}
+
+// tagInfo represents a git tag in API responses.
+type tagInfo struct {
+	Name   string `json:"name"`
+	SHA    string `json:"sha"`
+	Date   string `json:"date"`
+	Author string `json:"author"`
+	Msg    string `json:"msg"`
+}
+
+// ServeGitTags returns all tags with commit info.
+// DELETE /api/git/tags deletes a local tag.
+func ServeGitTags(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		serveGitDeleteTag(w, r)
+		return
+	}
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	projectPath, ok := requireProject(w, r)
+	if !ok {
+		return
+	}
+
+	if !isGitRepo(projectPath) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"isGit": false,
+			"tags":  []interface{}{},
+		})
+		return
+	}
+
+	// List tags with commit metadata using for-each-ref
+	// Format: tagname|objectname|creatordate|creator
+	cmd := exec.Command("git", "for-each-ref",
+		"--format=%(refname:short)|%(objectname)|%(creatordate:iso)|%(creator)",
+		"refs/tags/")
+	cmd.Dir = projectPath
+	output, _ := cmd.CombinedOutput()
+
+	var tags []tagInfo
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) < 2 {
+			continue
+		}
+		name := parts[0]
+		sha := parts[1]
+		date := ""
+		author := ""
+		if len(parts) > 2 {
+			date = parts[2]
+		}
+		if len(parts) > 3 {
+			// creator format: "Name email timestamp" — take name portion
+			author = parts[3]
+			if idx := strings.LastIndex(author, " "); idx > 0 {
+				author = author[:idx]
+			}
+		}
+
+		// Get tag message (annotated tags have messages, lightweight tags don't)
+		msg := ""
+		msgCmd := exec.Command("git", "tag", "-n1", name)
+		msgCmd.Dir = projectPath
+		msgOut, _ := msgCmd.Output()
+		if len(msgOut) > 0 {
+			// Output format: "tagname            message"
+			fields := strings.SplitN(strings.TrimSpace(string(msgOut)), "  ", 2)
+			if len(fields) > 1 {
+				msg = strings.TrimSpace(fields[1])
+			}
+		}
+
+		tags = append(tags, tagInfo{
+			Name:   name,
+			SHA:    sha,
+			Date:   date,
+			Author: author,
+			Msg:    msg,
+		})
+	}
+
+	if tags == nil {
+		tags = []tagInfo{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"isGit": true,
+		"tags":  tags,
+	})
+}
+
+// serveGitDeleteBranch deletes a local branch.
+func serveGitDeleteBranch(w http.ResponseWriter, r *http.Request) {
+	projectPath, ok := requireProject(w, r)
+	if !ok {
+		return
+	}
+
+	if !isGitRepo(projectPath) {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "not_git_repo",
+		})
+		return
+	}
+
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "invalid_request",
+		})
+		return
+	}
+	// Validate branch name to prevent argument injection (ISS-151)
+	if !isValidGitRefName(body.Name) {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "invalid_branch_name",
+		})
+		return
+	}
+
+	// Check if it's the current branch
+	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	cmd.Dir = projectPath
+	curOut, _ := cmd.Output()
+	currentBranch := strings.TrimSpace(string(curOut))
+	if currentBranch == body.Name {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "cannot_delete_current",
+		})
+		return
+	}
+
+	// Check if it's the default branch
+	defaultBranch := detectDefaultBranch(projectPath)
+	if defaultBranch == body.Name {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "cannot_delete_default",
+		})
+		return
+	}
+
+	// Try safe delete first (-d), fall back to force (-D)
+	// Use "--" separator to prevent branch name from being interpreted as a flag (ISS-151)
+	cmd = exec.Command("git", "branch", "-d", "--", body.Name)
+	cmd.Dir = projectPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		errMsg := strings.TrimSpace(string(out))
+		if strings.Contains(errMsg, "not fully merged") || strings.Contains(errMsg, "not merged") {
+			cmd = exec.Command("git", "branch", "-D", "--", body.Name)
+			cmd.Dir = projectPath
+			out, err = cmd.CombinedOutput()
+		}
+		if err != nil {
+			errMsg = strings.TrimSpace(string(out))
+			errorCode := "delete_failed"
+			if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "did not match") {
+				errorCode = "branch_not_found"
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"success":     false,
+				"error":       errorCode,
+				"errorDetail": errMsg,
+			})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+	})
+}
+
+// serveGitDeleteWorktree removes a git worktree.
+func serveGitDeleteWorktree(w http.ResponseWriter, r *http.Request) {
+	projectPath, ok := requireProject(w, r)
+	if !ok {
+		return
+	}
+
+	if !isGitRepo(projectPath) {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "not_git_repo",
+		})
+		return
+	}
+
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Path) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "invalid_request",
+		})
+		return
+	}
+
+	// Resolve symlinks on body.Path so comparisons work on macOS
+	// where /var is a symlink to /private/var.
+	deletePath := body.Path
+	if resolved, err := filepath.EvalSymlinks(body.Path); err == nil {
+		deletePath = resolved
+	}
+
+	// Check if it's the current worktree
+	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = projectPath
+	output, _ := cmd.CombinedOutput()
+	trees := parseWorktreePorcelain(string(output), projectPath)
+	for _, wt := range trees {
+		if wt.Path == deletePath && wt.IsCurrent {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   "cannot_delete_current",
+			})
+			return
+		}
+	}
+
+	// Remove worktree
+	cmd = exec.Command("git", "worktree", "remove", body.Path)
+	cmd.Dir = projectPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		errMsg := strings.TrimSpace(string(out))
+		if strings.Contains(errMsg, "dirty") || strings.Contains(errMsg, "modified") || strings.Contains(errMsg, "uncommitted") {
+			cmd = exec.Command("git", "worktree", "remove", "--force", body.Path)
+			cmd.Dir = projectPath
+			out, err = cmd.CombinedOutput()
+		}
+		if err != nil {
+			errMsg = strings.TrimSpace(string(out))
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"success":     false,
+				"error":       "delete_failed",
+				"errorDetail": errMsg,
+			})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+	})
+}
+
+// serveGitDeleteTag deletes a local tag.
+func serveGitDeleteTag(w http.ResponseWriter, r *http.Request) {
+	projectPath, ok := requireProject(w, r)
+	if !ok {
+		return
+	}
+
+	if !isGitRepo(projectPath) {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "not_git_repo",
+		})
+		return
+	}
+
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "invalid_request",
+		})
+		return
+	}
+	// Validate tag name to prevent argument injection (ISS-152)
+	if !isValidGitRefName(body.Name) {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "invalid_tag_name",
+		})
+		return
+	}
+
+	// Use "--" separator to prevent tag name from being interpreted as a flag (ISS-152)
+	cmd := exec.Command("git", "tag", "-d", "--", body.Name)
+	cmd.Dir = projectPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success":     false,
+			"error":       "delete_failed",
+			"errorDetail": strings.TrimSpace(string(out)),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
 	})
 }

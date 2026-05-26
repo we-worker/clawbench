@@ -3,9 +3,33 @@ import { gt } from '@/composables/useLocale'
 import { useToast } from '@/composables/useToast.ts'
 import { useNotification } from '@/composables/useNotification.ts'
 import { useSessionIdentity } from '@/composables/useSessionIdentity.ts'
-import { useAgents } from '@/composables/useAgents.ts'
+import { useAgents } from '@/composables/useAgents'
 import { store } from '@/stores/app.ts'
 import { buildMessageSnapshot, parseMessages } from '@/utils/chatSessionUtils.ts'
+import { warmWorktreeCache } from '@/composables/useWorktreeAnnotation.ts'
+
+// Module-level one-time session list load (replaces continuous polling)
+// Accessible from App.vue without instantiating useChatSession
+export async function loadSessionsOnce() {
+  try {
+    const identity = useSessionIdentity()
+    const res = await fetch('/api/ai/sessions')
+    if (res.ok) {
+      const data = await res.json()
+      const sessions = data.sessions || []
+      const hasRunning = sessions.some((s: any) => s.running)
+      const hasUnread = sessions.some((s: any) => s.unreadCount > 0 && s.id !== identity.currentSessionId.value)
+      store.state.chatRunning = hasRunning
+      store.state.chatUnread = hasUnread
+      // Populate runningSessions set from API data
+      identity.runningSessions.value.clear()
+      for (const s of sessions) {
+        if (s.running) identity.runningSessions.value.add(s.id)
+      }
+      identity.runningSessionsVersion.value++
+    }
+  } catch { /* ignore */ }
+}
 
 export interface UseChatSessionOptions {
   currentSessionId: Ref<string>
@@ -52,7 +76,7 @@ export function useChatSession(options: UseChatSessionOptions) {
 
   // ── Identity refs from singleton ──
   const identity = useSessionIdentity()
-  const { currentSessionTitle, currentBackend, currentAgentId, currentModelId, currentModelName, currentThinkingEffort, runningSessions } = identity
+  const { currentSessionTitle, currentBackend, currentAgentId, currentModelId, currentModelName, currentThinkingEffort, runningSessions, runningSessionsVersion } = identity
 
   // ── Agents from singleton ──
   const { agents, loadAgents, getAgentIcon, getAgentName, syncModelFromAgent, getAgentModel, agentHeaderTitle: makeAgentTitle } = useAgents()
@@ -106,10 +130,8 @@ export function useChatSession(options: UseChatSessionOptions) {
   // transition so the user sees immediate feedback instead of a frozen UI.
   const switching = ref(false)
 
-  const sessionDrawerOpen = ref(false)
   const lastMsgCount = ref(0)
   let msgCountInterval: ReturnType<typeof setInterval> | null = null
-  let globalPollingInterval: ReturnType<typeof setInterval> | null = null
 
   // Pagination state
   const totalMessages = ref(0)
@@ -138,6 +160,8 @@ export function useChatSession(options: UseChatSessionOptions) {
     try {
       // Load agents first so we can resolve agent names
       if (agents.value.length === 0) await loadAgents()
+      // Warm worktree cache so annotateWorktreePaths has data when rendering messages
+      warmWorktreeCache(store.state.projectRoot)
       // Use max of initialMessages and current loaded count to avoid truncating lazy-loaded messages
       const limit = Math.max(store.state.chatInitialMessages, messages.value.length)
       const url = currentSessionId.value
@@ -208,10 +232,10 @@ export function useChatSession(options: UseChatSessionOptions) {
     loadingMore.value = true
     try {
       const pageSize = store.state.chatPageSize
-      // Use cursor-based pagination: pass the created_at of the oldest loaded message
+      // Use cursor-based pagination: pass the id of the oldest loaded message
       const oldestMsg = messages.value[0]
-      const before = oldestMsg?.createdAt || ''
-      const resp = await fetch(`/api/ai/chat?session_id=${encodeURIComponent(currentSessionId.value)}&limit=${pageSize}&before=${encodeURIComponent(before)}`)
+      const beforeId = oldestMsg?.id || ''
+      const resp = await fetch(`/api/ai/chat?session_id=${encodeURIComponent(currentSessionId.value)}&limit=${pageSize}&before_id=${encodeURIComponent(beforeId)}`)
       if (!resp.ok) return
       const data = await resp.json()
       const olderMsgs = parseMessages(data.messages || [], onParseAssistantContent)
@@ -281,6 +305,11 @@ export function useChatSession(options: UseChatSessionOptions) {
         loading.value = false
         startMsgCountPolling()
       }
+      // Recalculate global chatUnread after switching — the backend has already
+      // marked this session as read (UpdateLastRead), so the session list will
+      // reflect the correct unread state. Without this, chatUnread stays true
+      // when the user is already on the chat tab (switchTab early-returns).
+      await loadSessionsOnce()
     } catch (err) {
       // If another switch happened, don't touch state
       if (switchSessionSeq !== mySeq) return
@@ -347,6 +376,9 @@ export function useChatSession(options: UseChatSessionOptions) {
             // No sessions left, create a default one
             await createSession()
           }
+        } else {
+          // Deleted a non-current session — refresh global state (chatUnread, chatRunning, runningSessions)
+          await loadSessionsOnce()
         }
         const maxCount = store.state.sessionMaxCount
         toast.show(gt('chat.session.deleted', { count: data.sessionCount ?? '', max: maxCount }), { icon: '🗑️', type: 'success', duration: 2000 })
@@ -355,10 +387,6 @@ export function useChatSession(options: UseChatSessionOptions) {
       console.error('Failed to delete session:', err)
       toast.show(gt('chat.session.deleteFailed'), { icon: '⚠️', type: 'error' })
     }
-  }
-
-  function openSessionTab() {
-    sessionDrawerOpen.value = true
   }
 
   function startMsgCountPolling() {
@@ -386,102 +414,46 @@ export function useChatSession(options: UseChatSessionOptions) {
     if (msgCountInterval) { clearInterval(msgCountInterval); msgCountInterval = null }
   }
 
-  function stopGlobalPolling() {
-    if (globalPollingInterval) { clearInterval(globalPollingInterval); globalPollingInterval = null }
+  // Debounce timer for loadSessionsOnce after session events.
+  // When multiple sessions complete in quick succession, we coalesce
+  // the recalculations into a single API call after a short delay.
+  let sessionEventDebounce: ReturnType<typeof setTimeout> | null = null
+
+  // Called from WS session_update event
+  function onSessionEvent(data: { session_id?: string; status?: string; has_new_messages?: boolean } | undefined) {
+    if (!data) return
+    const sid = data.session_id
+    if (data.status === 'running') {
+      store.state.chatRunning = true
+      if (sid) { runningSessions.value.add(sid); runningSessionsVersion.value++ }
+    } else {
+      if (sid) { runningSessions.value.delete(sid); runningSessionsVersion.value++ }
+      // Update global boolean from remaining set
+      store.state.chatRunning = runningSessions.value.size > 0
+      // Recalculate chatUnread from backend instead of optimistically setting true.
+      // The old code unconditionally set chatUnread=true here, which caused phantom
+      // flashing: a session that was already read (last_read_at set) would trigger
+      // the flash, and the button kept blinking until loadSessionsOnce() corrected it.
+      // Now we debounce-load the real unread state from the server.
+      if (sid && sid !== currentSessionId.value) {
+        if (sessionEventDebounce) clearTimeout(sessionEventDebounce)
+        sessionEventDebounce = setTimeout(() => {
+          sessionEventDebounce = null
+          loadSessionsOnce()
+        }, 500)
+      }
+    }
+  }
+
+  // One-time session list load — delegates to module-level function
+  async function loadSessionsOnceInner() {
+    await loadSessionsOnce()
   }
 
   // Track which sessions have already had their completion notification fired.
   // Prevents repeated sound/notification if an exception in the callback
   // prevents runningSessions from being updated.
   const notifiedSessions = new Set<string>()
-
-  async function startGlobalPolling() {
-    stopGlobalPolling()
-    globalPollingInterval = setInterval(async () => {
-      try {
-        const resp = await fetch('/api/ai/sessions')
-        const data = await resp.json()
-        const sessions = data.sessions || []
-        const newRunning = new Set(sessions.filter(s => s.running).map(s => s.id))
-
-        // Check for unread messages in other sessions
-        const hasUnreadOther = sessions.some(s => s.unreadCount > 0 && s.id !== currentSessionId.value)
-        store.state.chatUnread = hasUnreadOther
-
-        // Calculate total chat unread count for native badge
-        const totalChatUnread = sessions.reduce((sum, s) => sum + (s.unreadCount || 0), 0)
-        void totalChatUnread // reserved for future native badge
-
-        // Track running sessions for dock/chat button indicator
-        store.state.chatRunning = newRunning.size > 0
-
-        // Check for completed sessions
-        const completedSessions: string[] = []
-        for (const sessionId of runningSessions.value) {
-          if (!newRunning.has(sessionId)) {
-            completedSessions.push(sessionId)
-          }
-        }
-
-        // Update runningSessions FIRST so that even if callbacks throw,
-        // we won't re-detect these sessions as "just completed" on the next poll.
-        runningSessions.value = newRunning
-
-        // Clean up notifiedSessions: remove entries that are no longer running
-        // and have already been processed.
-        for (const sid of completedSessions) {
-          notifiedSessions.delete(sid)
-        }
-
-        // Now fire callbacks for completed sessions (with idempotency guard)
-        for (const sessionId of completedSessions) {
-          if (notifiedSessions.has(sessionId)) continue
-          notifiedSessions.add(sessionId)
-
-          if (sessionId === currentSessionId.value) {
-            // Current session completed but UI may be stuck in loading state
-            // (e.g. done event was dropped) — force reset with full reload.
-            // Disconnect SSE and fallback polling BEFORE replacing messages
-            // to prevent orphaned connections from writing stale events.
-            if (loading.value) {
-              onDisconnectStream()
-              onStopPolling()
-              loadHistory(true, false, true)
-            }
-          } else {
-            // Other session completed
-            const session = sessions.find(s => s.id === sessionId)
-            if (session) {
-              onStreamDone?.()
-              toast.show(gt('chat.session.completed'), {
-                icon: '✅',
-                type: 'success',
-                duration: 5000,
-                onClick: () => {
-                  switchSession(sessionId, session.backend)
-                  onOpen()
-                }
-              })
-              // Also show browser notification for completed session
-              try {
-                notification.show(gt('chat.session.completed'), {
-                  body: gt('chat.session.clickToViewDetails'),
-                  onClick: () => {
-                    switchSession(sessionId, session.backend)
-                    onOpen()
-                  }
-                })
-              } catch (e) {
-                console.warn('Failed to show browser notification:', e)
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Global polling error:', err)
-      }
-    }, 2000)
-  }
 
   function handleVisibilityChange() {
     if (document.visibilityState === 'visible' && loading.value) {
@@ -496,15 +468,13 @@ export function useChatSession(options: UseChatSessionOptions) {
   }
 
   return {
-    // Identity refs — from singleton, but still returned for backward compat
-    // (ChatPanel uses session.currentSessionTitle.value, etc.)
+    // Exposed refs (consumed by ChatPanelContent etc.)
     currentSessionId,
     currentSessionTitle,
     currentBackend,
     currentAgentId,
     runningSessions,
     // UI state — local to this instance
-    sessionDrawerOpen,
     agentHeaderTitle,
     totalMessages,
     hasMore,
@@ -516,9 +486,8 @@ export function useChatSession(options: UseChatSessionOptions) {
     switchSession,
     createSession,
     deleteSession,
-    openSessionTab,
-    startGlobalPolling,
-    stopGlobalPolling,
+    onSessionEvent,
+    loadSessionsOnce: loadSessionsOnceInner,
     startMsgCountPolling,
     stopMsgCountPolling,
     handleVisibilityChange,

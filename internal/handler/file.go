@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"clawbench/internal/model"
+	"clawbench/internal/platform"
 )
 
 // mimeTypes maps file extensions to MIME types for ServeLocalFile.
@@ -368,6 +369,76 @@ func ServeProjects(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// containsGlobChars returns true if the path contains characters that are
+// invalid in filesystem paths (glob wildcards, angle brackets, double-star).
+// These characters indicate the string is a glob pattern or template variable,
+// not a real file path.
+func containsGlobChars(path string) bool {
+	return strings.ContainsAny(path, "*?[]<>") || strings.Contains(path, "**")
+}
+
+// ServeFileBatchExists handles POST /api/file/batch-exists
+// Body:   { "paths": ["src/main.go", "lib/", "**/*.class"] }
+// Response: { "results": { "src/main.go": "file", "lib": "dir", "**/*.class": "none" } }
+// Each path is checked against the project directory. Paths containing glob
+// characters are short-circuited to "none" without touching the filesystem.
+func ServeFileBatchExists(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	var req struct {
+		Paths []string `json:"paths"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if len(req.Paths) == 0 {
+		writeLocalizedErrorf(w, r, http.StatusBadRequest, "MissingPath")
+		return
+	}
+	if len(req.Paths) > 100 {
+		writeLocalizedErrorf(w, r, http.StatusBadRequest, "TooManyPaths")
+		return
+	}
+
+	projectPath, ok := requireProject(w, r)
+	if !ok {
+		return
+	}
+	baseAbs, err := filepath.Abs(projectPath)
+	if err != nil {
+		model.WriteError(w, model.Internal(err))
+		return
+	}
+
+	results := make(map[string]string, len(req.Paths))
+	for _, p := range req.Paths {
+		// Short-circuit glob patterns and template variables
+		if containsGlobChars(p) {
+			results[p] = "none"
+			continue
+		}
+		// Expand ~ to home directory so paths like ~/.bashrc resolve correctly
+		p = platform.ExpandTilde(p)
+		absPath, ok := model.ValidatePath(baseAbs, p)
+		if !ok {
+			results[p] = "none"
+			continue
+		}
+		info, err := os.Stat(absPath)
+		if err != nil {
+			results[p] = "none"
+		} else if info.IsDir() {
+			results[p] = "dir"
+		} else {
+			results[p] = "file"
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"results": results})
+}
+
 // ── File-related DTOs ──────────────────────────────────────────────────────────
 
 // DirEntry represents a directory entry in API responses
@@ -521,9 +592,20 @@ func serveProjectsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	newDir := filepath.Join(absPath, req.Name)
-	if err := os.Mkdir(newDir, 0755); err != nil {
+	// Validate that the resolved new directory stays under WatchDir
+	// (req.Name could contain ".." path traversal components)
+	newDirAbs, err := filepath.Abs(newDir)
+	if err != nil {
+		model.WriteError(w, model.Internal(fmt.Errorf("resolve path failed: %w", err)))
+		return
+	}
+	if !isPathUnderBase(newDirAbs, basePath) {
+		writeLocalizedError(w, r, model.Forbidden(nil, "AccessDenied"))
+		return
+	}
+	if err := os.Mkdir(newDirAbs, 0755); err != nil {
 		model.WriteError(w, model.Internal(fmt.Errorf("create directory failed: %w", err)))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "path": newDir})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "path": newDirAbs})
 }

@@ -1014,6 +1014,226 @@ func TestServeTaskByID_DeleteAllExecutions(t *testing.T) {
 	assert.Equal(t, 0, count)
 }
 
+// ---------- serveTaskExecutions — cursor-based pagination ----------
+
+func TestServeTaskByID_Executions_WithLimit(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	model.Agents = map[string]*model.Agent{
+		"coder": {ID: "coder", Name: "Coder", Backend: "claude"},
+	}
+	defer func() { model.Agents = nil }()
+
+	s := service.NewScheduler()
+	defer s.Stop()
+	service.GlobalScheduler = s
+	defer func() { service.GlobalScheduler = nil }()
+
+	task := &model.ScheduledTask{
+		ProjectPath: env.ProjectDir,
+		Name:        "Paged Task",
+		CronExpr:    "0 * * * *",
+		AgentID:     "coder",
+		Prompt:      "Test",
+		RepeatMode:  "unlimited",
+	}
+	s.AddTask(task)
+
+	// Create 3 completed executions
+	for i := 0; i < 3; i++ {
+		sessionID, err := service.CreateSession(env.ProjectDir, "claude", fmt.Sprintf("Exec %d", i), "coder", "", "default", "scheduled")
+		assert.NoError(t, err)
+		service.AddChatMessage(env.ProjectDir, "claude", sessionID, "user", fmt.Sprintf("prompt %d", i), nil, false, "Exec")
+		service.AddChatMessage(env.ProjectDir, "claude", sessionID, "assistant", fmt.Sprintf("response %d", i), nil, false, "Exec")
+		service.AddTaskExecution(task.ID, sessionID, "auto")
+		service.UpdateExecutionStatus(sessionID, "completed")
+	}
+
+	// Request with limit=2
+	req := newRequest(t, http.MethodGet, fmt.Sprintf("/api/tasks/%d/executions?limit=2", task.ID), nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	w := callHandler(ServeTaskByID, req)
+	assertOK(t, w)
+
+	var result map[string]any
+	json.Unmarshal(w.Body.Bytes(), &result)
+	executions := result["executions"].([]interface{})
+	assert.Len(t, executions, 2)
+	assert.Equal(t, true, result["hasMore"])
+}
+
+func TestServeTaskByID_Executions_LimitNoMore(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	model.Agents = map[string]*model.Agent{
+		"coder": {ID: "coder", Name: "Coder", Backend: "claude"},
+	}
+	defer func() { model.Agents = nil }()
+
+	s := service.NewScheduler()
+	defer s.Stop()
+	service.GlobalScheduler = s
+	defer func() { service.GlobalScheduler = nil }()
+
+	task := &model.ScheduledTask{
+		ProjectPath: env.ProjectDir,
+		Name:        "Paged Task",
+		CronExpr:    "0 * * * *",
+		AgentID:     "coder",
+		Prompt:      "Test",
+		RepeatMode:  "unlimited",
+	}
+	s.AddTask(task)
+
+	// Create only 1 execution
+	sessionID, _ := service.CreateSession(env.ProjectDir, "claude", "Exec 0", "coder", "", "default", "scheduled")
+	service.AddTaskExecution(task.ID, sessionID, "auto")
+	service.UpdateExecutionStatus(sessionID, "completed")
+
+	// Request with limit=5 (more than available)
+	req := newRequest(t, http.MethodGet, fmt.Sprintf("/api/tasks/%d/executions?limit=5", task.ID), nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	w := callHandler(ServeTaskByID, req)
+	assertOK(t, w)
+
+	var result map[string]any
+	json.Unmarshal(w.Body.Bytes(), &result)
+	executions := result["executions"].([]interface{})
+	assert.Len(t, executions, 1)
+	assert.Equal(t, false, result["hasMore"])
+}
+
+func TestServeTaskByID_Executions_CursorPagination(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	model.Agents = map[string]*model.Agent{
+		"coder": {ID: "coder", Name: "Coder", Backend: "claude"},
+	}
+	defer func() { model.Agents = nil }()
+
+	s := service.NewScheduler()
+	defer s.Stop()
+	service.GlobalScheduler = s
+	defer func() { service.GlobalScheduler = nil }()
+
+	task := &model.ScheduledTask{
+		ProjectPath: env.ProjectDir,
+		Name:        "Paged Task",
+		CronExpr:    "0 * * * *",
+		AgentID:     "coder",
+		Prompt:      "Test",
+		RepeatMode:  "unlimited",
+	}
+	s.AddTask(task)
+
+	// Create 5 completed executions
+	for i := 0; i < 5; i++ {
+		sessionID, _ := service.CreateSession(env.ProjectDir, "claude", fmt.Sprintf("Exec %d", i), "coder", "", "default", "scheduled")
+		service.AddTaskExecution(task.ID, sessionID, "auto")
+		service.UpdateExecutionStatus(sessionID, "completed")
+	}
+
+	// Page 1: limit=2
+	req1 := newRequest(t, http.MethodGet, fmt.Sprintf("/api/tasks/%d/executions?limit=2", task.ID), nil)
+	req1 = withProjectCookie(req1, env.ProjectDir)
+	w1 := callHandler(ServeTaskByID, req1)
+	assertOK(t, w1)
+
+	var result1 map[string]any
+	json.Unmarshal(w1.Body.Bytes(), &result1)
+	executions1 := result1["executions"].([]interface{})
+	assert.Len(t, executions1, 2)
+	assert.Equal(t, true, result1["hasMore"])
+
+	// Extract cursor from last item of page 1
+	lastExec1 := executions1[1].(map[string]interface{})
+	cursor := lastExec1["createdAt"].(string)
+	cursorID := fmt.Sprintf("%v", lastExec1["id"])
+
+	// Page 2: use cursor from last item of page 1
+	req2 := newRequest(t, http.MethodGet,
+		fmt.Sprintf("/api/tasks/%d/executions?limit=2&cursor=%s&cursor_id=%s", task.ID, cursor, cursorID), nil)
+	req2 = withProjectCookie(req2, env.ProjectDir)
+	w2 := callHandler(ServeTaskByID, req2)
+	assertOK(t, w2)
+
+	var result2 map[string]any
+	json.Unmarshal(w2.Body.Bytes(), &result2)
+	executions2 := result2["executions"].([]interface{})
+	assert.Len(t, executions2, 2)
+	assert.Equal(t, true, result2["hasMore"])
+
+	// Verify page 2 IDs are different from page 1
+	firstExec2ID := fmt.Sprintf("%v", executions2[0].(map[string]interface{})["id"])
+	assert.NotEqual(t, cursorID, firstExec2ID)
+
+	// Page 3: remaining item
+	lastExec2 := executions2[1].(map[string]interface{})
+	cursor2 := lastExec2["createdAt"].(string)
+	cursorID2 := fmt.Sprintf("%v", lastExec2["id"])
+
+	req3 := newRequest(t, http.MethodGet,
+		fmt.Sprintf("/api/tasks/%d/executions?limit=2&cursor=%s&cursor_id=%s", task.ID, cursor2, cursorID2), nil)
+	req3 = withProjectCookie(req3, env.ProjectDir)
+	w3 := callHandler(ServeTaskByID, req3)
+	assertOK(t, w3)
+
+	var result3 map[string]any
+	json.Unmarshal(w3.Body.Bytes(), &result3)
+	executions3 := result3["executions"].([]interface{})
+	assert.Len(t, executions3, 1)
+	assert.Equal(t, false, result3["hasMore"])
+}
+
+func TestServeTaskByID_Executions_NoLimitBackwardCompat(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	model.Agents = map[string]*model.Agent{
+		"coder": {ID: "coder", Name: "Coder", Backend: "claude"},
+	}
+	defer func() { model.Agents = nil }()
+
+	s := service.NewScheduler()
+	defer s.Stop()
+	service.GlobalScheduler = s
+	defer func() { service.GlobalScheduler = nil }()
+
+	task := &model.ScheduledTask{
+		ProjectPath: env.ProjectDir,
+		Name:        "NoLimit Task",
+		CronExpr:    "0 * * * *",
+		AgentID:     "coder",
+		Prompt:      "Test",
+		RepeatMode:  "unlimited",
+	}
+	s.AddTask(task)
+
+	// Create 3 executions
+	for i := 0; i < 3; i++ {
+		sessionID, _ := service.CreateSession(env.ProjectDir, "claude", fmt.Sprintf("Exec %d", i), "coder", "", "default", "scheduled")
+		service.AddTaskExecution(task.ID, sessionID, "auto")
+		service.UpdateExecutionStatus(sessionID, "completed")
+	}
+
+	// Request without limit — should return all and no hasMore field
+	req := newRequest(t, http.MethodGet, fmt.Sprintf("/api/tasks/%d/executions", task.ID), nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	w := callHandler(ServeTaskByID, req)
+	assertOK(t, w)
+
+	var result map[string]any
+	json.Unmarshal(w.Body.Bytes(), &result)
+	executions := result["executions"].([]interface{})
+	assert.Len(t, executions, 3)
+	// hasMore should NOT be present (backward compat: no limit = no pagination)
+	_, hasHasMore := result["hasMore"]
+	assert.False(t, hasHasMore)
+}
+
 // ---------- helper ----------
 
 func createTestSession(t *testing.T, projectPath string) string {
@@ -1026,4 +1246,89 @@ func createTestSession(t *testing.T, projectPath string) string {
 		service.SetSessionRunning(id, false)
 	})
 	return id
+}
+
+// ---------- hasUnread logic (derived from tasks.UnreadCount) ----------
+
+// TestServeTasks_Get_HasUnreadTrue verifies that hasUnread is true when at
+// least one task has UnreadCount > 0.
+func TestServeTasks_Get_HasUnreadTrue(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	model.Agents = map[string]*model.Agent{
+		"coder": {ID: "coder", Name: "Coder", Backend: "claude"},
+	}
+	defer func() { model.Agents = nil }()
+
+	s := service.NewScheduler()
+	defer s.Stop()
+	service.GlobalScheduler = s
+	defer func() { service.GlobalScheduler = nil }()
+
+	// Create a task
+	task := &model.ScheduledTask{
+		ProjectPath: env.ProjectDir,
+		Name:        "Unread Task",
+		CronExpr:    "0 * * * *",
+		AgentID:     "coder",
+		Prompt:      "Test",
+		RepeatMode:  "unlimited",
+	}
+	err := s.AddTask(task)
+	assert.NoError(t, err)
+
+	// Create a completed execution (not read) → makes UnreadCount = 1
+	sessionID, err := service.CreateSession(env.ProjectDir, "claude", "Exec", "coder", "", "default", "scheduled")
+	assert.NoError(t, err)
+	_, err = service.AddTaskExecution(task.ID, sessionID, "auto")
+	assert.NoError(t, err)
+	service.UpdateExecutionStatus(sessionID, "completed")
+
+	req := newRequest(t, http.MethodGet, "/api/tasks", nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	w := callHandler(ServeTasks, req)
+
+	assertOK(t, w)
+	var result map[string]any
+	json.Unmarshal(w.Body.Bytes(), &result)
+	assert.Equal(t, true, result["hasUnread"], "hasUnread should be true when a task has unread executions")
+}
+
+// TestServeTasks_Get_HasUnreadFalse verifies that hasUnread is false when
+// all tasks have UnreadCount == 0.
+func TestServeTasks_Get_HasUnreadFalse(t *testing.T) {
+	env, teardown := setupTestEnv(t)
+	defer teardown()
+
+	model.Agents = map[string]*model.Agent{
+		"coder": {ID: "coder", Name: "Coder", Backend: "claude"},
+	}
+	defer func() { model.Agents = nil }()
+
+	s := service.NewScheduler()
+	defer s.Stop()
+	service.GlobalScheduler = s
+	defer func() { service.GlobalScheduler = nil }()
+
+	// Create a task with no executions → UnreadCount = 0
+	task := &model.ScheduledTask{
+		ProjectPath: env.ProjectDir,
+		Name:        "Read Task",
+		CronExpr:    "0 * * * *",
+		AgentID:     "coder",
+		Prompt:      "Test",
+		RepeatMode:  "unlimited",
+	}
+	err := s.AddTask(task)
+	assert.NoError(t, err)
+
+	req := newRequest(t, http.MethodGet, "/api/tasks", nil)
+	req = withProjectCookie(req, env.ProjectDir)
+	w := callHandler(ServeTasks, req)
+
+	assertOK(t, w)
+	var result map[string]any
+	json.Unmarshal(w.Body.Bytes(), &result)
+	assert.Equal(t, false, result["hasUnread"], "hasUnread should be false when no tasks have unread executions")
 }

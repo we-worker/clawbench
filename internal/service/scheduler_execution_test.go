@@ -237,3 +237,37 @@ func TestScheduler_SameTaskMultipleExecutions(t *testing.T) {
 	_, exists := counts[1]
 	assert.False(t, exists, "should have no running after both complete")
 }
+
+// ── Cron skip-if-running guard ──
+
+func TestScheduler_CronSkipIfRunning(t *testing.T) {
+	s := NewScheduler()
+
+	// Task 1 has a running execution
+	s.runningExecutions.Store("exec-running", &RunningExecution{
+		ID: "exec-running", TaskID: 1, CancelFunc: func() {}, StartedAt: time.Now(), TriggerType: "auto",
+	})
+
+	// HasRunningExecutions should return true — cron callback would skip
+	assert.True(t, s.HasRunningExecutions(1), "should skip when execution is running")
+
+	// After execution completes, HasRunningExecutions should return false — cron would proceed
+	s.runningExecutions.Delete("exec-running")
+	assert.False(t, s.HasRunningExecutions(1), "should proceed after execution completes")
+}
+
+func TestScheduler_CronSkip_DifferentTaskIndependent(t *testing.T) {
+	s := NewScheduler()
+
+	// Task 1 is running, task 2 is not
+	s.runningExecutions.Store("exec-1", &RunningExecution{
+		ID: "exec-1", TaskID: 1, CancelFunc: func() {}, StartedAt: time.Now(), TriggerType: "auto",
+	})
+
+	// Task 1 should be skipped, task 2 should proceed
+	assert.True(t, s.HasRunningExecutions(1), "task 1 should be skipped")
+	assert.False(t, s.HasRunningExecutions(2), "task 2 should not be affected")
+
+	s.runningExecutions.Delete("exec-1")
+	assert.False(t, s.HasRunningExecutions(1), "task 1 can proceed after completion")
+}

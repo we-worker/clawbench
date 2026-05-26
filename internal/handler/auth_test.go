@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"sync"
 	"testing"
@@ -68,7 +70,7 @@ func TestServeAuthCheck(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 
-	t.Run("PasswordSet_LocalhostWithoutCookie_Returns401", func(t *testing.T) {
+	t.Run("PasswordSet_LocalhostBypass_Returns200", func(t *testing.T) {
 		_, teardown := setupTestEnv(t)
 		defer teardown()
 
@@ -76,13 +78,14 @@ func TestServeAuthCheck(t *testing.T) {
 
 		req := newRequest(t, http.MethodGet, "/api/auth/check", nil)
 		req.RemoteAddr = "127.0.0.1:54321"
+		// No cookie — should still pass because localhost
 
 		w := callHandler(ServeAuthCheck, req)
 
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("PasswordSet_LocalhostIPv6WithoutCookie_Returns401", func(t *testing.T) {
+	t.Run("PasswordSet_LocalhostIPv6Bypass_Returns200", func(t *testing.T) {
 		_, teardown := setupTestEnv(t)
 		defer teardown()
 
@@ -90,10 +93,11 @@ func TestServeAuthCheck(t *testing.T) {
 
 		req := newRequest(t, http.MethodGet, "/api/auth/check", nil)
 		req.RemoteAddr = "[::1]:54321"
+		// No cookie — should still pass because localhost
 
 		w := callHandler(ServeAuthCheck, req)
 
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
 
@@ -157,11 +161,11 @@ func TestServeLogin(t *testing.T) {
 		assertJSONField(t, w, "ok", false)
 	})
 
-	t.Run("POST_SHA256Fallback_Returns200", func(t *testing.T) {
+	t.Run("POST_NilPasswordHash_Returns500", func(t *testing.T) {
 		_, teardown := setupTestEnv(t)
 		defer teardown()
 
-		// PasswordHash is nil — should fall back to SHA-256
+		// PasswordHash is nil — should reject login (no insecure SHA-256 fallback)
 		model.SessionToken = hashPassword("testpass")
 		model.PasswordHash = nil
 
@@ -170,8 +174,7 @@ func TestServeLogin(t *testing.T) {
 		})
 		w := callHandler(ServeLogin, req)
 
-		assert.Equal(t, http.StatusOK, w.Code)
-		assertJSONField(t, w, "ok", true)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
 	t.Run("POST_EmptyBody_Returns401", func(t *testing.T) {
@@ -216,6 +219,45 @@ func TestServeLogin(t *testing.T) {
 
 		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 	})
+}
+
+// --- ISS-SHA256: SHA-256 password login test ---
+
+func TestServeLogin_SHA256StoredPassword(t *testing.T) {
+	_, teardown := setupTestEnv(t)
+	defer teardown()
+
+	password := "sha256-password"
+	hash := sha256.Sum256([]byte(password + "clawbench-salt"))
+	model.SessionToken = hex.EncodeToString(hash[:])
+	model.PasswordIsSHA256 = true
+	model.PasswordHash = nil
+
+	req := newRequest(t, http.MethodPost, "/login", map[string]string{
+		"password": password,
+	})
+	w := callHandler(ServeLogin, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assertJSONField(t, w, "ok", true)
+}
+
+func TestServeLogin_SHA256StoredPassword_WrongPassword(t *testing.T) {
+	_, teardown := setupTestEnv(t)
+	defer teardown()
+
+	password := "correct-sha256-password"
+	hash := sha256.Sum256([]byte(password + "clawbench-salt"))
+	model.SessionToken = hex.EncodeToString(hash[:])
+	model.PasswordIsSHA256 = true
+	model.PasswordHash = nil
+
+	req := newRequest(t, http.MethodPost, "/login", map[string]string{
+		"password": "wrong-password",
+	})
+	w := callHandler(ServeLogin, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
 // --- ISS-003c: Login rate limiting tests ---

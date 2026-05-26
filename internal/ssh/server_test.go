@@ -1,6 +1,8 @@
 package ssh
 
 import (
+	crypto_sha256 "crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -18,7 +20,7 @@ import (
 // testServerHelper creates and starts an SSH server on a random port for testing.
 func testServerHelper(t *testing.T, password string, portReg *service.ProxyRegistry) *Server {
 	t.Helper()
-	srv := NewServer(model.SSHConfig{Enabled: true, Port: 0}, 0, password, portReg)
+	srv := NewServer(model.PortForwardConfig{Enabled: true, Port: 0}, 0, password, portReg)
 
 	// Find an available port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -99,9 +101,72 @@ func startEchoServer(t *testing.T) int {
 
 func newTestRegistry(t *testing.T) *service.ProxyRegistry {
 	t.Helper()
-	r := service.NewProxyRegistry(model.ProxyConfig{Enabled: true, AllowedPorts: "1024-65535"}, 0)
+	r := service.NewProxyRegistry(0)
 	t.Cleanup(func() { r.Stop() })
 	return r
+}
+
+// --- SHA-256 Password Auth Tests ---
+
+func TestSSHServer_SHA256PasswordAuth_Success(t *testing.T) {
+	portReg := newTestRegistry(t)
+	// Store password as SHA-256 hash
+	sha256Password := "sha256:" + sha256Hex("my-secret-password")
+	srv := testServerHelper(t, sha256Password, portReg)
+
+	// Authenticate with the plaintext password — server should hash and compare
+	client := testSSHClient(t, srv.addr, "clawbench", "my-secret-password")
+
+	// Verify connection works
+	if err := client.Close(); err != nil {
+		t.Errorf("failed to close client: %v", err)
+	}
+}
+
+func TestSSHServer_SHA256PasswordAuth_WrongPassword(t *testing.T) {
+	portReg := newTestRegistry(t)
+	sha256Password := "sha256:" + sha256Hex("correct-password")
+	srv := testServerHelper(t, sha256Password, portReg)
+
+	clientCfg := &gossh.ClientConfig{
+		User: "clawbench",
+		Auth: []gossh.AuthMethod{
+			gossh.Password("wrong-password"),
+		},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		Timeout:         5 * time.Second,
+	}
+
+	_, err := gossh.Dial("tcp", srv.addr, clientCfg)
+	if err == nil {
+		t.Error("expected auth failure for wrong password with SHA-256 stored hash")
+	}
+}
+
+func TestSSHServer_SHA256PasswordAuth_WrongUser(t *testing.T) {
+	portReg := newTestRegistry(t)
+	sha256Password := "sha256:" + sha256Hex("my-secret-password")
+	srv := testServerHelper(t, sha256Password, portReg)
+
+	clientCfg := &gossh.ClientConfig{
+		User: "root",
+		Auth: []gossh.AuthMethod{
+			gossh.Password("my-secret-password"),
+		},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		Timeout:         5 * time.Second,
+	}
+
+	_, err := gossh.Dial("tcp", srv.addr, clientCfg)
+	if err == nil {
+		t.Error("expected auth failure for wrong username with SHA-256 stored hash")
+	}
+}
+
+// sha256Hex returns the SHA-256 hex digest of (s + "clawbench-salt"), matching the server's derivation.
+func sha256Hex(s string) string {
+	h := crypto_sha256.Sum256([]byte(s + "clawbench-salt"))
+	return hex.EncodeToString(h[:])
 }
 
 // --- Connection & Auth Tests ---
@@ -200,7 +265,8 @@ func TestSSHPortForward_AllowedButUnregisteredPortWorks(t *testing.T) {
 
 func TestSSHPortForward_DisallowedPortRejectedByTunnel(t *testing.T) {
 	// Create a registry that only allows specific ports
-	r := service.NewProxyRegistry(model.ProxyConfig{Enabled: true, AllowedPorts: "3000-4000"}, 0)
+	r := service.NewProxyRegistry(0)
+	r.SetAllowedPorts("3000-4000")
 	defer r.Stop()
 
 	srv := testServerHelper(t, "test-password", r)
@@ -216,7 +282,7 @@ func TestSSHPortForward_DisallowedPortRejectedByTunnel(t *testing.T) {
 func TestSSHPortForward_RegisteredPortWorks(t *testing.T) {
 	portReg := newTestRegistry(t)
 	echoPort := startEchoServer(t)
-	portReg.RegisterPort(echoPort, "echo", "http")
+	portReg.RegisterPort(echoPort, "", "echo", "http")
 
 	srv := testServerHelper(t, "test-password", portReg)
 	client := testSSHClient(t, srv.addr, "clawbench", "test-password")
@@ -250,8 +316,8 @@ func TestSSHPortForward_MultiplePorts(t *testing.T) {
 	// Start two echo servers
 	echoPort1 := startEchoServer(t)
 	echoPort2 := startEchoServer(t)
-	portReg.RegisterPort(echoPort1, "echo1", "http")
-	portReg.RegisterPort(echoPort2, "echo2", "http")
+	portReg.RegisterPort(echoPort1, "", "echo1", "http")
+	portReg.RegisterPort(echoPort2, "", "echo2", "http")
 
 	srv := testServerHelper(t, "test-password", portReg)
 	client := testSSHClient(t, srv.addr, "clawbench", "test-password")
@@ -292,23 +358,26 @@ func TestSSHPortForward_MultiplePorts(t *testing.T) {
 
 func TestSSHPortForward_DisallowedPortRejected(t *testing.T) {
 	// Create a registry that only allows specific ports
-	r := service.NewProxyRegistry(model.ProxyConfig{Enabled: true, AllowedPorts: "3000-4000"}, 0)
+	r := service.NewProxyRegistry(0)
+	r.SetAllowedPorts("3000-4000")
 	defer r.Stop()
 
 	// RegisterPort should reject a port outside the allowed range
-	err := r.RegisterPort(8080, "outside-range", "http")
+	_, err := r.RegisterPort(8080, "", "outside-range", "http")
 	if err == nil {
 		t.Error("expected RegisterPort to reject port 8080 (outside allowed range 3000-4000)")
 	}
-	if r.IsPortRegistered(8080) {
-		t.Error("port 8080 should not be registered since it's outside allowed range")
+	for _, p := range r.ListPorts() {
+		if p.Port == 8080 {
+			t.Error("port 8080 should not be registered since it's outside allowed range")
+		}
 	}
 }
 
 func TestSSHPortForward_LargeDataTransfer(t *testing.T) {
 	portReg := newTestRegistry(t)
 	echoPort := startEchoServer(t)
-	portReg.RegisterPort(echoPort, "echo", "http")
+	portReg.RegisterPort(echoPort, "", "echo", "http")
 
 	srv := testServerHelper(t, "test-password", portReg)
 	client := testSSHClient(t, srv.addr, "clawbench", "test-password")
@@ -358,7 +427,7 @@ func TestSSHServer_HostKeyPersistence(t *testing.T) {
 	portReg := newTestRegistry(t)
 
 	// First server: generates and saves host key
-	srv1 := NewServer(model.SSHConfig{Enabled: true, Port: 0, HostKey: keyPath}, 0, "test", portReg)
+	srv1 := NewServer(model.PortForwardConfig{Enabled: true, Port: 0, HostKey: keyPath}, 0, "test", portReg)
 
 	// Find port
 	listener, _ := net.Listen("tcp", "127.0.0.1:0")
@@ -381,7 +450,7 @@ func TestSSHServer_HostKeyPersistence(t *testing.T) {
 	}
 
 	// Second server: loads existing host key
-	srv2 := NewServer(model.SSHConfig{Enabled: true, Port: 0, HostKey: keyPath}, 0, "test", portReg)
+	srv2 := NewServer(model.PortForwardConfig{Enabled: true, Port: 0, HostKey: keyPath}, 0, "test", portReg)
 	listener2, _ := net.Listen("tcp", "127.0.0.1:0")
 	addr2 := listener2.Addr().String()
 	listener2.Close()
@@ -405,7 +474,7 @@ func TestSSHServer_EphemeralKeyChangesOnRestart(t *testing.T) {
 	portReg := newTestRegistry(t)
 
 	// First server with ephemeral key
-	srv1 := NewServer(model.SSHConfig{Enabled: true, Port: 0}, 0, "test", portReg)
+	srv1 := NewServer(model.PortForwardConfig{Enabled: true, Port: 0}, 0, "test", portReg)
 	listener, _ := net.Listen("tcp", "127.0.0.1:0")
 	addr := listener.Addr().String()
 	listener.Close()
@@ -421,7 +490,7 @@ func TestSSHServer_EphemeralKeyChangesOnRestart(t *testing.T) {
 	srv1.Close()
 
 	// Second server with ephemeral key (should be different)
-	srv2 := NewServer(model.SSHConfig{Enabled: true, Port: 0}, 0, "test", portReg)
+	srv2 := NewServer(model.PortForwardConfig{Enabled: true, Port: 0}, 0, "test", portReg)
 	listener2, _ := net.Listen("tcp", "127.0.0.1:0")
 	addr2 := listener2.Addr().String()
 	listener2.Close()
@@ -447,13 +516,13 @@ func TestSSHServer_AutoPortAssignment(t *testing.T) {
 	portReg := newTestRegistry(t)
 
 	// Port 0 should auto-assign to mainPort+1
-	srv := NewServer(model.SSHConfig{Enabled: true, Port: 0}, 20000, "test", portReg)
+	srv := NewServer(model.PortForwardConfig{Enabled: true, Port: 0}, 20000, "test", portReg)
 	if srv.Port() != 20001 {
 		t.Errorf("expected auto-assigned port 20001, got %d", srv.Port())
 	}
 
 	// Explicit port should be used as-is
-	srv2 := NewServer(model.SSHConfig{Enabled: true, Port: 22222}, 20000, "test", portReg)
+	srv2 := NewServer(model.PortForwardConfig{Enabled: true, Port: 22222}, 20000, "test", portReg)
 	if srv2.Port() != 22222 {
 		t.Errorf("expected explicit port 22222, got %d", srv2.Port())
 	}
@@ -556,7 +625,7 @@ func TestSSHServer_ConnectionStats_MultipleClients(t *testing.T) {
 func TestSSHServer_ConnectionStats_ActiveChannels(t *testing.T) {
 	portReg := newTestRegistry(t)
 	echoPort := startEchoServer(t)
-	portReg.RegisterPort(echoPort, "echo", "http")
+	portReg.RegisterPort(echoPort, "", "echo", "http")
 
 	srv := testServerHelper(t, "test-password", portReg)
 	client := testSSHClient(t, srv.addr, "clawbench", "test-password")
@@ -687,4 +756,40 @@ func TestSSHServer_SuccessfulAuthResetsCounter(t *testing.T) {
 	// Should still be able to connect with correct password
 	client2 := testSSHClient(t, srv.addr, "clawbench", "correct-password")
 	client2.Close()
+}
+
+// --- IPv6 / JoinHostPort Tests ---
+
+func TestSSHServer_JoinHostPort_LocalhostTarget(t *testing.T) {
+	// Verify that the SSH server correctly uses net.JoinHostPort for localhost targets.
+	// This tests the fix from fmt.Sprintf("127.0.0.1:%d") → net.JoinHostPort.
+	portReg := newTestRegistry(t)
+	echoPort := startEchoServer(t)
+	portReg.RegisterPort(echoPort, "", "echo", "http")
+
+	srv := testServerHelper(t, "test-password", portReg)
+	client := testSSHClient(t, srv.addr, "clawbench", "test-password")
+
+	// Connect using "localhost" as the target — should be normalized to 127.0.0.1
+	conn, err := client.Dial("tcp", fmt.Sprintf("localhost:%d", echoPort))
+	if err != nil {
+		t.Fatalf("expected port forwarding via localhost to work, got: %v", err)
+	}
+	defer conn.Close()
+
+	testMsg := []byte("hello via localhost")
+	_, err = conn.Write(testMsg)
+	if err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	buf := make([]byte, 1024)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatalf("failed to read: %v", err)
+	}
+	if string(buf[:n]) != string(testMsg) {
+		t.Errorf("echo mismatch: got %q, want %q", string(buf[:n]), string(testMsg))
+	}
 }

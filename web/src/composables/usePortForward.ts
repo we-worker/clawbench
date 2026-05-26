@@ -1,11 +1,14 @@
 import { ref } from 'vue'
-import { apiGet, apiPost, apiDelete } from '@/utils/api.ts'
+import { apiGet, apiPost, apiPut, apiDelete } from '@/utils/api'
 import { useAppMode } from './useAppMode.ts'
 import { gt } from '@/composables/useLocale'
+import { useToast } from '@/composables/useToast.ts'
 import { tunnelStatusFromPorts as tunnelStatusFromPortsUtil, buildPortUrl } from '@/utils/portForwardUtils.ts'
 
 interface ForwardedPort {
-  port: number
+  port: number        // Target port on remote host
+  localPort: number   // Local listening port (auto-assigned)
+  host: string
   name: string
   protocol: string
   autoDetect: boolean
@@ -83,20 +86,32 @@ export function usePortForward() {
     }
   }
 
-  async function registerPort(port: number, name?: string, protocol?: string) {
-    await apiPost('/api/proxy/ports', { port, name: name || '', protocol: protocol || 'http' })
-    // Register with Android native layer
+  async function registerPort(port: number, name?: string, protocol?: string, host?: string) {
+    const result = await apiPost<{ localPort: number }>('/api/proxy/ports', { port, host: host || '', name: name || '', protocol: protocol || 'http' })
+    const localPort = result?.localPort ?? port
+    // Register with Android native layer: pass localPort, targetPort, host
     if (isAppMode.value) {
-      ;(window as any).AndroidNative?.addForwardedPort(port)
+      console.log('[PortForward] registerPort: localPort=' + localPort + ', targetPort=' + port + ', host=' + (host || ''))
+      ;(window as any).AndroidNative?.addForwardedPort(localPort, port, host || '')
     }
     // Silent refresh: don't flicker the port list with loading state
     await Promise.all([loadPorts(true), loadSSHInfo()])
   }
 
-  async function unregisterPort(port: number) {
-    await apiDelete(`/api/proxy/ports?port=${port}`)
+  async function updatePort(localPort: number, port: number, host: string, name: string, protocol: string) {
+    await apiPut('/api/proxy/ports', { localPort, port, host, name, protocol })
+    // Re-sync native layer after update: remove old, add new with correct localPort
     if (isAppMode.value) {
-      ;(window as any).AndroidNative?.removeForwardedPort(port)
+      ;(window as any).AndroidNative?.removeForwardedPort(localPort)
+      ;(window as any).AndroidNative?.addForwardedPort(localPort, port, host || '')
+    }
+    await Promise.all([loadPorts(true), loadSSHInfo()])
+  }
+
+  async function unregisterPort(localPort: number) {
+    await apiDelete(`/api/proxy/ports?port=${localPort}`)
+    if (isAppMode.value) {
+      ;(window as any).AndroidNative?.removeForwardedPort(localPort)
     }
     await Promise.all([loadPorts(true), loadSSHInfo()])
   }
@@ -114,11 +129,11 @@ export function usePortForward() {
     await loadPorts()
     if (ports.value.length === 0) {
       // No ports on server — stop the native service (clears stale SharedPreferences)
-      ;(window as any).AndroidNative?.stopPortForwardService()
+      ;(window as any).AndroidNative?.stopBackgroundService()
       return
     }
     for (const p of ports.value) {
-      ;(window as any).AndroidNative?.addForwardedPort(p.port)
+      ;(window as any).AndroidNative?.addForwardedPort(p.localPort, p.port, p.host || '')
     }
   }
 
@@ -325,46 +340,135 @@ export function usePortForward() {
     }
   }
 
-  /** Open a forwarded port — in app mode opens sandbox browser, otherwise window.open */
-  function openPort(targetPort: number, protocol?: string) {
-    if (isAppMode.value) {
-      const native = (window as any).AndroidNative
-      // Prefer sandbox browser (isolated process), fall back to external browser
-      if (native?.openInSandbox) {
-        native.openInSandbox(targetPort, protocol === 'https' ? 'https' : 'http')
-      } else if (native?.openInBrowser) {
-        native.openInBrowser(targetPort, protocol === 'https' ? 'https' : 'http')
-      }
-    } else {
-      window.open(buildPortUrl(targetPort, protocol), '_blank')
+  /** Internal helper: actually open the port in sandbox or external browser */
+  function doOpen(native: any, localPort: number, protocol?: string, hostArg?: string) {
+    if (native?.openInSandbox) {
+      native.openInSandbox(localPort, protocol === 'https' ? 'https' : 'http', hostArg || '')
+    } else if (native?.openInBrowser) {
+      native.openInBrowser(localPort, protocol === 'https' ? 'https' : 'http', hostArg || '')
     }
   }
 
+  /** Open a forwarded port — in app mode opens sandbox browser, otherwise window.open.
+   *  In app mode: first tests if the port is reachable, auto-reconnects SSH tunnel if not.
+   *  Shows toast on success or failure after reconnection attempt. */
+  async function openPort(localPort: number, protocol?: string, host?: string) {
+    console.log('[PortForward] openPort: localPort=' + localPort + ', protocol=' + protocol + ', host=' + (host || ''))
+
+    if (isAppMode.value) {
+      const native = (window as any).AndroidNative
+      const hostArg = host || ''
+
+      // Pre-check: test if the local port is reachable
+      if (native?.testPortReachable) {
+        const reachable = native.testPortReachable(localPort)
+        if (reachable) {
+          // Port is reachable — open immediately
+          doOpen(native, localPort, protocol, hostArg)
+          return
+        }
+
+        // Port unreachable — yield UI then reconnect tunnel
+        console.log('[PortForward] openPort: port ' + localPort + ' unreachable, attempting tunnel reconnect')
+        await new Promise(r => setTimeout(r, 50))
+
+        let reconnected = false
+        if (native?.reconnectTunnel) {
+          reconnected = native.reconnectTunnel()
+        }
+
+        const toast = useToast()
+        if (reconnected) {
+          // Re-test after reconnect
+          const reachableAfter = native.testPortReachable(localPort)
+          if (reachableAfter) {
+            toast.show(gt('portForward.tunnelReconnected'), { type: 'success' })
+            doOpen(native, localPort, protocol, hostArg)
+            return
+          }
+        }
+
+        // Still unreachable after reconnect — show error
+        toast.show(gt('portForward.portUnreachable'), { type: 'error' })
+        return
+      }
+
+      // Fallback: no testPortReachable available (old APK) — open directly
+      doOpen(native, localPort, protocol, hostArg)
+    } else {
+      window.open(buildPortUrl(localPort, protocol), '_blank')
+    }
+  }
+
+  /** Reconnect a specific forwarded port: test reachability, reconnect tunnel if needed.
+   *  Used by the per-port reconnect button in the port forwarding panel.
+   *  The caller tracks which ports are reconnecting and shows a spinning icon.
+   *  Shows toast on success or failure, not during checking. */
+  async function reconnectPort(localPort: number) {
+    const native = (window as any).AndroidNative
+    const toast = useToast()
+
+    // Yield to let Vue render the spinning button before any blocking bridge calls
+    await new Promise(r => setTimeout(r, 50))
+
+    if (isAppMode.value && native?.testPortReachable) {
+      // Step 1: Test if the port is already reachable
+      const reachable = native.testPortReachable(localPort)
+      if (reachable) {
+        toast.show(gt('portForward.tunnelReconnected'), { type: 'success' })
+        await loadPorts(true)
+        return
+      }
+
+      // Step 2: Port unreachable — reconnect tunnel
+      let reconnected = false
+      if (native?.reconnectTunnel) {
+        reconnected = native.reconnectTunnel()
+      }
+
+      if (reconnected) {
+        const reachableAfter = native.testPortReachable(localPort)
+        if (reachableAfter) {
+          toast.show(gt('portForward.tunnelReconnected'), { type: 'success' })
+        } else {
+          toast.show(gt('portForward.portUnreachable'), { type: 'error' })
+        }
+      } else {
+        toast.show(gt('portForward.portUnreachable'), { type: 'error' })
+      }
+    }
+
+    // Refresh port list — spinning button stops when caller sees this resolve
+    await loadPorts(true)
+  }
+
   /** Open a forwarded port in external/system browser */
-  function openInExternalBrowser(targetPort: number, protocol?: string) {
+  function openInExternalBrowser(localPort: number, protocol?: string, host?: string) {
     if (isAppMode.value) {
       const native = (window as any).AndroidNative
       if (native?.openInBrowser) {
-        native.openInBrowser(targetPort, protocol === 'https' ? 'https' : 'http')
+        native.openInBrowser(localPort, protocol === 'https' ? 'https' : 'http', host || '')
       }
     } else {
-      window.open(buildPortUrl(targetPort, protocol), '_blank')
+      window.open(buildPortUrl(localPort, protocol), '_blank')
     }
   }
 
   /**
    * Ensure a port is registered for forwarding, registering it if needed,
    * and wait for it to appear in the ports list (max 5s).
+   * Returns the localPort that was assigned (may differ from target port).
    * Used by localhost URL tag click handler to auto-setup port forwarding.
    */
-  async function ensurePortRegistered(port: number, protocol: string): Promise<void> {
-    const exists = ports.value.some(p => p.port === port)
-    if (exists) return
+  async function ensurePortRegistered(port: number, protocol: string): Promise<number> {
+    const existing = ports.value.find(p => p.port === port)
+    if (existing) return existing.localPort
     await registerPort(port, '', protocol)
     // Wait for port to appear in the list (max 5s, poll every 200ms)
     for (let i = 0; i < 25; i++) {
       await new Promise(r => setTimeout(r, 200))
-      if (ports.value.some(p => p.port === port)) return
+      const found = ports.value.find(p => p.port === port)
+      if (found) return found.localPort
     }
     throw new Error(`Port ${port} did not appear in forwarding list after 5s`)
   }
@@ -382,6 +486,7 @@ export function usePortForward() {
     tunnelErrorType,
     loadPorts,
     registerPort,
+    updatePort,
     unregisterPort,
     detectPorts,
     syncToNative,
@@ -389,6 +494,7 @@ export function usePortForward() {
     checkTunnelHealth,
     openPort,
     openInExternalBrowser,
+    reconnectPort,
     ensurePortRegistered,
   }
 }

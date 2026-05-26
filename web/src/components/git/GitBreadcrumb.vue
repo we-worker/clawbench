@@ -7,6 +7,12 @@
       @click="currentView !== 'commits' && $emit('navigate', 'commits')"
     >{{ mode === 'file' ? t('git.breadcrumb.fileHistory') : t('git.breadcrumb.commitList') }}</span>
 
+    <!-- Manage crumb -->
+    <template v-if="currentView === 'manage'">
+      <span class="git-crumb-sep">›</span>
+      <span class="git-crumb current">{{ t('git.manage.title') }}</span>
+    </template>
+
     <!-- Commit crumb (shown when a commit is selected) -->
     <template v-if="selectedCommit">
       <span class="git-crumb-sep">›</span>
