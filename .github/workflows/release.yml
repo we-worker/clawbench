@@ -253,7 +253,7 @@ jobs:
           else
             echo "No keystore secret configured, building debug APK"
             ./gradlew assembleDebug -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
-            echo "APK_PATH=android/app/build/outputs/apk/debug/app-debug.apk" >> $GITHUB_ENV
+            echo "APK_PATH=android/app/build/outputs/apk/debug/clawbench-android-debug.apk" >> $GITHUB_ENV
           fi
 
       - name: Upload APK to release
