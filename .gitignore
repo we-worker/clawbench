@@ -41,7 +41,7 @@ web/package-lock.json
 # Git worktrees
 .worktrees/
 dist/
-server
+/server
 .venv/
 
 # Docs - local only

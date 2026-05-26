@@ -39,9 +39,9 @@ func TestAuth_NoPassword_PassThrough(t *testing.T) {
 	})
 }
 
-// --- Auth: localhost bypass ---
+// --- Auth: localhost requires cookie (no bypass) ---
 
-func TestAuth_Localhost_IPv4_BypassesAuth(t *testing.T) {
+func TestAuth_Localhost_IPv4_RequiresCookie(t *testing.T) {
 	withSavedToken(func() {
 		model.SessionToken = "valid-token"
 
@@ -51,17 +51,35 @@ func TestAuth_Localhost_IPv4_BypassesAuth(t *testing.T) {
 
 		middleware.Auth(okHandler).ServeHTTP(rec, req)
 
-		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 }
 
-func TestAuth_Localhost_IPv6_BypassesAuth(t *testing.T) {
+func TestAuth_Localhost_IPv6_RequiresCookie(t *testing.T) {
 	withSavedToken(func() {
 		model.SessionToken = "valid-token"
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "[::1]:12345"
+
+		middleware.Auth(okHandler).ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+}
+
+func TestAuth_Localhost_ValidCookie_Passes(t *testing.T) {
+	withSavedToken(func() {
+		model.SessionToken = "valid-token"
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.AddCookie(&http.Cookie{
+			Name:  model.SessionCookie,
+			Value: "valid-token",
+		})
 
 		middleware.Auth(okHandler).ServeHTTP(rec, req)
 
@@ -123,9 +141,9 @@ func TestAuth_MissingCookie_Returns401(t *testing.T) {
 	})
 }
 
-// --- Auth: localhost + bad cookie still passes (localhost wins) ---
+// --- Auth: localhost + bad cookie → 401 (no localhost bypass) ---
 
-func TestAuth_LocalhostWithBadCookie_StillPasses(t *testing.T) {
+func TestAuth_LocalhostWithBadCookie_Returns401(t *testing.T) {
 	withSavedToken(func() {
 		model.SessionToken = "valid-token"
 
@@ -139,7 +157,7 @@ func TestAuth_LocalhostWithBadCookie_StillPasses(t *testing.T) {
 
 		middleware.Auth(okHandler).ServeHTTP(rec, req)
 
-		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 }
 
