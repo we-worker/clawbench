@@ -249,16 +249,19 @@ jobs:
             KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
             KEY_PASSWORD=${{ secrets.KEY_PASSWORD }} \
             ./gradlew assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
+            echo "APK_PATH=android/app/build/outputs/apk/release/clawbench-android.apk" >> $GITHUB_ENV
           else
             echo "No keystore secret configured, building debug APK"
             ./gradlew assembleDebug -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
+            echo "APK_PATH=android/app/build/outputs/apk/debug/app-debug.apk" >> $GITHUB_ENV
           fi
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: false
-          files: |
-            android/app/build/outputs/apk/release/clawbench-android.apk
+      - name: Upload APK to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          gh release upload "$TAG" "$APK_PATH" --clobber
 
   release-notes:
     name: Generate Release Notes
